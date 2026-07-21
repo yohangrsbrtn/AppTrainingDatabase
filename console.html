@@ -782,6 +782,7 @@ async function openPanel(id){
   state.selected = id;
   panelTab = 'apercu';
   panelNotes = null;
+  panelProgression = null;
   if (state.nav==='clients') renderTable();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
@@ -806,11 +807,16 @@ async function setPanelTab(t){
     body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>`;
     try { panelNotes = await chargerNotes(c.id); } catch(e) { panelNotes = null; body.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`; return; }
   }
+  if (t === 'progression' && panelProgression === null) {
+    body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>`;
+    try { panelProgression = await chargerProgression(c.id); } catch(e) { panelProgression = null; body.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`; return; }
+  }
   body.innerHTML = panelTabContent(c, t);
 }
 
 function panelTabContent(c, t){
   if (t === 'notes') return renderNotesTab();
+  if (t === 'progression') return renderProgressionTab();
   return `
     <div class="panel-row"><span class="l">Statut bilan</span><span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span></div>
     <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(c.dernConnexion||'Jamais connecté')}</span></div>
@@ -854,6 +860,45 @@ async function retirerNote(id){
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
+// ── Progression (bilan_snapshots, Supabase) ───────────────────────────────
+let panelProgression = null;
+async function chargerProgression(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bilan_snapshots?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+function progressionChart(vals, color){
+  const w=560,h=100,min=Math.min(...vals),max=Math.max(...vals);
+  const pts = vals.map((v,i)=>[ (i/(vals.length-1||1))*w, h - ((v-min)/((max-min)||1))*(h-10) - 4 ]);
+  const line = pts.map((p,i)=> (i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area = line + ` L${w},${h} L0,${h} Z`;
+  const last = pts[pts.length-1];
+  const gridLines = [0.25,0.5,0.75].map(f=>`<line x1="0" y1="${h*f}" x2="${w}" y2="${h*f}" stroke="var(--hairline)" stroke-width="1"/>`).join('');
+  return `<svg class="bigchart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${gridLines}
+    <path d="${area}" fill="${color}" opacity="0.12"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3.2" fill="${color}"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="6" fill="${color}" opacity="0.18"/>
+  </svg>`;
+}
+function renderProgressionTab(){
+  const list = panelProgression || [];
+  const poids = list.map(s => parseFloat(s.poids_moyen)).filter(v => !isNaN(v));
+  return `
+    ${poids.length >= 2 ? `
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-faint);margin-bottom:6px;">Poids moyen par bilan</div>
+      ${progressionChart(poids, 'var(--accent)')}
+    ` : `<div class="empty-panel" style="padding:20px 12px;margin-bottom:12px;">Pas assez de bilans validés pour tracer un graphique (minimum 2).</div>`}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-faint);margin:14px 0 6px;">Historique</div>
+    ${list.length ? list.slice().reverse().map(s => `
+      <div class="note-item">
+        <div class="txt"><b>Semaine ${esc(s.semaine||'?')}</b>${s.poids_moyen ? ' · ' + parseFloat(s.poids_moyen).toFixed(1) + ' kg' : ''}${s.jours_diete_ok != null ? ' · diète ' + s.jours_diete_ok + '/7' : ''}</div>
+        ${s.commentaire_jour ? `<div class="txt" style="color:var(--text-faint);margin-top:4px;">${esc(s.commentaire_jour)}</div>` : ''}
+        <div class="meta"><span class="date">${esc(s.date_validation||'')}</span></div>
+      </div>`).join('') : `<div class="empty-panel" style="padding:24px 12px;">Aucun bilan enregistré pour ce client.</div>`}`;
+}
+
 function panelHTML(c){
   return `
     <div class="panel-head">
@@ -871,6 +916,7 @@ function panelHTML(c){
     </div>
     <div class="panel-tabs">
       <button class="panel-tab active" data-tab="apercu" onclick="setPanelTab('apercu')">Aperçu</button>
+      <button class="panel-tab" data-tab="progression" onclick="setPanelTab('progression')">Progression</button>
       <button class="panel-tab" data-tab="notes" onclick="setPanelTab('notes')">Notes</button>
     </div>
     <div class="panel-body" id="panelBody">${panelTabContent(c, 'apercu')}</div>
