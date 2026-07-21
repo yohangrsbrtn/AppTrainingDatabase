@@ -245,10 +245,11 @@ function renderBilanDetail(data, modeHistorique, isSemainePrecedente) {
     >${esc(data.commentaireActivite)}</textarea>
   </div>`;
 
-  // ── Boutons bas
+  // ── Boutons bas — un seul bouton "Envoyer au coach" fusionne clôture + envoi (le récap
+  // ci-dessous sert d'étape de relecture avant validation, à la place de l'ancien 2e bouton).
   if (modeHistorique) {
     html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()">📅 Historique des bilans</button>`;
-  } else if (data.dejaValide) {
+  } else {
     const deja = !!data.dejaEnvoye;
     html += `<button id="btn-envoyer" onclick="doEnvoyerBilanAuCoach(${data.ligneTitre}, this)"
       ${deja ? 'disabled' : ''}
@@ -259,17 +260,6 @@ function renderBilanDetail(data, modeHistorique, isSemainePrecedente) {
     if (isSemainePrecedente) {
       html += `<button class="btn-secondary" onclick="loadBilan()" style="margin-top:8px;">← Semaine en cours</button>`;
     }
-  } else {
-    const deja = !!data.dejaEnvoye;
-    html += `<div style="display:flex;gap:10px;margin-top:4px;">
-      <button id="btn-envoyer" onclick="doEnvoyerBilanAuCoach(${data.ligneTitre}, this)"
-        ${deja ? 'disabled' : ''}
-        class="${deja ? 'btn-disabled' : 'btn-blue'}" style="flex:1;margin:0;">
-        ${deja ? '✅ Envoyé au coach' : '📤 Envoyer au coach'}
-      </button>
-      <button onclick="ouvrirRecapBilan(${data.ligneTitre})" class="btn-green" style="flex:1;margin:0;">🔒 Clôturer</button>
-    </div>`;
-    html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()" style="margin-top:8px;">📅 Historique des bilans</button>`;
   }
 
   return `<div id="app">
@@ -347,31 +337,19 @@ function sauverStepsBilan(ligne, val) {
   api('enregistrerValeur', { nomFeuille: 'Bilan', ligne, colonne: 17, valeur: v }).catch(() => {});
 }
 
+// Un seul bouton "Envoyer au coach" fusionne l'ancien "Clôturer" (calcul XP) et l'envoi —
+// après vérification du retard éventuel, on ouvre le récap de la semaine (ouvrirRecapBilan)
+// comme étape de relecture avant de tout valider en un clic.
 async function doEnvoyerBilanAuCoach(ligneTitre, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi...'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
   try {
     const retard = await api('verifierRetardBilan').catch(() => null);
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
     if (retard && retard.enRetard) {
-      if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
-      afficherAlerteRetardBilan(() => envoyerBilanAuCoachConfirme(ligneTitre, btn));
+      afficherAlerteRetardBilan(() => ouvrirRecapBilan(ligneTitre));
       return;
     }
-    await envoyerBilanAuCoachConfirme(ligneTitre, btn);
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
-    showToast('Erreur : ' + e.message, '#c0392b');
-  }
-}
-
-async function envoyerBilanAuCoachConfirme(ligneTitre, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi...'; }
-  try {
-    const res = await api('envoyerBilanAuCoach', { ligneTitre });
-    if (btn) { btn.className = 'btn-disabled'; btn.textContent = '✅ Envoyé au coach'; }
-    if (_bilanData) _bilanData.dejaEnvoye = true;
-    const bonus = res && res.bonusPonctualite > 0;
-    showToast(bonus ? '📤 Bilan envoyé au coach ! +20 XP ⏱️' : '📤 Bilan envoyé au coach !', bonus ? null : '#1a5ba0');
-    if (bonus) setTimeout(() => rafraichirProgressionEtDeblocages(), 300);
+    ouvrirRecapBilan(ligneTitre);
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
     showToast('Erreur : ' + e.message, '#c0392b');
@@ -396,7 +374,7 @@ function afficherAlerteRetardBilan(onConfirm) {
 
 function ouvrirRecapBilan(ligneTitre) {
   const data = _bilanData;
-  if (!data) { demanderConfirmationValidation(ligneTitre, null); return; }
+  if (!data) { validerEtEnvoyerConfirme(ligneTitre); return; }
 
   let joursOk = 0;
   (data.jours || []).forEach(j => {
@@ -438,7 +416,7 @@ function ouvrirRecapBilan(ligneTitre) {
     ${noteWarn}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:#2d3142;margin:0;padding:12px;font-size:14px;border:none;border-radius:10px;color:#e8eaf0;cursor:pointer;">Modifier</button>
-      <button onclick="demanderConfirmationValidation(${ligneTitre}, document.getElementById('recap-bilan-modal'));" style="flex:1;background:linear-gradient(135deg,#1D9E75,#167a5a);margin:0;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:10px;color:#fff;cursor:pointer;">Clôturer ✓</button>
+      <button onclick="validerEtEnvoyerConfirme(${ligneTitre});document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:linear-gradient(135deg,#1D9E75,#167a5a);margin:0;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:10px;color:#fff;cursor:pointer;">Envoyer au coach ✓</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
@@ -448,47 +426,25 @@ function ouvrirRecapBilan(ligneTitre) {
   });
 }
 
-function demanderConfirmationValidation(ligneTitre, modalEl) {
-  if (!modalEl) {
-    // Pas de _bilanData dispo (fallback rare) : on ouvre directement une modale de confirmation
-    modalEl = document.createElement('div');
-    modalEl.id = 'recap-bilan-modal';
-    modalEl.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;';
-    modalEl.innerHTML = '<div style="background:#1a1d29;border-radius:20px;padding:28px 22px;text-align:center;max-width:320px;width:88%;"></div>';
-    document.body.appendChild(modalEl);
-  }
-  const inner = modalEl.querySelector('div');
-  if (!inner) return;
-  inner.innerHTML = `
-    <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
-    <div style="font-size:17px;font-weight:700;color:#e8eaf0;margin-bottom:10px;">Valider le bilan</div>
-    <div style="font-size:13px;color:#8892a4;line-height:1.6;margin-bottom:20px;">Confirmer la validation de ton bilan de la semaine ?<br>Tu pourras toujours le modifier depuis l'historique.</div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:#2d3142;margin:0;padding:12px;font-size:14px;border:none;border-radius:10px;color:#e8eaf0;cursor:pointer;">Annuler</button>
-      <button onclick="confirmerCloture(${ligneTitre});document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:linear-gradient(135deg,#1D9E75,#167a5a);margin:0;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:10px;color:#fff;cursor:pointer;">Confirmer ✓</button>
-    </div>`;
-}
-
-async function confirmerCloture(ligneTitre) {
+// Fusion clôture (calcul XP) + envoi au coach en une seule action serveur — voir
+// validerEtEnvoyerBilan() côté GAS, qui réutilise validerBilan()/envoyerBilanAuCoach()
+// telles quelles plutôt que de dupliquer leur logique.
+async function validerEtEnvoyerConfirme(ligneTitre) {
   setPage('bilan-loading');
   try {
-    // validerBilan renvoie une chaîne JSON.stringify côté serveur (contrairement à
-    // validerJournee/envoyerBilanAuCoach qui renvoient de vrais objets) — il faut la parser.
-    const raw = await api('validerBilan', { ligneTitre, targetSunday: _bilanData?.targetSunday || null });
+    // validerEtEnvoyerBilan renvoie une chaîne JSON.stringify côté serveur (même piège
+    // que l'ancien validerBilan) — il faut la parser.
+    const raw = await api('validerEtEnvoyerBilan', { ligneTitre, targetSunday: _bilanData?.targetSunday || null });
     const result = typeof raw === 'string' ? JSON.parse(raw) : (raw || { xp: 50 });
-    if (result.erreur === 'bilan_deja_valide') {
-      showToast('🚫 Tu as déjà validé un bilan cette semaine (lundi→dimanche).', '#c0392b');
-      await loadBilan();
-      return;
-    }
     await loadBilan();
     // Re-fetch complet (XP total, %, niveau) plutôt que de ne patcher que le
     // niveau localement — sinon S.data.prog reste incohérent (niveau à jour
     // mais XP/barre périmés) si l'utilisateur revient ensuite à l'accueil.
-    if (result.nouveauNiveau && typeof rafraichirProgressionEtDeblocages === 'function') {
+    if ((result.nouveauNiveau || result.bonusPonctualite > 0) && typeof rafraichirProgressionEtDeblocages === 'function') {
       rafraichirProgressionEtDeblocages();
     }
     if (!(typeof modeSimplifieActif === 'function' && modeSimplifieActif())) afficherXPValidation(result);
+    else showToast('📤 Bilan envoyé au coach !', '#1a5ba0');
   } catch(e) {
     showToast('Erreur : ' + e.message, '#c0392b');
     setPage('bilan');
@@ -496,12 +452,13 @@ async function confirmerCloture(ligneTitre) {
 }
 
 function afficherXPValidation(result) {
-  const xp = result.xp || 50;
-  const rows = [['Clôture 🔒', result.xpBase || 50]];
-  if (result.bonusDiete > 0)   rows.push(['Diète 7/7 ✅', result.bonusDiete]);
-  if (result.bonusSeances > 0) rows.push(['Objectif séances ✅', result.bonusSeances]);
-  if (result.bonusSteps > 0)   rows.push(['Bonus steps 👟', result.bonusSteps]);
-  if (result.bonusStreak > 0)  rows.push(['Streak bilans 🔥', result.bonusStreak]);
+  const xp = (result.xp || 50) + (result.bonusPonctualite || 0);
+  const rows = [['Bilan de la semaine 🔒', result.xpBase || 50]];
+  if (result.bonusDiete > 0)      rows.push(['Diète 7/7 ✅', result.bonusDiete]);
+  if (result.bonusSeances > 0)    rows.push(['Objectif séances ✅', result.bonusSeances]);
+  if (result.bonusSteps > 0)      rows.push(['Bonus steps 👟', result.bonusSteps]);
+  if (result.bonusStreak > 0)     rows.push(['Streak bilans 🔥', result.bonusStreak]);
+  if (result.bonusPonctualite > 0) rows.push(['Envoyé à temps ⏱️', result.bonusPonctualite]);
   const bonusHtml = rows.map(r =>
     `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #2d3142;">
       <span style="font-size:13px;color:#8892a4;">${r[0]}</span>
@@ -512,7 +469,7 @@ function afficherXPValidation(result) {
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;transition:opacity 0.3s;';
   overlay.innerHTML = `<div style="background:#1a1d29;border-radius:20px;padding:36px 28px;text-align:center;max-width:300px;width:85%;box-shadow:0 20px 60px rgba(0,0,0,0.5);transform:scale(0.85);transition:transform 0.3s;">
     <div style="font-size:52px;margin-bottom:10px;">🏆</div>
-    <div style="font-size:22px;font-weight:700;color:#e8eaf0;margin-bottom:4px;">Bilan clôturé !</div>
+    <div style="font-size:22px;font-weight:700;color:#e8eaf0;margin-bottom:4px;">Bilan envoyé !</div>
     <div style="font-size:13px;color:#8892a4;margin-bottom:18px;">Bravo pour cette semaine !</div>
     <div style="background:#0f1117;border-radius:12px;padding:4px 16px 8px;margin-bottom:16px;text-align:left;">
       ${bonusHtml}
