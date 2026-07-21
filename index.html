@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mon Training</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mon Training">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  /* Palette alignée sur l'app GAS officielle (body #0f1117, .card #1a1d29,
+     bordures/inputs #2d3142, texte secondaire #8892a4) */
+  --bg: #0f1117; --bg2: #1a1d29; --bg3: #1e2235;
+  --border: #2d3142; --text: #e8eaf0; --muted: #8892a4;
+  --accent: #4f6ef7; --green: #1D9E75; --red: #e05c5c;
+  --radius: 14px; --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+#app { min-height: 100dvh; display: flex; flex-direction: column; }
+
+/* ── Spinner ── */
+.spinner-full { display:flex; align-items:center; justify-content:center; height:100dvh; }
+.spinner-inline { display:flex; align-items:center; justify-content:center; padding:50px 0; }
+.spin { width:30px; height:30px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+@keyframes fadeInModal { from { opacity:0; } to { opacity:1; } }
+@keyframes popIn { 0% { transform:scale(0.2) rotate(-8deg); opacity:0; } 70% { transform:scale(1.08) rotate(2deg); } 100% { transform:scale(1) rotate(0); opacity:1; } }
+@keyframes slideDown { from { transform:translateY(-18px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+@keyframes slideUp2 { from { transform:translateY(18px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+@keyframes pulseGlow { 0%,100% { transform:translate(-50%,-50%) scale(1); opacity:0.5; } 50% { transform:translate(-50%,-50%) scale(1.18); opacity:0.2; } }
+
+/* ── Login ── */
+.login-page { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100dvh; padding:24px; }
+.login-logo { width:88px; height:88px; margin-bottom:16px; border-radius:20px; box-shadow:0 8px 24px rgba(0,0,0,.35); }
+.login-title { font-size:24px; font-weight:700; margin-bottom:4px; }
+.login-sub { font-size:14px; color:var(--muted); margin-bottom:40px; }
+.login-form { width:100%; max-width:360px; display:flex; flex-direction:column; gap:12px; }
+.login-form input {
+  background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
+  color:var(--text); font-size:16px; padding:14px 16px; outline:none; width:100%;
+  transition:border-color .2s;
+}
+.login-form input:focus { border-color:var(--accent); }
+.login-form input::placeholder { color:var(--muted); }
+.btn-primary {
+  background:var(--accent); color:#fff; border:none; border-radius:var(--radius);
+  font-size:16px; font-weight:600; padding:14px; cursor:pointer; transition:opacity .2s;
+}
+.btn-primary:active { opacity:.8; }
+.btn-primary:disabled { opacity:.5; cursor:default; }
+.login-error { color:var(--red); font-size:13px; text-align:center; min-height:18px; }
+
+/* ── Header ── */
+.header {
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  padding:calc(var(--safe-top) + 12px) 16px 12px;
+  display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:100;
+}
+.header-back { background:none; border:none; color:var(--text); font-size:20px; cursor:pointer; padding:4px 8px; }
+.header-title { font-size:17px; font-weight:600; flex:1; }
+.header-sub { font-size:12px; color:var(--muted); }
+
+/* ── Nav bar ── */
+.navbar {
+  position:fixed; bottom:0; left:0; right:0;
+  background:var(--bg2); border-top:1px solid var(--border);
+  display:flex; padding:8px 0 calc(8px + var(--safe-bottom));
+  z-index:100;
+}
+.nav-item { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer; padding:4px 0; transition:color .2s; color:var(--muted); border:none; background:none; }
+.nav-item.active { color:var(--accent); }
+.nav-icon { font-size:22px; }
+.nav-label { font-size:10px; font-weight:500; }
+
+/* ── Page container ── */
+.page { flex:1; overflow-y:auto; padding:16px 16px calc(80px + var(--safe-bottom)); }
+
+/* ── Cards ── */
+.card { background:var(--bg2); border-radius:var(--radius); padding:16px; margin-bottom:12px; }
+.card-title { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+.card-value { font-size:28px; font-weight:700; }
+.card-sub { font-size:12px; color:var(--muted); margin-top:4px; }
+
+/* ── Stats row ── */
+.stats-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+
+/* ── XP bar ── */
+.xp-bar-bg { background:var(--bg3); border-radius:99px; height:8px; margin:8px 0 4px; overflow:hidden; }
+.xp-bar-fill { height:100%; border-radius:99px; background:linear-gradient(90deg,var(--accent),#7c3aed); transition:width .6s ease; }
+
+/* ── List items ── */
+.list-item { display:flex; align-items:center; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); cursor:pointer; }
+.list-item:last-child { border-bottom:none; }
+.list-icon { font-size:22px; width:36px; text-align:center; }
+.list-text { flex:1; }
+.list-title { font-size:15px; font-weight:500; }
+.list-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+.list-arrow { color:var(--muted); font-size:16px; }
+
+/* ── Badge ── */
+.badge { display:inline-block; background:var(--accent); color:#fff; border-radius:99px; font-size:11px; font-weight:700; padding:2px 8px; }
+.badge-green { background:var(--green); }
+.badge-red { background:var(--red); }
+
+/* ── Empty state ── */
+.empty { text-align:center; padding:48px 16px; color:var(--muted); }
+.empty-icon { font-size:48px; margin-bottom:12px; }
+.empty-text { font-size:14px; }
+
+/* ── Bilan ── */
+.section-title { font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px; }
+.field-label { font-size:11px;color:var(--muted);margin-bottom:3px;font-weight:600;letter-spacing:.5px; }
+.bilan-input { width:100%;padding:8px;background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:16px;font-family:inherit; }
+.bilan-input[readonly] { opacity:.6; }
+.bilan-textarea { width:100%;padding:10px;background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:16px;font-family:inherit;resize:vertical;min-height:70px; }
+.bilan-textarea[readonly] { opacity:.6; }
+.bilan-banner { font-size:12px;color:var(--muted);text-align:center;margin-bottom:12px;padding:8px 12px;background:#1e2235;border-radius:8px; }
+.btn-secondary { width:100%;background:#2d3142;color:var(--text);border:none;border-radius:var(--radius);font-size:14px;font-weight:600;padding:12px;cursor:pointer;margin-bottom:4px; }
+.btn-blue { background:linear-gradient(135deg,#378ADD,#1a5ba0);color:#fff;border:none;border-radius:var(--radius);font-size:14px;font-weight:600;padding:14px;cursor:pointer; }
+.btn-green { background:linear-gradient(135deg,#1D9E75,#167a5a);color:#fff;border:none;border-radius:var(--radius);font-size:14px;font-weight:600;padding:14px;cursor:pointer; }
+.btn-disabled { background:#2d3142;color:var(--text);border:none;border-radius:var(--radius);font-size:14px;font-weight:600;padding:14px;opacity:.55;cursor:not-allowed; }
+
+/* ── Training ── */
+.t-select { width:100%;padding:10px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:16px;font-family:inherit; }
+.set-row { display:flex;align-items:center;gap:6px;margin-bottom:6px; }
+.set-num { font-size:12px;font-weight:700;color:var(--muted);width:24px;flex-shrink:0;text-align:center; }
+.set-input { flex:1;padding:8px 4px;background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:16px;text-align:center;min-width:0; }
+.chrono-btn { background:#1e2444;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-weight:600;padding:6px 10px;cursor:pointer;white-space:nowrap;flex-shrink:0; }
+
+/* ── Diète ── */
+.diete-item { background:#161b2e;border-radius:12px;border:1.5px solid #1e6648;padding:14px 16px;margin-bottom:10px;cursor:pointer;position:relative;overflow:hidden;display:flex;justify-content:space-between;align-items:center; }
+.diete-bar  { position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,#3ecf8e,#1a7a52);border-radius:12px 0 0 12px; }
+.diete-arrow { width:26px;height:26px;background:#3ecf8e22;border:1px solid #3ecf8e66;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;color:#3ecf8e;font-weight:600; }
+.macro-label { font-size:10px;color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js"></script>
+<script src="api.js"></script>
+<script src="bilan.js"></script>
+<script src="training.js"></script>
+<script src="diete.js"></script>
+<script src="mensurations.js"></script>
+<script src="recettes.js"></script>
+<script src="progression.js"></script>
+<script src="collection.js"></script>
+<script src="coach.js"></script>
+<script src="protocole.js"></script>
+<script>
+// ── État global ───────────────────────────────────────────────────────
+const S = {
+  page: 'loading',
+  client:  localStorage.getItem('at_client')  || '',
+  token:   localStorage.getItem('at_token')   || '',
+  isCoach: localStorage.getItem('at_coach') === '1' || localStorage.getItem('at_client') === 'yohan',
+  data: {}
+};
+
+function setPage(name) {
+  S.page = name;
+  // Pour les pages bilan, document.body peut avoir été remplacé — on s'assure que #app existe
+  if (!document.getElementById('app')) {
+    document.body.innerHTML = '<div id="app"></div>';
+  }
+  render();
+  // Bandeau "Retour coach" persistant en mode vue-client
+  if (_viewAsClientOverride && name !== 'loading') {
+    if (!document.getElementById('coachRetourBanner')) {
+      const nom = (_clientSelectionne && _clientSelectionne.nom) || _viewAsClientOverride;
+      const banner = document.createElement('div');
+      banner.id = 'coachRetourBanner';
+      banner.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom) + 8px);left:50%;transform:translateX(-50%);z-index:8000;background:linear-gradient(135deg,#E8A838,#c88010);color:#1a0e00;border-radius:20px;padding:8px 16px 8px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,.5);white-space:nowrap;';
+      banner.innerHTML = `<span style="font-size:12px;font-weight:700;">👁️ Vue de <strong>${esc(nom)}</strong></span><button onclick="exitVueClient()" style="background:rgba(0,0,0,0.2);border:none;color:#1a0e00;font-size:12px;font-weight:700;padding:4px 10px;border-radius:10px;cursor:pointer;">✕ Retour</button>`;
+      document.body.appendChild(banner);
+    }
+  }
+}
+
+// ── Vue client (coach simule un client) ───────────────────────────────
+let _coachSavedState = null;
+let _vueClientRetour = 'mes-clients';
+
+// andThen : callback de navigation à exécuter une fois en vue client (défaut loadHome)
+// retour : page à afficher au clic sur "Retour coach" (défaut 'mes-clients')
+function enterVueClient(clientId, andThen, retour) {
+  const nom = (_clientSelectionne && _clientSelectionne.nom) || clientId;
+  _coachSavedState = {
+    client: S.client,
+    isCoach: S.isCoach,
+    data: S.data,
+    journeeData: _journeeData
+  };
+  S.client = clientId;
+  S.isCoach = false;
+  S.data = {};
+  _journeeData = null;
+  _viewAsClientOverride = clientId;
+  _vueClientRetour = retour || 'mes-clients';
+  // Le préchargement est propre à une identité client : on le réinitialise à
+  // chaque bascule pour ne jamais montrer les données préchargées d'un autre
+  // client (loadHome() relance le préchargement, mais andThen peut ouvrir
+  // bilan/mensurations directement sans repasser par l'accueil).
+  _resetPrechargement();
+  if (typeof andThen === 'function') andThen();
+  else loadHome();
+}
+
+function exitVueClient() {
+  if (!_coachSavedState) return;
+  _viewAsClientOverride = null;
+  S.client  = _coachSavedState.client;
+  S.isCoach = _coachSavedState.isCoach;
+  S.data    = _coachSavedState.data;
+  _journeeData = _coachSavedState.journeeData;
+  _coachSavedState = null;
+  _resetPrechargement();
+  const banner = document.getElementById('coachRetourBanner');
+  if (banner) banner.remove();
+  setPage(_vueClientRetour || 'mes-clients');
+}
+
+// ── Rendu principal ───────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById('app');
+  switch (S.page) {
+    case 'loading':       app.innerHTML = renderFullSpinner(); break;
+    case 'login':         app.innerHTML = renderLogin();   bindLogin(); break;
+    case 'home':          document.body.innerHTML = renderHome(); break;
+    case 'training':
+    case 'training-loading': document.body.innerHTML = renderTrainingPage(); break;
+    case 'bilan':
+    case 'bilan-loading': document.body.innerHTML = renderBilanPage(); break;
+    case 'diete':
+    case 'diete-loading': document.body.innerHTML = renderDietePage();
+      if (_dSubPage === 'detail') {
+        initDieteSliders((_dDetail && _dDetail.repas || []).length);
+        initDieteStickyMacros();
+      } else if (_dSubPage === 'journal' && _dJournalDateOuverte) {
+        initDieteStickyMacros();
+      }
+      break;
+    case 'mensurations':
+    case 'mens-loading':  document.body.innerHTML = renderMensurationsPage(); break;
+    case 'recettes':
+    case 'recettes-loading': document.body.innerHTML = renderRecettesPage(); break;
+    case 'classement':           app.innerHTML = renderClassement();           break;
+    case 'profil':               app.innerHTML = renderProfil();               break;
+    case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
+    case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
+    case 'centre-bilans':        document.body.innerHTML = renderCentreBilans();         break;
+    case 'notifications-coach':  document.body.innerHTML = renderNotificationsCoach();   break;
+    case 'rapports-bugs':        document.body.innerHTML = renderRapportsBugs();         break;
+    case 'mes-clients':          document.body.innerHTML = renderMesClients();           break;
+    case 'aliments-a-valider':   document.body.innerHTML = renderAlimentsAValider();     break;
+    case 'protocole':            document.body.innerHTML = renderProtocolePage();        break;
+  }
+}
+
+// ── Spinner ───────────────────────────────────────────────────────────
+// Spinner léger utilisé À L'INTÉRIEUR d'une page déjà affichée (header/nav
+// visibles), pas un remplacement plein écran.
+function renderSpinner() {
+  return `<div class="spinner-inline"><div class="spin"></div></div>`;
+}
+
+// Spinner plein écran, uniquement pour l'état initial avant tout rendu (S.page
+// démarre à 'loading' avant la connexion) — ne doit plus être atteint en pratique.
+function renderFullSpinner() {
+  return `<div class="spinner-full"><div class="spin"></div></div>`;
+}
+
+// ── Overlay de chargement (façon GAS) ───────────────────────────────────
+// Petite fenêtre pop-up centrée avec fond grisé, pour les actions/navigations
+// courtes (verrouiller un client, changer de page coach, etc.) — la page en
+// cours reste visible en arrière-plan, pas de flash plein écran.
+function showLoadingOverlay(message) {
+  hideLoadingOverlay();
+  const el = document.createElement('div');
+  el.id = 'loadingOverlay';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(8,9,15,0.6);backdrop-filter:blur(1.5px);display:flex;align-items:center;justify-content:center;z-index:9997;animation:fadeInModal .15s ease;';
+  el.innerHTML = `<div style="background:#1a1d29;border:1px solid var(--border);border-radius:18px;padding:26px 30px;text-align:center;min-width:180px;max-width:260px;box-shadow:0 16px 50px rgba(0,0,0,.5);">
+    <div class="spin" style="margin:0 auto 14px;"></div>
+    <div style="font-size:13px;font-weight:600;color:#e8eaf0;">${esc(message || 'Chargement…')}</div>
+  </div>`;
+  document.body.appendChild(el);
+}
+function hideLoadingOverlay() {
+  const el = document.getElementById('loadingOverlay');
+  if (el) el.remove();
+}
+
+// ── Login ─────────────────────────────────────────────────────────────
+// Flux en 2 temps : on demande d'abord l'identifiant (verifierClient), puis
+// TOUJOURS l'écran mot de passe classique — jamais de pré-aiguillage sur
+// clientAMotDePasse avant la saisie, pour ne jamais court-circuiter l'accès
+// coach (code maître comparé en premier côté serveur, indépendamment de tout
+// mot de passe stocké). C'est seulement si le login échoue ET que le serveur
+// confirme qu'aucun mot de passe n'existe encore pour ce client (erreur
+// 'sans_mot_de_passe') qu'on bascule sur l'écran de création.
+let _loginStep   = 'identifiant'; // 'identifiant' | 'password' | 'create'
+let _loginClient = '';
+
+function renderLogin() {
+  if (_loginStep === 'password') return renderLoginPassword();
+  if (_loginStep === 'create')   return renderLoginCreate();
+  return renderLoginIdentifiant();
+}
+
+function renderLoginIdentifiant() {
+  return `
+  <div class="login-page">
+    <img class="login-logo" src="icons/icon-192.png" alt="">
+    <div class="login-title">Mon Suivi</div>
+    <div class="login-sub">Connecte-toi pour accéder à ton suivi</div>
+    <div class="login-form">
+      <input id="l-client" type="text" placeholder="Ton prénom" autocomplete="username" autocapitalize="none">
+      <button class="btn-primary" id="l-btn">Continuer →</button>
+      <div class="login-error" id="l-err"></div>
+    </div>
+  </div>`;
+}
+
+function renderLoginPassword() {
+  return `
+  <div class="login-page">
+    <img class="login-logo" src="icons/icon-192.png" alt="">
+    <div class="login-title">Bonjour !</div>
+    <div class="login-sub">Entre ton mot de passe pour accéder à ton espace</div>
+    <div class="login-form">
+      <input id="l-mdp" type="password" placeholder="Mot de passe" autocomplete="current-password">
+      <button class="btn-primary" id="l-btn">Se connecter</button>
+      <div class="login-error" id="l-err"></div>
+    </div>
+  </div>`;
+}
+
+function renderLoginCreate() {
+  return `
+  <div class="login-page">
+    <img class="login-logo" src="icons/icon-192.png" alt="">
+    <div class="login-title">🔐 Crée ton mot de passe</div>
+    <div class="login-sub">Pour sécuriser ton espace coaching</div>
+    <div class="login-form">
+      <input id="l-mdp1" type="password" placeholder="Minimum 4 caractères" autocomplete="new-password">
+      <input id="l-mdp2" type="password" placeholder="Répète ton mot de passe" autocomplete="new-password">
+      <button class="btn-primary" id="l-btn">Créer mon mot de passe →</button>
+      <div class="login-error" id="l-err"></div>
+    </div>
+  </div>`;
+}
+
+function bindLogin() {
+  const btn = document.getElementById('l-btn');
+  if (_loginStep === 'identifiant') {
+    btn.addEventListener('click', doVerifierClient);
+    document.getElementById('l-client').addEventListener('keydown', e => { if (e.key === 'Enter') doVerifierClient(); });
+  } else if (_loginStep === 'password') {
+    btn.addEventListener('click', doLogin);
+    document.getElementById('l-mdp').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  } else if (_loginStep === 'create') {
+    btn.addEventListener('click', doCreerMotDePasse);
+    document.getElementById('l-mdp2').addEventListener('keydown', e => { if (e.key === 'Enter') doCreerMotDePasse(); });
+  }
+}
+
+async function doVerifierClient() {
+  const client = document.getElementById('l-client').value.trim().toLowerCase();
+  const btn = document.getElementById('l-btn');
+  const err = document.getElementById('l-err');
+  if (!client) { err.textContent = 'Entre ton prénom.'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  err.textContent = '';
+  try {
+    const res  = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'verifierClient', client }) });
+    const json = await res.json();
+    if (!json.ok || !json.existe) throw new Error('Identifiant inconnu.');
+    _loginClient = client;
+    _loginStep = 'password';
+    setPage('login');
+  } catch(e) {
+    err.textContent = e.message || 'Erreur de connexion.';
+    btn.disabled = false; btn.textContent = 'Continuer →';
+  }
+}
+
+async function doLogin() {
+  const mdp = document.getElementById('l-mdp').value;
+  const btn = document.getElementById('l-btn');
+  const err = document.getElementById('l-err');
+  if (!mdp) { err.textContent = 'Entre ton mot de passe.'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  err.textContent = '';
+  try {
+    const res  = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'login', client: _loginClient, mdp })
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      if (json.error === 'sans_mot_de_passe') { _loginStep = 'create'; setPage('login'); return; }
+      throw new Error(json.error || 'Identifiants incorrects');
+    }
+    await _completerConnexion(json);
+  } catch(e) {
+    err.textContent = e.message === 'token_invalide' ? 'Identifiants incorrects.' : (e.message || 'Erreur de connexion.');
+    btn.disabled = false; btn.textContent = 'Se connecter';
+  }
+}
+
+async function doCreerMotDePasse() {
+  const mdp1 = document.getElementById('l-mdp1').value;
+  const mdp2 = document.getElementById('l-mdp2').value;
+  const btn  = document.getElementById('l-btn');
+  const err  = document.getElementById('l-err');
+  err.textContent = '';
+  if (mdp1.length < 4) { err.textContent = 'Minimum 4 caractères.'; return; }
+  if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const res  = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'creerMotDePasse', client: _loginClient, mdp: mdp1 })
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error === 'mdp_trop_court' ? 'Minimum 4 caractères.' : 'Erreur lors de la création.');
+    await _completerConnexion(json);
+  } catch(e) {
+    err.textContent = e.message || 'Erreur serveur.';
+    btn.disabled = false; btn.textContent = 'Créer mon mot de passe →';
+  }
+}
+
+async function _completerConnexion(json) {
+  localStorage.setItem('at_client', json.client);
+  localStorage.setItem('at_token',  json.token);
+  const isCoach = !!(json.coachMode || json.client === 'yohan');
+  localStorage.setItem('at_coach',  isCoach ? '1' : '0');
+  S.client  = json.client;
+  S.token   = json.token;
+  S.isCoach = isCoach;
+  _loginStep = 'identifiant';
+  _loginClient = '';
+  _resetPrechargement();
+  await loadHome();
+}
+
+// ── Home ──────────────────────────────────────────────────────────────
+let _journeeData = null;
+
+// ── Préchargement (navigation instantanée vers Bilan/Programme/Diète/Mensurations) ──
+// Se relance à CHAQUE retour à l'accueil (pas juste une fois par session) —
+// donc quel que soit le nombre d'allers-retours, la prochaine page visitée
+// est déjà prête. Chaque page consomme sa donnée préchargée une seule fois
+// (setPage direct, sans spinner) puis repasse en fetch normal si on la
+// revisite sans être repassé par l'accueil entre-temps — les validations et
+// saisies restent, elles, toujours en direct.
+let _pf = { home: null, bilan: null, tInfos: null, tFeuilles: null, tSemaines: null, tSeances: null, diete: null, mens: null };
+let _pfInFlight = false;
+let _pfSession  = 0; // incrémenté à chaque bascule d'identité (login, vue client) pour ignorer les résultats d'un préchargement lancé pour un autre client
+
+function _resetPrechargement() {
+  _pfSession++;
+  _pf = { home: null, bilan: null, tInfos: null, tFeuilles: null, tSemaines: null, tSeances: null, diete: null, mens: null };
+  _pfInFlight = false;
+}
+
+function schedulerPrechargement() {
+  if (_pfInFlight) return;
+  _pfInFlight = true;
+  const maSession = _pfSession;
+  setTimeout(() => { precharger(maSession).finally(() => { _pfInFlight = false; }); }, 400);
+}
+
+async function precharger(maSession) {
+  // Les 5 chargements (accueil compris) sont indépendants entre eux et
+  // peuvent tourner en parallèle. chargerBilan et chargerJourneeEnCours
+  // passent par apiEtendreBilan (voir api.js) pour ne jamais tourner en
+  // même temps l'une que l'autre.
+  const pHome = Promise.all([
+    api('chargerProgressionClient'),
+    apiEtendreBilan('chargerJourneeEnCours')
+  ]).then(([prog, journee]) => { if (_pfSession === maSession) _pf.home = { prog, journee }; }).catch(() => {});
+  const pBilan = apiEtendreBilan('chargerBilan').then(d => { if (_pfSession === maSession) _pf.bilan = d; }).catch(() => {});
+  const pTraining = (async () => {
+    const [infos, feuilles] = await Promise.all([
+      api('chargerInfosActivite'),
+      api('lireFeuillesActives')
+    ]);
+    if (_pfSession !== maSession) return;
+    _pf.tInfos = infos || {};
+    _pf.tFeuilles = Array.isArray(feuilles) ? feuilles : [feuilles].filter(Boolean);
+    const feuilleActive = _pf.tFeuilles[0];
+    if (feuilleActive) {
+      const [semaines, seances] = await Promise.all([
+        api('listerSemaines', { nomFeuille: feuilleActive }),
+        api('listerSeances',  { nomFeuille: feuilleActive })
+      ]);
+      if (_pfSession !== maSession) return;
+      _pf.tSemaines = semaines || [];
+      _pf.tSeances  = seances  || [];
+    }
+  })().catch(() => {});
+  const pDiete = api('listerDietes').then(d => { if (_pfSession === maSession) _pf.diete = d; }).catch(() => {});
+  const pMens  = api('chargerMensurations').then(d => { if (_pfSession === maSession) _pf.mens = d; }).catch(() => {});
+  await Promise.allSettled([pHome, pBilan, pTraining, pDiete, pMens]);
+}
+
+async function loadHome() {
+  if (_pf.home) {
+    S.data.prog  = _pf.home.prog;
+    _journeeData = _pf.home.journee;
+    _pf.home = null;
+    setPage('home');
+    schedulerPrechargement();
+    _apresChargementHome();
+    return;
+  }
+  showLoadingOverlay('Chargement…');
+  try {
+    // Note : chargerBilan() n'est PAS appelée ici (comme en GAS, qui ne l'appelle
+    // que sur la page Bilan) — chargerBilan et chargerJourneeEnCours appellent
+    // toutes les deux etendreBilan() côté serveur ; apiEtendreBilan() (api.js)
+    // les sérialise pour empêcher toute écriture concurrente.
+    const [prog, journee] = await Promise.all([
+      api('chargerProgressionClient'),
+      apiEtendreBilan('chargerJourneeEnCours')
+    ]);
+    S.data.prog  = prog;
+    _journeeData = journee;
+    hideLoadingOverlay();
+    setPage('home');
+    schedulerPrechargement();
+    _apresChargementHome();
+  } catch(e) {
+    hideLoadingOverlay();
+    localStorage.removeItem('at_token');
+    _loginStep = 'identifiant'; _loginClient = '';
+    setPage('login');
+  }
+}
+
+function _apresChargementHome() {
+  // Détection déblocages niveau/titres — le coach voit ses propres passages
+  // de niveau/titres comme n'importe quel client (comme en GAS), seule la
+  // vue client (coach qui consulte le profil d'un autre) est exclue.
+  if (!_viewAsClientOverride) {
+    setTimeout(() => verifierDeblocages(S.data.prog), 300);
+  }
+  // fire-and-forget classement — lit un spreadsheet séparé (LOG_SHEET_ID), safe en concurrent
+  // Pas d'appel du tout en mode simplifié (comme le GAS : chargerTop5() n'est
+  // même pas invoquée), pas juste un masquage visuel.
+  if (!modeSimplifieActif()) {
+    setTimeout(() => {
+      api('listerClassement').then(raw => {
+        const cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+        S.data.classement = cl;
+        const el = document.getElementById('top5Home');
+        if (el) el.outerHTML = renderTop5Home(cl);
+      }).catch(() => {});
+    }, 0);
+  }
+  // Badges coach : chargés en parallèle en arrière-plan, injectés dans le DOM
+  // dès que dispo (au lieu de bloquer l'affichage de l'accueil comme avant)
+  if (S.isCoach) {
+    api('listerBilansCoach').then(bilans => {
+      S.data.coachBilans = bilans;
+      const n = (bilans || []).filter(b => !b.coachTraite).length;
+      S.data.coachBilansCount = n;
+      const el = document.getElementById('badgeCentreBilans');
+      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
+    }).catch(() => { S.data.coachBilansCount = 0; });
+    api('chargerRapportsBugs').then(rapports => {
+      const n = rapports?.nonLus || 0;
+      S.data.bugsNonLus = n;
+      const el = document.getElementById('badgeRapports');
+      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
+    }).catch(() => { S.data.bugsNonLus = 0; });
+    api('chargerTousLesLogs').then(result => {
+      const lastSeen = result?.lastSeen || 0;
+      const n = (result?.logs || []).filter(l => l.tms > lastSeen).length;
+      S.data.notifsNonLues = n;
+      const el = document.getElementById('badgeNotifs');
+      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e05c5c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
+    }).catch(() => { S.data.notifsNonLues = 0; });
+  }
+}
+
+function renderCarteJournee(data) {
+  if (!data || data.aucun) return '<div id="carteJourneeHome"></div>';
+  const valide = !!data.valide;
+  const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  const jourNom = JOURS[new Date(Date.now() - 2*3600*1000).getDay()];
+  const col = on => on ? '#1D9E75' : '#555e7a';
+  const steps = data.steps !== '' && data.steps != null
+    ? (parseInt(data.steps) >= 1000 ? Math.round(parseInt(data.steps)/100)/10 + 'k' : data.steps)
+    : '—';
+  const borderColor = valide ? '#1D9E75' : '#378ADD';
+  const cursor = valide ? 'default' : 'pointer';
+  const onclick = valide ? '' : `onclick="ouvrirJourneeModal()"`;
+  return `<div id="carteJourneeHome" ${onclick}
+    ontouchstart="this.style.opacity='.8'" ontouchend="this.style.opacity='1'"
+    style="background:#161b2e;border-radius:12px;border-left:3px solid ${borderColor};border:1px solid ${borderColor}33;border-left:3px solid ${borderColor};padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:14px;cursor:${cursor};-webkit-tap-highlight-color:transparent;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:10px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Journée en cours</div>
+      <div style="font-size:15px;font-weight:700;color:${valide ? '#1D9E75' : '#f0f2ff'};margin-bottom:8px;">${valide ? '✓ Journée validée' : jourNom}</div>
+      <div style="display:flex;gap:12px;">
+        <span style="font-size:12px;color:${col(data.diete)};font-weight:700;">🥗${data.diete ? '✓' : '—'}</span>
+        <span style="font-size:12px;color:#8892a4;font-weight:600;">👟${steps}</span>
+        <span style="font-size:12px;color:${col(data.training)};font-weight:700;">🏋${data.training ? '✓' : '—'}</span>
+        <span style="font-size:12px;color:${col(data.cardio)};font-weight:700;">🏃${data.cardio ? '✓' : '—'}</span>
+      </div>
+    </div>
+    ${!valide ? `<div style="background:linear-gradient(135deg,#378ADD,#1a5ba0);color:#fff;font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;white-space:nowrap;flex-shrink:0;">Valider ↗</div>` : ''}
+  </div>`;
+}
+
+function renderTop5Home(liste) {
+  if (!liste || liste.length === 0) return '<div id="top5Home"></div>';
+  const _podium = [
+    { bg:'linear-gradient(135deg,#1e1700,#3d2e00)', border:'1.5px solid #f59e0b', namec:'#fde68a' },
+    { bg:'linear-gradient(135deg,#101420,#1e2838)', border:'1.5px solid #94a3b8', namec:'#d4d8e0' },
+    { bg:'linear-gradient(135deg,#140e09,#271c0d)', border:'1px solid #b45309',   namec:'#d4956a' }
+  ];
+  const medals = ['🥇','🥈','🥉'];
+  const rows = liste.map((c, i) => {
+    const tier = typeof niveauToTier === 'function' ? niveauToTier(c.niveau) : 'debutant';
+    const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858'};
+    const isMe = c.client === S.client || c.id === S.client;
+    const parts = (c.nom || c.prenom || c.client || '').trim().split(' ');
+    const nom = parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
+    let bg, border, namec;
+    if (i < 3) { bg = _podium[i].bg; border = _podium[i].border; namec = isMe ? tc.c1 : _podium[i].namec; }
+    else { bg = `linear-gradient(145deg,#0f1117,${tc.c2}aa,#0f1117)`; border = isMe ? `1px solid ${tc.c1}88` : '1px solid #1e2235'; namec = isMe ? tc.c1 : '#f0f2ff'; }
+    const badgeSz = i === 0 ? 34 : 30;
+    const tDef = (c.titreActif && typeof TITRES_DEF !== 'undefined') ? TITRES_DEF.find(t => t.id === c.titreActif) : null;
+    const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:${i===0?'10px':'8px'} 12px;border-radius:10px;margin-bottom:5px;background:${bg};border:${border};">
+      <div style="font-size:16px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
+      <div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, badgeSz, 't5'+i) : ''}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:${i===0?'14':'13'}px;font-weight:700;color:${namec};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nom}${isMe?' <span style="font-size:9px;opacity:0.7;">(toi)</span>':''}${titreBadge}</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:1px;">Niv. ${c.niveau} · ${(c.xpTotal||0).toLocaleString('fr')} XP</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div id="top5Home" style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:14px 16px;margin-top:14px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #1e2235;">
+      <span style="font-size:20px;">🏆</span>
+      <div>
+        <div style="font-size:14px;font-weight:800;background:linear-gradient(90deg,#fde68a,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Top 5</div>
+        <div style="font-size:10px;color:#555e7a;text-transform:uppercase;letter-spacing:1.5px;">Classement</div>
+      </div>
+      <button onclick="loadClassement()" style="margin-left:auto;background:transparent;border:none;color:#555e7a;font-size:12px;cursor:pointer;padding:4px 8px;">Voir tout ›</button>
+    </div>
+    ${rows}
+  </div>`;
+}
+
+// ── Mode simplifié ───────────────────────────────────────────────────
+// Réglage par appareil (pas par client, comme dans le GAS officiel) qui
+// cache l'affichage XP/progression/classement — l'XP continue de tourner
+// normalement côté serveur, seul le rendu client est concerné.
+function modeSimplifieActif() {
+  try { return localStorage.getItem('modeSimplifie') === 'true'; } catch(e) { return false; }
+}
+function toggleModeSimplifie() {
+  try { localStorage.setItem('modeSimplifie', modeSimplifieActif() ? 'false' : 'true'); } catch(e) {}
+  ouvrirSettings();
+  if (S.page === 'home') render();
+}
+
+// Carte header (badge, nom, titre, XP, barre de niveau) — extraite pour
+// pouvoir être rafraîchie en place (_majCarteHeader) sans re-render toute la
+// page, dès que S.data.prog change (XP gagné) pendant qu'on est sur l'accueil.
+function renderCarteHeader() {
+  const p = S.data.prog || {};
+  const simplifie = modeSimplifieActif();
+  const niveau = p.niveau || 1;
+  const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
+  const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858',bar:'linear-gradient(90deg,#808898,#c0c8d8)'};
+  const sz = tier === 'legendaire' ? 62 : tier === 'diamant' ? 56 : tier === 'platine' ? 50 : 44;
+  const xpPct = p.pct || 0;
+  const xpTotal = p.xpTotal || 0;
+  const xpManquant = p.xpManquant != null ? p.xpManquant : 10;
+  const titreId = p.titreActif || ((() => { try { return localStorage.getItem('titreActif_' + S.client) || null; } catch(e) { return null; } })());
+  const titreDef = titreId && typeof TITRES_DEF !== 'undefined' ? TITRES_DEF.find(t => t.id === titreId) : null;
+  const titreHtml = titreDef ? renderTitrePill(titreDef, false) : '';
+
+  return `<div id="carteHeaderHome" style="
+      background:linear-gradient(145deg,#131825 0%,${tc.c2}99 30%,${tc.c2}ee 50%,${tc.c2}99 70%,#131825 100%);
+      border-radius:12px;border-top:4px solid ${tc.c1};
+      border-left:1px solid ${tc.c1}33;border-right:1px solid ${tc.c1}33;border-bottom:1px solid ${tc.c1}22;
+      padding:14px 16px;margin-bottom:16px;
+      box-shadow:inset 0 1px 0 ${tc.c1}88,0 0 28px ${tc.c1}44,0 2px 14px rgba(0,0,0,0.45);">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
+          ${simplifie ? '' : `<div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, sz, 'hm') : '⭐'}</div>`}
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span style="font-size:18px;font-weight:700;color:#f0f2ff;">${(p.nom || S.client).split(' ')[0]}</span>
+              ${simplifie ? '' : titreHtml}
+            </div>
+            ${simplifie ? '' : `<div style="font-size:12px;color:#8892a4;margin-top:2px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
+            <div style="margin-top:8px;display:flex;justify-content:space-between;">
+              <span style="font-size:10px;color:#8892a4;">Niv. ${niveau}</span>
+              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${xpManquant.toLocaleString('fr')} XP → Niv. ${niveau+1}</span>
+            </div>
+            <div style="height:4px;background:#1e2235;border-radius:2px;overflow:hidden;margin-top:6px;">
+              <div style="height:4px;border-radius:2px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
+            </div>`}
+          </div>
+        </div>
+        <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_PARAMETRES}</button>
+      </div>
+    </div>`;
+}
+
+function _majCarteHeader() {
+  const carte = document.getElementById('carteHeaderHome');
+  if (carte) carte.outerHTML = renderCarteHeader();
+}
+
+function renderHome() {
+  const p = S.data.prog || {};
+  const nBilans = S.data.coachBilansCount || 0;
+
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+
+    ${renderCarteHeader()}
+
+    ${renderCarteJournee(_journeeData)}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+
+      <div onclick="goTo('training')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="2" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="35" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="8" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="31" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="13" y="20" width="18" height="4" rx="2" fill="#4f8ef7"/><circle cx="22" cy="9" r="3.5" fill="#6fa8ff" opacity="0.8"/><path d="M17 32 L19 40 L22 35 L25 40 L27 32" stroke="#6fa8ff" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Entraînement</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Saisir mes séances</div>
+      </div>
+
+      <div onclick="goTo('diete')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #3ecf8e;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M8 28 Q8 16 22 16 Q36 16 36 28 L34 32 H10 Z" fill="#3ecf8e" opacity="0.15"/><path d="M10 28 Q10 18 22 18 Q34 18 34 28" stroke="#3ecf8e" stroke-width="1.5" fill="none"/><rect x="8" y="28" width="28" height="4" rx="2" fill="#3ecf8e"/><path d="M18 16 Q18 8 22 6 Q26 8 26 16" stroke="#3ecf8e" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="22" cy="6" r="2.5" fill="#3ecf8e"/><line x1="14" y1="22" x2="30" y2="22" stroke="#3ecf8e" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Ma Diète</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Mon alimentation</div>
+      </div>
+
+      <div onclick="goTo('mensurations')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #a78bfa;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="4" y="36" width="7" height="4" rx="1" fill="#a78bfa" opacity="0.3"/><rect x="13" y="28" width="7" height="12" rx="1" fill="#a78bfa" opacity="0.5"/><rect x="22" y="20" width="7" height="20" rx="1" fill="#a78bfa" opacity="0.7"/><rect x="31" y="12" width="7" height="28" rx="1" fill="#a78bfa"/><polyline points="7.5,34 16.5,26 25.5,18 34.5,10" stroke="#c4b5fd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="34" r="2.5" fill="#c4b5fd"/><circle cx="34.5" cy="10" r="2.5" fill="#c4b5fd"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mensurations</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Ma progression</div>
+      </div>
+
+      <div onclick="goTo('bilan')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #f59e0b;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="8" y="5" width="26" height="34" rx="3" fill="#f59e0b" opacity="0.1"/><rect x="8" y="5" width="26" height="34" rx="3" stroke="#f59e0b" stroke-width="1.5"/><rect x="16" y="1" width="10" height="7" rx="2" fill="#f59e0b"/><line x1="14" y1="16" x2="30" y2="16" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="22" x2="30" y2="22" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="28" x2="24" y2="28" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><polyline points="15,34 19,38 29,28" stroke="#3ecf8e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mon Bilan</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bilan semaine</div>
+      </div>
+
+      <div onclick="goTo('recettes')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #f97316;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M10 12 Q10 8 22 8 Q34 8 34 12 L34 36 Q34 38 22 38 Q10 38 10 36 Z" fill="#f97316" fill-opacity="0.12" stroke="#f97316" stroke-width="1.5"/><line x1="16" y1="17" x2="28" y2="17" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="22" x2="28" y2="22" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="27" x2="24" y2="27" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><circle cx="30" cy="10" r="4" fill="#f97316"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Recettes</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Mes recettes coaching</div>
+      </div>
+
+      ${p.chimieActif ? `
+      <div onclick="loadProtocole()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #a78bfa;-webkit-tap-highlight-color:transparent;">
+        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🧬</div>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Protocole</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Cycle en cours</div>
+      </div>` : ''}
+
+      ${S.isCoach ? `
+      <div onclick="loadMesClients()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;">
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><circle cx="16" cy="15" r="5.5" fill="#4f8ef7" opacity="0.6"/><circle cx="28" cy="15" r="5.5" fill="#4f8ef7"/><path d="M5 36 Q5 26 16 26 Q22 26 22 26" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/><path d="M22 26 Q28 26 39 26 Q39 36 39 36" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mes clients</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Accéder aux profils</div>
+      </div>
+
+      <div onclick="loadCentreBilans()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #1D9E75;position:relative;-webkit-tap-highlight-color:transparent;">
+        <span id="badgeCentreBilans">${nBilans > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${nBilans}</div>` : ''}</span>
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="10" y="7" width="24" height="30" rx="3" stroke="#1D9E75" stroke-width="1.5" fill="#1D9E75" fill-opacity="0.12"/><line x1="15" y1="15" x2="29" y2="15" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="21" x2="29" y2="21" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="27" x2="23" y2="27" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><circle cx="31" cy="31" r="6" fill="#1D9E75"/><polyline points="28,31 30,33 34,29" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Centre bilans</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bilans reçus à traiter</div>
+      </div>
+
+      <div onclick="loadNotificationsCoach()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;position:relative;-webkit-tap-highlight-color:transparent;">
+        <span id="badgeNotifs">${(S.data.notifsNonLues||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e05c5c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.notifsNonLues}</div>` : ''}</span>
+        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M22 6 C15 6 11 12 11 20 L11 29 L7 33 L37 33 L33 29 L33 20 C33 12 29 6 22 6 Z" fill="#4f8ef7" opacity="0.15" stroke="#4f8ef7" stroke-width="1.5"/><path d="M18 33 Q18 37 22 37 Q26 37 26 33" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Notifications</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Activité clients</div>
+      </div>
+
+      <div onclick="loadRapportsBugs()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #555e7a;position:relative;-webkit-tap-highlight-color:transparent;">
+        <span id="badgeRapports">${(S.data.bugsNonLus||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.bugsNonLus}</div>` : ''}</span>
+        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🐛</div>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Rapports</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bugs signalés</div>
+      </div>
+
+      <div onclick="loadAlimentsAValider()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #a78bfa;-webkit-tap-highlight-color:transparent;">
+        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🍎</div>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Base alimentaire</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Ajouts à valider</div>
+      </div>` : ''}
+
+    </div>
+
+    <div id="top5Home"></div>
+
+  </div>`;
+}
+
+
+
+// ── Classement ────────────────────────────────────────────────────────
+async function loadClassement() {
+  showLoadingOverlay('Chargement…');
+  try {
+    const raw = await api('listerClassement');
+    S.data.classement = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    hideLoadingOverlay();
+    setPage('classement');
+  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+}
+
+function renderClassement() {
+  const items = S.data.classement || [];
+  const medals = ['🥇','🥈','🥉'];
+  const rows = items.map((c, i) => {
+    const tier = typeof niveauToTier === 'function' ? niveauToTier(c.niveau) : 'debutant';
+    const isMe = c.id === S.client;
+    const tDef = (c.titreActif && typeof TITRES_DEF !== 'undefined') ? TITRES_DEF.find(t => t.id === c.titreActif) : null;
+    const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
+    return `
+    <div class="list-item">
+      <div class="list-icon" style="font-size:18px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
+      <div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, 32, 'cl'+i) : ''}</div>
+      <div class="list-text">
+        <div class="list-title" style="${isMe ? 'color:var(--accent);' : ''}">${c.nom || c.id}${isMe ? ' <span style="font-size:9px;opacity:0.7;">(toi)</span>' : ''}${titreBadge}</div>
+        <div class="list-sub">Niv. ${c.niveau} · ${(c.xpTotal||0).toLocaleString('fr')} XP</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div id="app">
+    ${renderHeader('Classement', '', false)}
+    <div class="page">
+      <div class="card">${rows || '<div class="empty"><div class="empty-text">Aucun résultat</div></div>'}</div>
+    </div>
+    ${renderNavBar('classement')}
+  </div>`;
+}
+
+// ── Profil ────────────────────────────────────────────────────────────
+function renderProfil() {
+  const p = S.data.prog || {};
+  const niveau = p.niveau || 1;
+  const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
+  const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858'};
+  const sz = tier === 'legendaire' ? 40 : tier === 'diamant' ? 36 : tier === 'platine' ? 32 : 28;
+  const titreId = p.titreActif || ((() => { try { return localStorage.getItem('titreActif_' + S.client) || null; } catch(e) { return null; } })());
+  const titreDef = titreId && typeof TITRES_DEF !== 'undefined' ? TITRES_DEF.find(t => t.id === titreId) : null;
+  const titreHtml = titreDef ? `<div style="margin-top:6px;display:flex;justify-content:center;">${renderTitrePill(titreDef, false)}</div>` : '';
+  return `
+  <div id="app">
+    ${renderHeader('Profil', '', false)}
+    <div class="page">
+      <div class="card" style="text-align:center;padding:24px;">
+        <div style="display:flex;justify-content:center;margin-bottom:8px;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, sz, 'pf') : ''}</div>
+        <div style="font-size:20px;font-weight:700;">${(p.nom || S.client).split(' ')[0]}</div>
+        <div style="font-size:13px;color:${tc.c1};font-weight:600;">Niveau ${niveau}</div>
+        ${titreHtml}
+      </div>
+      <div class="card">
+        <div class="list-item" onclick="deconnexion()" style="color:var(--red);">
+          <div class="list-icon">🚪</div>
+          <div class="list-text"><div class="list-title">Se déconnecter</div></div>
+        </div>
+      </div>
+    </div>
+    ${renderNavBar('profil')}
+  </div>`;
+}
+
+// ── Notifications push (Firebase Cloud Messaging) ───────────────────────
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCNi28-nmp12JWdkp2I5HzXSJ7II1at4W8",
+  authDomain: "apptraining-push-95e0d.firebaseapp.com",
+  projectId: "apptraining-push-95e0d",
+  storageBucket: "apptraining-push-95e0d.firebasestorage.app",
+  messagingSenderId: "305834460978",
+  appId: "1:305834460978:web:e1031a87209b0bdff8392b"
+};
+const FCM_VAPID_KEY = "BHh2EJzrbN6O88VLoUJAryv3tgTdVfsgIkFXnwTLEGtjCi9ePpqB2RFe8frPJYaDVhVFIlnGcXGjSz6XMLKPN38";
+
+function _urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+let _fcmMessaging = null;
+function _getFcmMessaging() {
+  if (_fcmMessaging) return _fcmMessaging;
+  if (typeof firebase === 'undefined') return null;
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  _fcmMessaging = firebase.messaging();
+  return _fcmMessaging;
+}
+
+function notificationsActivees() {
+  return localStorage.getItem('at_push_enabled') === '1' && Notification.permission === 'granted';
+}
+
+async function activerNotifications() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    showToast('Notifications non supportées sur cet appareil.', '#c0392b'); return;
+  }
+  // iOS n'autorise les notifications web QUE pour une PWA installée à l'écran d'accueil
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (isIOS && !isStandalone) {
+    showToast('Ajoute d\'abord l\'app à ton écran d\'accueil pour activer les notifications.', '#c0392b');
+    return;
+  }
+  let etape = 'permission';
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { showToast('Permission refusée.', '#c0392b'); return; }
+
+    etape = 'sw-ready';
+    const reg = await navigator.serviceWorker.ready;
+
+    etape = 'subscribe-natif';
+    // Pré-abonnement natif avec un Uint8Array correctement typé : contourne
+    // un bug connu de Safari où le getToken() de Firebase échoue sur la
+    // validation de la clé VAPID ("applicationServerKey must contain a
+    // valid P-256 public key") à cause de sa propre conversion interne.
+    // Si un abonnement existe déjà, Firebase le réutilise directement.
+    const keyArr = _urlBase64ToUint8Array(FCM_VAPID_KEY);
+    const toHex = b => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+    etape = 'subscribe-natif (clé: len=' + keyArr.length + ' début=' + toHex(keyArr.slice(0,4)) + ' fin=' + toHex(keyArr.slice(-4)) + ')';
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: keyArr
+      });
+    }
+
+    etape = 'firebase-init';
+    const messaging = _getFcmMessaging();
+    if (!messaging) { showToast('Erreur d\'initialisation Firebase.', '#c0392b'); return; }
+
+    etape = 'get-token';
+    const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) { showToast('Jeton vide (étape get-token).', '#c0392b'); return; }
+
+    etape = 'enregistrement-serveur';
+    await api('enregistrerPushToken', { fcmToken: token });
+
+    localStorage.setItem('at_push_enabled', '1');
+    showToast('🔔 Notifications activées', '#1D9E75');
+    ouvrirSettings();
+  } catch(e) {
+    showToast('[' + etape + '] ' + e.name + ' : ' + e.message, '#c0392b');
+  }
+}
+
+async function desactiverNotifications() {
+  try {
+    const messaging = _getFcmMessaging();
+    if (messaging) await messaging.deleteToken();
+    await api('enregistrerPushToken', { fcmToken: '' });
+  } catch(e) {}
+  localStorage.removeItem('at_push_enabled');
+  showToast('🔕 Notifications désactivées', '#8892a4');
+  ouvrirSettings();
+}
+
+// ── Paramètres ────────────────────────────────────────────────────────
+// Structure alignée sur le GAS officiel : onglets Fonctionnement/Rapport de
+// bug, sous-onglets L'application (accordéon) / Système XP. Le contenu du
+// Bilan/Mensurations est réécrit pour matcher le fonctionnement RÉEL actuel
+// (mensurations découplées de l'envoi/clôture du bilan — pas de blocage).
+let _settingsTab = 'guide'; // 'guide' | 'bug'
+let _settingsGuideSub = 'application'; // 'application' | 'xp'
+let _settingsAccordion = null; // 'journee' | 'bilan' | 'mensurations' | 'titres' | null
+
+function ouvrirSettings(tab) {
+  if (tab === 'guide' || tab === 'bug') _settingsTab = tab;
+  const existing = document.getElementById('settingsPanel');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.id = 'settingsPanel';
+  el.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.82);display:flex;align-items:flex-end;';
+
+  const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 0;font-size:13px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
+  const content = _settingsTab === 'bug' ? renderSettingsBug() : renderSettingsGuide();
+
+  el.innerHTML = `<div style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
+    <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 20px 0;flex-shrink:0;">
+      <div style="font-size:17px;font-weight:700;color:#e8eaf0;">Paramètres</div>
+      <button onclick="document.getElementById('settingsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:14px 20px 0;flex-shrink:0;">
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Mode simplifié</div>
+          <div style="font-size:11px;color:#555e7a;margin-top:2px;">Cache XP, progression et classement</div>
+        </div>
+        <div onclick="toggleModeSimplifie()" style="width:48px;height:28px;border-radius:14px;background:${modeSimplifieActif() ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+          <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${modeSimplifieActif() ? '#fff' : '#555e7a'};transform:${modeSimplifieActif() ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;padding:14px 20px 0;flex-shrink:0;">
+      ${tabBtn('guide', 'Fonctionnement', _settingsTab !== 'bug')}
+      ${tabBtn('bug', 'Rapport de bug', _settingsTab === 'bug')}
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:16px 20px 12px;-webkit-overflow-scrolling:touch;">
+      ${content}
+    </div>
+    <div style="padding:8px 20px calc(16px + env(safe-area-inset-bottom));flex-shrink:0;text-align:center;">
+      <button onclick="document.getElementById('settingsPanel').remove();deconnexion()" style="background:transparent;border:none;color:#8a4444;font-size:12px;padding:6px;cursor:pointer;">🚪 Se déconnecter</button>
+    </div>
+  </div>`;
+  el.onclick = e => { if (e.target === el) el.remove(); };
+  document.body.appendChild(el);
+}
+
+function switchSettingsTab(tab) { _settingsTab = tab; ouvrirSettings(); }
+function switchGuideSub(sub) { _settingsGuideSub = sub; ouvrirSettings(); }
+function toggleSettingsAccordion(id) { _settingsAccordion = _settingsAccordion === id ? null : id; ouvrirSettings(); }
+
+function renderSettingsGuide() {
+  const subBtn = (id, label, active) => `<button onclick="switchGuideSub('${id}')" style="flex:1;padding:7px 0;font-size:12px;font-weight:600;border-radius:8px;margin:0;background:${active?'#4f8ef7':'#1e2235'};color:${active?'#fff':'#8892a4'};border:${active?'none':'1px solid #2d3142'};cursor:pointer;">${label}</button>`;
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:14px;">
+      ${subBtn('application', "L'application", _settingsGuideSub !== 'xp')}
+      ${subBtn('xp', 'Système XP', _settingsGuideSub === 'xp')}
+    </div>
+    ${_settingsGuideSub === 'xp' ? renderGuideXP() : renderGuideApplication()}`;
+}
+
+function _stepItem(num, color, title, sub, accent) {
+  const titleColor = accent ? color : '#e8eaf0';
+  return `<div style="display:flex;gap:10px;align-items:flex-start;"><div style="width:21px;height:21px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">${num}</div><div><div style="font-size:12px;font-weight:600;color:${titleColor};">${title}</div><div style="font-size:11px;color:#8892a4;margin-top:1px;">${sub}</div></div></div>`;
+}
+function _calloutBox(color, label, text) {
+  return `<div style="background:${color}20;border:1px solid ${color}44;border-radius:10px;padding:10px 12px;font-size:11px;color:#8892a4;line-height:1.5;"><span style="color:${color};font-weight:700;">${label}</span> — ${text}</div>`;
+}
+function _accordionItem(id, icon, title, sub, bodyHtml) {
+  const open = _settingsAccordion === id;
+  return `<div style="background:#0f1117;border-radius:12px;overflow:hidden;margin-bottom:6px;">
+    <div onclick="toggleSettingsAccordion('${id}')" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;user-select:none;-webkit-user-select:none;">
+      <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">${icon}</span><div><div style="font-size:14px;font-weight:600;color:#e8eaf0;">${title}</div><div style="font-size:11px;color:#8892a4;margin-top:1px;">${sub}</div></div></div>
+      <span style="color:#555e7a;font-size:11px;transition:transform 0.2s;transform:rotate(${open?'180':'0'}deg);display:inline-block;">▼</span>
+    </div>
+    ${open ? `<div style="padding:0 16px 16px;">${bodyHtml}</div>` : ''}
+  </div>`;
+}
+
+function renderGuideApplication() {
+  return `<div style="font-size:13px;color:#8892a4;margin-bottom:14px;line-height:1.5;">Appuie sur une section pour en savoir plus.</div>
+    ${_accordionItem('journee', '🗓️', 'Valider sa journée', 'Carte journée → validation → XP', `
+      <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
+        ${_stepItem('1', '#4f8ef7', 'Appuie sur la carte "Journée en cours"', "Elle apparaît chaque jour en haut de l'accueil")}
+        ${_stepItem('2', '#4f8ef7', 'Renseigne tes pas, coche ta séance et ta diète', "Tout se remplit dans le modal qui s'ouvre")}
+        ${_stepItem('✓', '#1D9E75', 'Clique sur "Valider ma journée"', "Les infos se copient automatiquement dans le bilan · +5 XP", true)}
+      </div>
+      ${_calloutBox('#4f8ef7', 'ℹ️ Bon à savoir', "Une seule validation par jour. Si l'objectif de pas est atteint tu reçois +10 XP bonus en plus.")}
+    `)}
+    ${_accordionItem('bilan', '📋', 'Mon bilan', 'Remplir, clôturer et envoyer le bilan hebdo', `
+      <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
+        ${_stepItem('1', '#4f8ef7', 'Accueil → carte "Mon Bilan"', "Le bilan de la semaine en cours s'ouvre automatiquement")}
+        ${_stepItem('2', '#4f8ef7', 'Remplis chaque jour : poids, eau, pas, diète, training, cardio', 'Sauvegarde automatique à chaque modification')}
+        ${_stepItem('📤', '#378ADD', '"Envoyer au coach" — dans les temps = +20 XP', "Envoie en avance, le jour J ou le lendemain avant l'heure limite pour décrocher le bonus. Envoyé plus tard, ton coach reste prévenu mais sans le bonus XP.", true)}
+        ${_stepItem('🔒', '#1D9E75', '"Clôturer la semaine" — quand tu veux, sans deadline', "Un récap de ta semaine s'affiche avant confirmation (diète tenue, moyenne de pas, séances). Calcule l'XP complet du bilan.", true)}
+      </div>
+      ${_calloutBox('#4f8ef7', 'ℹ️ Bon à savoir', "Les deux boutons sont indépendants : tu peux envoyer au coach sans clôturer, ou clôturer sans envoyer. Un bilan clôturé reste modifiable mais ne peut pas être re-clôturé. Depuis l'historique, tu peux aussi envoyer plus tard un bilan déjà clôturé que tu n'aurais pas encore transmis.")}
+    `)}
+    ${_accordionItem('mensurations', '📐', 'Mensurations', 'Saisir poids et tour de taille', `
+      <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
+        ${_stepItem('1', '#4f8ef7', 'Accueil → carte "Mensurations"', 'Historique et graphiques de ton évolution')}
+        ${_stepItem('✓', '#1D9E75', 'Saisis ton poids et ton tour de taille', 'Sauvegarde automatique à chaque saisie', true)}
+      </div>
+      ${_calloutBox('#a78bfa', '💡 Indépendant du bilan', "Tu peux envoyer ou clôturer ton bilan même sans avoir renseigné tes mensurations de la semaine. Renseigne-les régulièrement pour que ton coach suive bien ton évolution.")}
+    `)}
+    ${_accordionItem('titres', '🎖️', 'Niveaux & Titres', 'Montée de niveau et déblocage de titres', `
+      <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
+        ${_stepItem('1', '#4f8ef7', 'Accumule des XP pour monter de niveau', "Chaque niveau débloque de nouveaux emblèmes et titres exclusifs")}
+        ${_stepItem('2', '#4f8ef7', 'Accueil → carte profil (en haut) → Collection', 'Vois tous tes titres débloqués et verrouillés')}
+        ${_stepItem('👑', '#f0a500', "Clique sur un titre débloqué pour l'activer", "Il s'affiche sous ton prénom sur l'accueil et dans le classement", true)}
+      </div>
+      ${_calloutBox('#9333ea', '💎 Titres verrouillés (🔒)', 'Ils se débloquent automatiquement en cumulant des pas, en validant des bilans ou des séances, ou en montant de niveau.')}
+    `)}`;
+}
+
+function renderGuideXP() {
+  const row = (label, sub, xp, color) => `<div style="background:#0f1117;border-radius:10px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center;">
+    <div><div style="font-size:13px;font-weight:600;color:#e8eaf0;">${label}</div><div style="font-size:11px;color:#8892a4;margin-top:2px;">${sub}</div></div>
+    <div style="background:${color}22;border:1px solid ${color}55;border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;color:${color};white-space:nowrap;">${xp}</div>
+  </div>`;
+  return `
+    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Journée</div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px;">
+      ${row('✅ Journée validée', "Valider ta journée depuis l'accueil", '+5 XP', '#1D9E75')}
+      ${row('🦶 Objectif pas atteint', 'Quota de pas quotidien dépassé', '+10 XP', '#1D9E75')}
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Bilan — Clôture</div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:6px;">
+      ${row('🔒 Clôture de semaine', 'À chaque bilan clôturé', '+50 XP', '#4f8ef7')}
+      ${row('🥗 Diète 6/7 jours', '6 jours de diète tenus dans la semaine', '+15 XP', '#4f8ef7')}
+      ${row('🥗🔥 Diète 7/7 jours', 'Les 7 jours sans exception', '+30 XP', '#4f8ef7')}
+      ${row('💪 Séances complètes', "100% de l'objectif séances de la semaine", '+25 XP', '#4f8ef7')}
+      ${row('👟 Pas cumulés', 'Moyenne quotidienne de la semaine — 1 XP / 500 pas', 'variable', '#4f8ef7')}
+      ${row('🎯 Objectif pas hebdo atteint', 'Moyenne ≥ cible fixée par ton coach', '+20 XP', '#4f8ef7')}
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;margin-top:10px;">Bilan — Envoi au coach</div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px;">
+      ${row('⏱️ Dans les temps', "Envoyé en avance, le jour J ou le lendemain avant l'heure limite", '+20 XP', '#4f8ef7')}
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Streaks bilans</div>
+    <div style="display:flex;flex-direction:column;gap:7px;">
+      ${row("🔥 3 bilans d'affilée", 'Bonus fidélité', '+30 XP', '#f0a500')}
+      ${row("🔥🔥 6 bilans d'affilée", 'Bonus régularité', '+50 XP', '#f0a500')}
+      ${row("🔥🔥🔥 10 bilans d'affilée", 'Bonus champion', '+100 XP', '#f0a500')}
+    </div>`;
+}
+
+function renderSettingsBug() {
+  return `
+    <div style="font-size:14px;color:#8892a4;margin-bottom:14px;line-height:1.5;">Décris le problème rencontré et sur quelle page. Ton coach le recevra directement.</div>
+    <textarea id="bugDesc" placeholder="Ex: Sur la page bilan, le bouton 'Valider' ne répond pas après avoir rempli les champs…"
+      style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;font-family:inherit;resize:none;height:120px;box-sizing:border-box;margin-bottom:12px;"></textarea>
+    <button onclick="envoyerBugReport()" style="width:100%;padding:13px;background:linear-gradient(135deg,#4f8ef7,#2260c8);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Envoyer le rapport</button>`;
+}
+
+async function envoyerBugReport() {
+  const desc = (document.getElementById('bugDesc')?.value || '').trim();
+  if (!desc) return;
+  const panel = document.getElementById('settingsPanel');
+  const btn = panel?.querySelector('button[onclick="envoyerBugReport()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi...'; }
+  try {
+    await api('envoyerRapportBug', { message: desc });
+    if (panel) panel.remove();
+    showToast('✅ Rapport envoyé, ton coach a été prévenu.', '#1D9E75');
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Envoyer le rapport'; }
+    showToast('Erreur : ' + e.message, '#c0392b');
+  }
+}
+
+// ── Journée en cours modal ────────────────────────────────────────────
+function ouvrirJourneeModal() {
+  if (!_journeeData || _journeeData.aucun) return;
+  if (_journeeData.valide) return; // déjà validée, la carte l'affiche
+  // La fenêtre s'ouvre tout de suite avec les données déjà connues (celles de
+  // la carte accueil) ; on rafraîchit ensuite en arrière-plan sans bloquer.
+  _afficherModalJournee(true);
+  api('chargerDonneesJournee', { ligne: _journeeData.ligne }).then(fresh => {
+    if (fresh) { _journeeData.diete = fresh.diete; _journeeData.steps = fresh.steps; _journeeData.training = fresh.training; _journeeData.cardio = fresh.cardio; }
+  }).catch(() => {}).finally(() => {
+    if (document.getElementById('modalJournee')) _afficherModalJournee(false);
+  });
+}
+
+function _majCarteJournee() {
+  const carte = document.getElementById('carteJourneeHome');
+  if (carte) carte.outerHTML = renderCarteJournee(_journeeData);
+}
+
+function _afficherModalJournee(refreshing) {
+  const existant = document.getElementById('modalJournee');
+  if (existant) existant.remove();
+  const d = _journeeData;
+  const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  const jourNom = JOURS[new Date(Date.now() - 2*3600*1000).getDay()];
+  const modal = document.createElement('div');
+  modal.id = 'modalJournee';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
+  modal.innerHTML = `
+    <div style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
+      ${refreshing ? `<div style="position:absolute;inset:0;background:rgba(26,31,53,0.85);border-radius:20px 20px 0 0;z-index:2;display:flex;align-items:center;justify-content:center;"><div class="spin"></div></div>` : ''}
+      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
+      <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Journée en cours</div>
+      <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:20px;">${jourNom}</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button id="jTogDiete" onclick="toggleJourneeField('diete')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.diete?'#1D9E75':'#2d3142'};">${d.diete?'✓ ':''}Diète</button>
+        <button id="jTogTraining" onclick="toggleJourneeField('training')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.training?'#1D9E75':'#2d3142'};">${d.training?'✓ ':''}Training</button>
+        <button id="jTogCardio" onclick="toggleJourneeField('cardio')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.cardio?'#1D9E75':'#2d3142'};">${d.cardio?'✓ ':''}Cardio</button>
+      </div>
+      <div style="margin-bottom:20px;">
+        <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">STEPS</div>
+        <input id="jSteps" type="text" inputmode="numeric" value="${fmtFR(d.steps)}" placeholder="ex: 10200"
+          onchange="sauverStepsJournee(this.value)"
+          style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+        <div id="jStepsErr" style="display:none;font-size:11px;color:#e05252;margin-top:4px;">⚠️ Rentre tes steps en nombre entier (ex: 10200 pour 10 200 pas)</div>
+      </div>
+      <button id="btnValiderJournee" onclick="validerJourneeClient()" style="width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75,#167a5a);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">✅ Valider ma journée</button>
+      <button onclick="document.getElementById('modalJournee').remove()" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function toggleJourneeField(type) {
+  if (!_journeeData) return;
+  _journeeData[type] = !_journeeData[type];
+  const cols = { diete: 14, training: 18, cardio: 19 };
+  api('enregistrerValeur', { nomFeuille: 'Bilan', ligne: _journeeData.ligne, colonne: cols[type], valeur: _journeeData[type] }).catch(() => {});
+  const labels = { diete: 'Diète', training: 'Training', cardio: 'Cardio' };
+  const id = { diete: 'jTogDiete', training: 'jTogTraining', cardio: 'jTogCardio' };
+  const btn = document.getElementById(id[type]);
+  if (btn) { btn.style.background = _journeeData[type] ? '#1D9E75' : '#2d3142'; btn.textContent = (_journeeData[type] ? '✓ ' : '') + labels[type]; }
+}
+
+function sauverStepsJournee(val) {
+  if (!_journeeData) return;
+  const v = parseSteps(val);
+  const errEl = document.getElementById('jStepsErr');
+  if (errEl) errEl.style.display = (v !== '' && v > 0 && v < 1000) ? 'block' : 'none';
+  _journeeData.steps = v;
+  // pasTotal (chargerProgressionClient) compte les steps de la semaine en
+  // cours même non validée — un titre "pas cumulés" peut donc se débloquer
+  // dès la saisie, sans attendre "Valider ma journée".
+  api('enregistrerValeur', { nomFeuille: 'Bilan', ligne: _journeeData.ligne, colonne: 17, valeur: v })
+    .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
+    .catch(() => {});
+}
+
+async function validerJourneeClient() {
+  if (!_journeeData) return;
+  const stepsEl = document.getElementById('jSteps');
+  if (stepsEl) sauverStepsJournee(stepsEl.value);
+  const btn = document.getElementById('btnValiderJournee');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
+  try {
+    const res = await api('validerJournee', { ligne: _journeeData.ligne, semaine: _journeeData.semaine });
+    _journeeData.valide = true;
+    const modal = document.getElementById('modalJournee');
+    if (modal) modal.remove();
+    _majCarteJournee();
+    setTimeout(() => rafraichirProgressionEtDeblocages(), 300);
+    const xpBase = (res && typeof res === 'object') ? (res.xp || 0) : (res || 0);
+    const bonusPas = (res && typeof res === 'object') ? (res.bonusPas || 0) : 0;
+    const xpTotal = xpBase + bonusPas;
+    if (xpTotal > 0) {
+      const flash = document.createElement('div');
+      flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:22px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);';
+      flash.innerHTML = '🎉 +' + xpTotal + ' XP'
+        + (bonusPas > 0 ? '<div style="font-size:12px;margin-top:4px;opacity:.85;">🦶 Objectif pas atteint !</div>' : '')
+        + '<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>';
+      document.body.appendChild(flash);
+      setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
+    alert('Erreur lors de la validation.');
+  }
+}
+
+function deconnexion() {
+  localStorage.removeItem('at_token');
+  localStorage.removeItem('at_client');
+  localStorage.removeItem('at_coach');
+  S.client = ''; S.token = ''; S.isCoach = false; S.data = {};
+  _loginStep = 'identifiant'; _loginClient = '';
+  _resetPrechargement();
+  setPage('login');
+}
+
+// ── Composants partagés ───────────────────────────────────────────────
+function renderHeader(title, sub, showBack) {
+  return `
+  <div class="header">
+    ${showBack ? `<button class="header-back" onclick="history.back()">‹</button>` : ''}
+    <div>
+      <div class="header-title">${title}</div>
+      ${sub ? `<div class="header-sub">${sub}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// Icône "paramètres" (menu hamburger) — remplace l'ancien ⚙️, réutilisée
+// partout où le bouton réglages apparaît (accueil, progression).
+const ICONE_PARAMETRES = `<svg width="18" height="14" viewBox="0 0 18 14" fill="none"><line x1="1" y1="1" x2="17" y2="1" stroke="#8892a4" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="7" x2="17" y2="7" stroke="#8892a4" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="13" x2="17" y2="13" stroke="#8892a4" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+// Mêmes icônes SVG que les tuiles de l'accueil (pas d'emoji) — la couleur
+// pleine + l'opacité réduite indiquent l'état actif/inactif de l'onglet.
+const NAV_ICONS = {
+  home: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><path d="M6 20 L22 7 L38 20" stroke="#4f6ef7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 17 V36 Q10 38 12 38 H32 Q34 38 34 36 V17" fill="#4f6ef7" fill-opacity="0.12" stroke="#4f6ef7" stroke-width="2"/><rect x="18" y="25" width="8" height="13" rx="1.5" fill="#4f6ef7" opacity="0.7"/></svg>`,
+  training: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><rect x="2" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="35" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="8" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="31" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="13" y="20" width="18" height="4" rx="2" fill="#4f8ef7"/><circle cx="22" cy="9" r="3.5" fill="#6fa8ff" opacity="0.8"/><path d="M17 32 L19 40 L22 35 L25 40 L27 32" stroke="#6fa8ff" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
+  bilan: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><rect x="8" y="5" width="26" height="34" rx="3" fill="#f59e0b" opacity="0.1"/><rect x="8" y="5" width="26" height="34" rx="3" stroke="#f59e0b" stroke-width="1.5"/><rect x="16" y="1" width="10" height="7" rx="2" fill="#f59e0b"/><line x1="14" y1="16" x2="30" y2="16" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="22" x2="30" y2="22" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="28" x2="24" y2="28" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><polyline points="15,34 19,38 29,28" stroke="#3ecf8e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  diete: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><path d="M8 28 Q8 16 22 16 Q36 16 36 28 L34 32 H10 Z" fill="#3ecf8e" opacity="0.15"/><path d="M10 28 Q10 18 22 18 Q34 18 34 28" stroke="#3ecf8e" stroke-width="1.5" fill="none"/><rect x="8" y="28" width="28" height="4" rx="2" fill="#3ecf8e"/><path d="M18 16 Q18 8 22 6 Q26 8 26 16" stroke="#3ecf8e" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="22" cy="6" r="2.5" fill="#3ecf8e"/><line x1="14" y1="22" x2="30" y2="22" stroke="#3ecf8e" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/></svg>`,
+  mensurations: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><rect x="4" y="36" width="7" height="4" rx="1" fill="#a78bfa" opacity="0.3"/><rect x="13" y="28" width="7" height="12" rx="1" fill="#a78bfa" opacity="0.5"/><rect x="22" y="20" width="7" height="20" rx="1" fill="#a78bfa" opacity="0.7"/><rect x="31" y="12" width="7" height="28" rx="1" fill="#a78bfa"/><polyline points="7.5,34 16.5,26 25.5,18 34.5,10" stroke="#c4b5fd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="34" r="2.5" fill="#c4b5fd"/><circle cx="34.5" cy="10" r="2.5" fill="#c4b5fd"/></svg>`,
+  recettes: `<svg width="22" height="22" viewBox="0 0 44 44" fill="none"><path d="M10 12 Q10 8 22 8 Q34 8 34 12 L34 36 Q34 38 22 38 Q10 38 10 36 Z" fill="#f97316" fill-opacity="0.12" stroke="#f97316" stroke-width="1.5"/><line x1="16" y1="17" x2="28" y2="17" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="22" x2="28" y2="22" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="27" x2="24" y2="27" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><circle cx="30" cy="10" r="4" fill="#f97316"/></svg>`,
+};
+
+function renderNavBar(active) {
+  const items = [
+    { id:'home',         label:'Accueil'   },
+    { id:'training',     label:'Programme' },
+    { id:'bilan',        label:'Bilan'     },
+    { id:'diete',        label:'Diète'     },
+    { id:'mensurations', label:'Mensu.'    },
+    { id:'recettes',     label:'Recettes'  },
+  ];
+  return `<nav class="navbar">${items.map(it => `
+    <button class="nav-item${it.id===active?' active':''}" onclick="goTo('${it.id}')">
+      <span class="nav-icon" style="opacity:${it.id===active?'1':'0.55'};">${NAV_ICONS[it.id]}</span>
+      <span class="nav-label">${it.label}</span>
+    </button>`).join('')}
+  </nav>`;
+}
+
+function bindNav() {}
+
+function goTo(page) {
+  if (page === 'home')        loadHome();
+  else if (page === 'bilan')    loadBilan();
+  else if (page === 'training') loadTraining();
+  else if (page === 'diete')         loadDiete();
+  else if (page === 'mensurations')  loadMensurations();
+  else if (page === 'recettes')      loadRecettes();
+  else if (page === 'classement')   loadClassement();
+  else if (page === 'progression')  loadProgression();
+  else if (page === 'collection')   loadCollection();
+  else setPage(page);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+if (S.token && S.client) {
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _viewAsParam = _urlParams.get('viewAs');
+  const _forceMobile = _urlParams.get('mobile');
+  if (_viewAsParam && S.isCoach) {
+    history.replaceState(null, '', window.location.pathname);
+    enterVueClient(_viewAsParam);
+  } else if (S.isCoach && !_forceMobile && window.innerWidth >= 900) {
+    // Coach sur grand écran → la console desktop est plus adaptée que l'appli mobile.
+    // ?mobile=1 (utilisé par "Retour à l'app" depuis console.html) contourne cette redirection.
+    window.location.replace('console.html');
+  } else {
+    loadHome();
+  }
+} else {
+  setPage('login');
+}
+</script>
+</body>
+</html>

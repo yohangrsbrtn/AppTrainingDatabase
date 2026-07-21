@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppTraining — Console Coach</title>
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --surface: #151514;
+    --surface-2: #1c1c1a;
+    --surface-3: #262524;
+    --hairline: rgba(255,255,255,0.055);
+    --text: #f5f2ec;
+    --text-muted: #9d968a;
+    --text-faint: #656055;
+    --accent: #f2ba3e;
+    --accent-soft: #f2ba3e17;
+    --accent-2: #f5a83c;
+    --accent-2-soft: #f5a83c14;
+    --success: #3ecf8e;
+    --success-soft: #3ecf8e17;
+    --warning: #e08a3c;
+    --warning-soft: #e08a3c17;
+    --critical: #e2615c;
+    --critical-soft: #e2615c17;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-lg: 0 20px 44px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Display", system-ui, sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body);
+    font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+  ::selection { background: var(--accent-soft); }
+  button { font-family: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .shell { display: grid; grid-template-columns: 232px 1fr; grid-template-rows: 58px 1fr; height: 100vh; background: var(--bg); }
+
+  .gate { height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; text-align: center; padding: 20px; }
+  .gate .mark { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .gate h1 { font-family: var(--font-display); font-size: 18px; margin: 0; }
+  .gate p { color: var(--text-muted); font-size: 13px; margin: 0; max-width: 320px; }
+  .gate a.btn { text-decoration: none; }
+  .spin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--surface-3); border-top-color: var(--accent); animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Topbar ── */
+  .topbar {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    border-bottom: 1px solid var(--hairline); background: var(--bg);
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-display); font-weight: 700; font-size: 13px; letter-spacing: 0.02em; width: 212px; flex-shrink: 0; }
+  .brand .mark { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); flex-shrink: 0; }
+  .brand .sub { color: var(--text-faint); font-weight: 500; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; margin-left: 2px; }
+
+  .search { position: relative; flex: 1; max-width: 420px; }
+  .search input {
+    width: 100%; background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-sm);
+    padding: 8px 12px 8px 32px; color: var(--text); font-size: 12.5px; font-family: inherit;
+  }
+  .search input:focus { border-color: var(--hairline); }
+  .search input::placeholder { color: var(--text-faint); }
+  .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-faint); }
+
+  .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: var(--surface);
+    color: var(--text); font-size: 12px; font-weight: 600; padding: 8px 13px; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); color: #1a1408; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .icon-btn {
+    position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+    border: none; background: var(--surface); border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+  .badge-dot { position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--critical); color: #fff; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); }
+
+  .avatar {
+    width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; cursor: pointer; color: var(--text);
+  }
+
+  /* ── Dropdowns ── */
+  .dropdown { position: relative; }
+  .menu {
+    position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px; background: var(--surface-2);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); padding: 6px;
+    display: none; z-index: 60;
+  }
+  .menu.open { display: block; }
+  .menu-item {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 9px; border-radius: 7px;
+    border: none; background: none; color: var(--text); font-size: 12.5px; cursor: pointer;
+  }
+  .menu-item:hover { background: var(--surface-3); }
+  .menu-item.danger { color: var(--critical); }
+  .menu-item svg { color: var(--text-faint); flex-shrink: 0; }
+  .menu-item.danger svg { color: var(--critical); }
+  .menu-sep { height: 1px; background: var(--hairline); margin: 5px 4px; }
+  .menu-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); padding: 6px 9px 3px; font-weight: 600; }
+
+  /* ── Sidebar ── */
+  .sidebar { border-right: 1px solid var(--hairline); background: var(--bg); display: flex; flex-direction: column; padding: 16px 12px; overflow-y: auto; }
+  .nav-group { margin-bottom: 4px; }
+  .nav-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); font-weight: 700; padding: 14px 10px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: none; text-align: left;
+    padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .nav-item svg { flex-shrink: 0; color: var(--text-faint); }
+  .nav-item:hover { background: var(--surface); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+  .nav-item.active svg { color: var(--accent); }
+  .nav-count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; background: var(--surface-2); color: var(--text-muted); padding: 1px 6px; border-radius: 999px; }
+  .sidebar-footer { margin-top: auto; padding: 12px 10px 4px; border-top: 1px solid var(--hairline); display: flex; align-items: center; gap: 9px; }
+  .sidebar-footer .name { font-size: 12px; font-weight: 700; }
+  .sidebar-footer .role { font-size: 10.5px; color: var(--text-faint); }
+
+  /* ── Main ── */
+  .main { overflow-y: auto; padding: 24px 28px 40px; }
+  .page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  .page-head .eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); font-weight: 700; margin-bottom: 4px; }
+  .page-head h1 { font-family: var(--font-display); font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+  .page-head .meta { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* ── Dashboard grid ── */
+  .dash-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: min-content; gap: 14px; }
+  .card { background: var(--surface); border-radius: var(--radius); display: flex; flex-direction: column; box-shadow: var(--shadow-sm); }
+  .card-head { display: flex; align-items: center; gap: 8px; padding: 15px 16px 12px; }
+  .card-head svg { color: var(--accent); flex-shrink: 0; }
+  .card-head .t { font-weight: 700; font-size: 12.5px; margin-right: auto; }
+  .card-head .link { font-size: 11.5px; color: var(--text-faint); cursor: pointer; font-weight: 600; }
+  .card-head .link:hover { color: var(--accent); }
+  .card-list { padding: 2px 8px 10px; overflow-y: auto; }
+  .card-list-row { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-radius: 10px; cursor: pointer; }
+  .card-list-row:hover { background: var(--surface-2); }
+  .card-list-row .t { font-size: 12.5px; font-weight: 600; }
+  .card-list-row .s { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+  .card-list-row .time { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+  .card-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 12px; flex: 1; }
+  .card-empty svg { color: var(--success); }
+
+  .chart-card .chart-top { display: flex; align-items: baseline; justify-content: space-between; padding: 0 16px; }
+  .chart-card .big-value { font-family: var(--font-mono); font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .chart-card .period { font-size: 11.5px; color: var(--text-faint); border-radius: 999px; padding: 4px 10px; background: var(--surface-2); }
+  .chart-card svg.bigchart { width: 100%; height: 108px; display: block; padding: 10px 8px 6px; }
+
+  .timeline-card .card-list { padding: 4px 16px 14px; }
+  .tl-row { display: flex; gap: 10px; padding: 9px 0; cursor: default; border-radius: 0; }
+  .tl-row.clickable { cursor: pointer; }
+  .tl-row.clickable:hover { background: var(--surface-2); }
+  .tl-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; background: var(--accent); }
+  .tl-row .t { font-size: 12.5px; }
+  .tl-row .t b { font-weight: 700; }
+  .tl-row .d { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); margin-top: 1px; }
+
+  .table-card { background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .table-toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 16px; }
+  .table-toolbar .title { font-weight: 700; font-size: 13px; margin-right: auto; }
+  .chip-filter { display: flex; gap: 6px; }
+  .chip-filter button {
+    border: none; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; font-weight: 600;
+    padding: 5px 11px; border-radius: 999px; cursor: pointer;
+  }
+  .chip-filter button.active { background: var(--accent); color: #1a1408; }
+
+  .table-scroll { overflow-x: auto; }
+  table.clients { width: 100%; border-collapse: collapse; min-width: 780px; }
+  table.clients thead th {
+    position: sticky; top: 0; background: var(--surface); text-align: left; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-faint); font-weight: 700; padding: 8px 16px 12px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  table.clients thead th:hover { color: var(--text); }
+  table.clients thead th .sort-arrow { margin-left: 3px; opacity: 0.5; font-size: 9px; }
+  table.clients thead th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+  table.clients tbody tr { cursor: pointer; }
+  table.clients tbody tr:hover td { background: var(--surface-2); }
+  table.clients tbody tr.selected td { background: var(--accent-soft); }
+  table.clients td { padding: 11px 16px; font-size: 12.5px; vertical-align: middle; border-top: 1px solid var(--hairline); }
+  table.clients tbody tr:first-child td { border-top: none; }
+  .cell-name { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+  .mini-avatar { width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--surface-3); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--text-muted); flex-shrink: 0; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+  .level-pill { display: inline-flex; align-items: center; gap: 3px; background: var(--accent-2-soft); color: var(--accent-2); font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; }
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .chip.ok { background: var(--success-soft); color: var(--success); }
+  .chip.ok .dot { background: var(--success); }
+  .chip.late { background: var(--warning-soft); color: var(--warning); }
+  .chip.late .dot { background: var(--warning); }
+  .chip.off { background: var(--surface-3); color: var(--text-faint); }
+  .chip.off .dot { background: var(--text-faint); }
+
+  .row-actions { display: flex; justify-content: flex-end; }
+  .row-actions .icon-btn { width: 28px; height: 28px; }
+
+  .empty-panel { background: var(--surface); border-radius: var(--radius); padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 12.5px; }
+  .empty-panel strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 6px; font-family: var(--font-display); }
+
+  /* ── Detail slide-over ── */
+  .overlay { position: fixed; inset: 58px 0 0 0; background: rgba(0,0,0,0.5); z-index: 40; opacity: 0; pointer-events: none; transition: opacity 0.16s ease; }
+  .overlay.open { opacity: 1; pointer-events: auto; }
+  .panel {
+    position: fixed; top: 58px; right: 0; bottom: 0; width: 400px; background: var(--surface);
+    box-shadow: var(--shadow-lg); z-index: 50; transform: translateX(100%); transition: transform 0.18s ease; display: flex; flex-direction: column;
+    border-radius: 20px 0 0 0;
+  }
+  .panel.open { transform: translateX(0); }
+  .panel-head { padding: 20px 20px 0; }
+  .panel-head-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .panel-avatar { width: 46px; height: 46px; border-radius: var(--radius-sm); background: var(--surface-3); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+  .panel-close { border: none; background: var(--surface-2); width: 28px; height: 28px; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-muted); }
+  .panel-name { font-family: var(--font-display); font-size: 17px; font-weight: 700; margin: 10px 0 2px; }
+  .panel-sub { font-size: 12px; color: var(--text-muted); }
+  .panel-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+  .panel-stat { background: var(--surface-2); border-radius: var(--radius-sm); padding: 9px 10px; }
+  .panel-stat .l { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); font-weight: 700; }
+  .panel-stat .v { font-family: var(--font-mono); font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .panel-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--hairline); padding: 0 20px; }
+  .panel-tab { border: none; background: none; padding: 9px 4px; margin-right: 16px; font-size: 12px; font-weight: 600; color: var(--text-faint); cursor: pointer; border-bottom: 2px solid transparent; }
+  .panel-tab:hover { color: var(--text); }
+  .panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .panel-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+  .note-item { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+  .note-item .txt { font-size: 12.5px; white-space: pre-wrap; }
+  .note-item .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .note-item .date { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+  .note-item .del { border: none; background: none; color: var(--text-faint); cursor: pointer; font-size: 11px; }
+  .note-item .del:hover { color: var(--critical); }
+  .note-form textarea { width: 100%; background: var(--surface-2); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); font-size: 12.5px; font-family: inherit; resize: vertical; min-height: 64px; }
+  .note-form textarea:focus { border-color: var(--hairline); }
+  .panel-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: 12.5px; }
+  .panel-row:last-child { border-bottom: none; }
+  .panel-row .l { color: var(--text-muted); }
+  .panel-row .v { font-weight: 600; }
+  .panel-row .v.mono { font-family: var(--font-mono); }
+  .panel-footer { padding: 14px 20px; border-top: 1px solid var(--hairline); display: flex; gap: 8px; }
+  .panel-footer .btn { flex: 1; justify-content: center; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate" style="display:none;">
+  <div class="mark"></div>
+  <h1>Connexion requise</h1>
+  <p>Connecte-toi d'abord comme coach dans l'application AppTraining, puis reviens sur cette page.</p>
+  <a class="btn primary" href="index.html">Ouvrir l'application</a>
+</div>
+
+<div id="loading" class="gate">
+  <div class="spin"></div>
+</div>
+
+<div class="shell" id="shell" style="display:none;">
+  <div class="topbar">
+    <div class="brand"><span class="mark"></span>AppTraining<span class="sub">Console</span></div>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Rechercher un client…" oninput="onSearch(this.value)" />
+    </div>
+    <div class="topbar-actions">
+      <div class="dropdown">
+        <button class="icon-btn" onclick="toggleMenu(event,'notif')" aria-label="Notifications">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+          <span class="badge-dot" id="notifCount" style="display:none;"></span>
+        </button>
+        <div class="menu" id="menu-notif" style="min-width:280px;"></div>
+      </div>
+      <div class="dropdown">
+        <div class="avatar" onclick="toggleMenu(event,'account')">YG</div>
+        <div class="menu" id="menu-account">
+          <div class="menu-label">Yohan · Coach</div>
+          <button class="menu-item" onclick="window.location.href='index.html?mobile=1'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Retour à l'app</button>
+          <div class="menu-sep"></div>
+          <button class="menu-item danger" onclick="logoutConsole()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>Déconnexion</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main" id="main"></div>
+</div>
+
+<div class="overlay" id="overlay" onclick="closePanel()"></div>
+<div class="panel" id="panel"></div>
+
+<script src="api.js"></script>
+<script>
+// ── Garde d'authentification ────────────────────────────────────────────
+if (localStorage.getItem('at_coach') !== '1' || !localStorage.getItem('at_token')) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('gate').style.display = 'flex';
+  throw new Error('non_authentifie');
+}
+
+function logoutConsole() {
+  localStorage.removeItem('at_client');
+  localStorage.removeItem('at_token');
+  localStorage.removeItem('at_coach');
+  window.location.href = 'index.html';
+}
+
+// ── Icônes ─────────────────────────────────────────────────────────────
+function iGrid(){return svgIcon('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>');}
+function iUsers(){return svgIcon('<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16.5 4.3a3.2 3.2 0 010 6.2"/><path d="M15.5 14.6c2.9.5 5 2.2 5 5.4"/>');}
+function iClipboard(){return svgIcon('<rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h6"/>');}
+function iRuler(){return svgIcon('<path d="M4 15l5-5 10 10-5 5z"/><path d="M9.5 10.5l1.6 1.6M12.7 7.3l1.6 1.6M15.9 4.1l1.6 1.6"/>');}
+function iTrophy(){return svgIcon('<path d="M8 4h8v5a4 4 0 01-8 0z"/><path d="M8 5H4v2a4 4 0 004 4M16 5h4v2a4 4 0 01-4 4"/><path d="M12 13v4M9 21h6M9.5 17h5l.5 4h-6z"/>');}
+function iDumbbell(){return svgIcon('<path d="M4 9v6M2 10v4M20 9v6M22 10v4M7 12h10"/><rect x="4.5" y="7" width="3" height="10" rx="1"/><rect x="16.5" y="7" width="3" height="10" rx="1"/>');}
+function iApple(){return svgIcon('<path d="M12 8c-3.5-3-8-1-8 4.5C4 17 8 21 11 21c.8 0 1.2-.3 2-.3s1.2.3 2 .3c2.6 0 6.5-3.5 6.5-8C21.5 8.5 18 6 15 8"/><path d="M12 8V4c0-1 1-2 3-2"/>');}
+function iDatabase(){return svgIcon('<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>');}
+function iFlask(){return svgIcon('<path d="M9 2h6M10 2v6.5L4.5 19a2 2 0 001.8 3h11.4a2 2 0 001.8-3L14 8.5V2"/><path d="M7.5 15h9"/>');}
+function iCog(){return svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9c.14.36.44.63 1.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z"/>');}
+function iCheckCircle(){return svgIcon('<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3L16 10"/>');}
+function iSend(){return svgIcon('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>');}
+function iLock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>');}
+function iUnlock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 017.6-1.8"/>');}
+function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
+
+function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+function initials(nom){ return (nom||'?').split(" ").map(w=>w[0]).filter(Boolean).join("").slice(0,2).toUpperCase(); }
+
+// Même mapping que renderNotificationsCoach() (coach.js) — à garder synchro si un type est ajouté là-bas.
+function libelleLog(l){
+  if (l.type === 'bilan') return { icon:'📋', txt:'Bilan clôturé', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
+  if (l.type === 'journee') return { icon:'✅', txt:'Journée validée', sub: l.semaine || '' };
+  if (l.type === 'bilanEnvoye') return { icon:'📤', txt:'Bilan envoyé au coach', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
+  if (l.type === 'bonus_ponctualite') return { icon:'🎯', txt:'Bonus de ponctualité du bilan', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
+  if (l.type === 'bonus_streak') return { icon:'🔥', txt:'Bonus série de bilans', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
+  if (l.type === 'bonus_pas') return { icon:'🦶', txt:'Objectif pas atteint', sub: l.semaine || '' };
+  const progParts = (l.programme || '').split('|');
+  return { icon:'✅', txt: (l.semaine ? 'S' + l.semaine : '') + (progParts[1] ? ' · ' + progParts[1] : ' · Séance validée'), sub: progParts[0] || '' };
+}
+
+function bigChart(data, color){
+  const w=560,h=100,max=Math.max(1,...data),min=Math.min(...data,0);
+  const pts = data.map((v,i)=>[ (i/(data.length-1||1))*w, h - ((v-min)/((max-min)||1))*(h-10) - 4 ]);
+  const line = pts.map((p,i)=> (i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area = line + ` L${w},${h} L0,${h} Z`;
+  const last = pts[pts.length-1];
+  const gridLines = [0.25,0.5,0.75].map(f=>`<line x1="0" y1="${h*f}" x2="${w}" y2="${h*f}" stroke="var(--hairline)" stroke-width="1"/>`).join('');
+  return `<svg class="bigchart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${gridLines}
+    <path d="${area}" fill="${color}" opacity="0.12"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3.2" fill="${color}"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="6" fill="${color}" opacity="0.18"/>
+  </svg>`;
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────
+const NAV = [
+  { group:"Principal", items:[
+    { id:"dashboard", label:"Accueil", icon:iGrid() },
+    { id:"clients", label:"Clients", icon:iUsers() },
+  ]},
+  { group:"Suivi", items:[
+    { id:"bilans", label:"Bilans", icon:iClipboard() },
+    { id:"mensurations", label:"Mensurations", icon:iRuler() },
+    { id:"classement", label:"Classement", icon:iTrophy() },
+  ]},
+  { group:"Contenu", items:[
+    { id:"programmes", label:"Programmes", icon:iDumbbell() },
+    { id:"dietes", label:"Diètes", icon:iApple() },
+    { id:"base", label:"Base alimentaire", icon:iDatabase() },
+  ]},
+  { group:"Système", items:[
+    { id:"protocole", label:"Protocole", icon:iFlask() },
+    { id:"parametres", label:"Paramètres", icon:iCog() },
+  ]},
+];
+
+let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null };
+let data = { clients:[], bilansCoach:[], logs:[], aValider:[] };
+
+// ── Notes de coaching (Supabase) ──────────────────────────────────────
+const SUPABASE_URL = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmYWNqYndpY3p3a2NqcHduZXlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjgzNTAsImV4cCI6MjEwMDIwNDM1MH0.mrjPbOuQROMihzxZWrUNbncQIos0jK2VexpQDoRZXzY';
+function supaHeaders(extra){
+  return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
+}
+async function chargerNotes(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/notes_coach?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function ajouterNote(clientId, contenu){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/notes_coach`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ client_id: clientId, contenu })
+  });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function supprimerNoteApi(id){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/notes_coach?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+function fmtDateNote(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+}
+
+function renderSidebar(){
+  const baseCount = data.aValider.length;
+  const bilansCount = data.bilansCoach.filter(b=>!b.coachTraite).length;
+  document.getElementById('sidebar').innerHTML = NAV.map(g => `
+    <div class="nav-group">
+      <div class="nav-label">${g.group}</div>
+      ${g.items.map(it => {
+        let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
+        return `
+        <button class="nav-item ${state.nav===it.id?'active':''}" onclick="setNav('${it.id}')">
+          ${it.icon}<span>${it.label}</span>
+          ${count ? `<span class="nav-count">${count}</span>` : ''}
+        </button>`;
+      }).join('')}
+    </div>
+  `).join('') + `
+    <div class="sidebar-footer">
+      <div class="avatar">YG</div>
+      <div><div class="name">Yohan</div><div class="role">Coach</div></div>
+    </div>`;
+}
+
+function setNav(id){ state.nav = id; renderSidebar(); renderMain(); }
+
+function onSearch(v){ state.search = v; if (state.nav==='clients') renderTable(); }
+function setStatusFilter(f){ state.statusFilter = f; renderMain(); }
+function setSort(key){
+  if (state.sortKey === key) state.sortDir *= -1; else { state.sortKey = key; state.sortDir = 1; }
+  renderTable();
+}
+
+function filteredSortedClients(){
+  let list = data.clients.filter(c => (c.nom||'').toLowerCase().includes(state.search.toLowerCase()));
+  if (state.statusFilter === 'late') list = list.filter(c => c.enRetard);
+  if (state.statusFilter === 'locked') list = list.filter(c => c.verrouile);
+  list = list.slice().sort((a,b) => {
+    let av=a[state.sortKey], bv=b[state.sortKey];
+    if (typeof av === 'string') return (av||'').localeCompare(bv||'','fr') * state.sortDir;
+    return ((av||0)-(bv||0)) * state.sortDir;
+  });
+  return list;
+}
+
+// ── Chargement des données réelles ────────────────────────────────────
+async function chargerDonnees(){
+  const [clientsRaw, bilansCoach, logsRes, aValider] = await Promise.all([
+    api('listerClientsAvecNiveaux').catch(()=>[]),
+    api('listerBilansCoach').catch(()=>[]),
+    api('chargerTousLesLogs').catch(()=>({logs:[]})),
+    api('listerAlimentsCommunauteAValider').catch(()=>[]),
+  ]);
+  const clients = (typeof clientsRaw === 'string' ? JSON.parse(clientsRaw) : clientsRaw).filter(c => c.id !== 'yohan');
+  const retards = await Promise.all(
+    clients.map(c => apiAs('verifierRetardBilan', c.id).catch(()=>({enRetard:false})))
+  );
+  clients.forEach((c,i) => { c.enRetard = !!(retards[i] && retards[i].enRetard); });
+
+  data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
+}
+
+async function rafraichir(){
+  try {
+    await chargerDonnees();
+    renderSidebar();
+    renderMain();
+  } catch(e) {
+    document.getElementById('main').innerHTML = `<div class="empty-panel"><strong>Erreur de chargement</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="rafraichir()" style="margin-top:10px;">Réessayer</button></div>`;
+  }
+}
+
+// ── Rendu principal ────────────────────────────────────────────────────
+function renderMain(){
+  const el = document.getElementById('main');
+  if (state.nav === 'dashboard') { renderDashboard(el); return; }
+  if (state.nav === 'clients') { renderClientsPage(el); return; }
+  if (state.nav === 'bilans') { renderBilansPage(el); return; }
+  if (state.nav === 'classement') { renderClassementPage(el); return; }
+  if (state.nav === 'base') { renderBasePage(el); return; }
+  if (state.nav === 'protocole') { renderProtocolePage(el); return; }
+  const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
+  el.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
+    <div class="empty-panel"><strong>Pas encore construit</strong>
+    "${label}" suivra la même grammaire visuelle qu'Accueil/Clients — cartes, tableau filtrable, panneau de détail latéral.</div>`;
+}
+
+// ── Page Bilans ───────────────────────────────────────────────────────
+let bilansFilter = 'attente'; // 'attente' | 'traites' | 'tous'
+function setBilansFilter(f){ bilansFilter = f; renderMain(); }
+function renderBilansPage(el){
+  let list = data.bilansCoach.slice();
+  if (bilansFilter === 'attente') list = list.filter(b=>!b.coachTraite);
+  if (bilansFilter === 'traites') list = list.filter(b=>b.coachTraite);
+  list.sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Bilans</h1></div>
+      <div class="meta">${list.length} bilan${list.length>1?'s':''}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-toolbar">
+        <div class="title">Bilans envoyés au coach</div>
+        <div class="chip-filter">
+          <button class="${bilansFilter==='attente'?'active':''}" onclick="setBilansFilter('attente')">À traiter</button>
+          <button class="${bilansFilter==='traites'?'active':''}" onclick="setBilansFilter('traites')">Traités</button>
+          <button class="${bilansFilter==='tous'?'active':''}" onclick="setBilansFilter('tous')">Tous</button>
+        </div>
+      </div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th>Statut</th><th></th></tr></thead>
+        <tbody>
+          ${list.map(b => `
+            <tr>
+              <td><div class="cell-name"><div class="mini-avatar">${initials(b.nom)}</div>${esc(b.nom)}</div></td>
+              <td>${esc(b.semaine||'')}</td>
+              <td class="mono" style="color:var(--text-faint);">${esc(b.ts||'')}</td>
+              <td>${b.coachTraite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
+              <td class="row-actions">${b.coachTraite ? '' : `<button class="btn" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">Marquer traité</button>`}</td>
+            </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun bilan ici.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+// ── Page Classement ───────────────────────────────────────────────────
+function renderClassementPage(el){
+  const list = data.clients.slice().sort((a,b)=> (b.niveau||0)-(a.niveau||0));
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Classement</h1></div>
+      <div class="meta">${list.length} client${list.length>1?'s':''}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Rang</th><th>Client</th><th>Niveau</th><th>Titre actif</th></tr></thead>
+        <tbody>
+          ${list.map((c,i) => `
+            <tr onclick="openPanel('${c.id}')">
+              <td class="mono">${i+1}</td>
+              <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+              <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
+              <td>${esc(c.titreActif||'—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+// ── Page Base alimentaire ──────────────────────────────────────────────
+function renderBasePage(el){
+  const list = data.aValider;
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Base alimentaire</h1></div>
+      <div class="meta">${list.length} en attente</div>
+    </div>
+    ${list.length ? `<div class="dash-grid" style="grid-template-columns:repeat(2,1fr);">
+      ${list.map(a => `
+        <div class="card">
+          <div class="card-head">${iApple()}<span class="t">${esc(a.nom)}</span></div>
+          <div class="panel-body" style="padding-top:0;">
+            <div class="panel-row"><span class="l">Ajouté par</span><span class="v">${esc(a.ajoutePar)}</span></div>
+            <div class="panel-row"><span class="l">Date</span><span class="v mono" style="font-size:11px;">${esc(a.date)}</span></div>
+            <div class="macro-grid" style="margin:10px 0;">
+              <div><div class="n">${Math.round(a.kcal*100)}</div><div class="u">kcal</div></div>
+              <div><div class="n">${Math.round(a.prot*100)}g</div><div class="u">prot</div></div>
+              <div><div class="n">${Math.round(a.glu*100)}g</div><div class="u">gluc</div></div>
+              <div><div class="n">${Math.round(a.lip*100)}g</div><div class="u">lip</div></div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn primary" style="flex:1;justify-content:center;" onclick="validerAliment(${a.ligne})">Valider</button>
+              <button class="btn" style="flex:1;justify-content:center;color:var(--critical);" onclick="supprimerAliment(${a.ligne})">Supprimer</button>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>` : `<div class="empty-panel"><strong>Rien à valider</strong>Tous les ajouts communautaires sont à jour.</div>`}`;
+}
+async function validerAliment(ligne){
+  try { await api('validerAlimentCommunaute', { ligne }); data.aValider = data.aValider.filter(a=>a.ligne!==ligne); renderSidebar(); renderMain(); }
+  catch(e) { alert('Erreur : ' + e.message); }
+}
+async function supprimerAliment(ligne){
+  try {
+    await api('supprimerAlimentCommunaute', { ligne });
+    // deleteRow décale les lignes suivantes — refetch plutôt que filtrer localement (piège documenté CLAUDE.md).
+    data.aValider = await api('listerAlimentsCommunauteAValider');
+    renderSidebar(); renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// ── Page Protocole ─────────────────────────────────────────────────────
+function renderProtocolePage(el){
+  const actifs = data.clients.filter(c=>c.chimieActif);
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Protocole</h1></div>
+      <div class="meta">${actifs.length} actif${actifs.length>1?'s':''}</div>
+    </div>
+    <div class="table-card">
+      <div class="table-toolbar"><div class="title">Clients avec le protocole chimie activé</div></div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Niveau</th><th></th></tr></thead>
+        <tbody>
+          ${actifs.map(c => `
+            <tr>
+              <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+              <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
+              <td class="row-actions"><button class="btn" onclick="toggleChimie('${c.id}',true)">Désactiver</button></td>
+            </tr>`).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun protocole actif.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+    <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>`;
+}
+
+function renderDashboard(el){
+  const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
+  const bilansEnRetard = data.clients.filter(c=>c.enRetard);
+
+  // Activité 7 jours : nombre de logs par jour calendaire (à partir de tms)
+  const jourKey = tms => { const d = new Date(tms); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); };
+  const counts = {};
+  data.logs.forEach(l => { const k = jourKey(l.tms); counts[k] = (counts[k]||0) + 1; });
+  const days = [];
+  for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate()-i); days.push(counts[d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate()] || 0); }
+  const totalActivite = data.logs.length;
+
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Accueil</h1></div>
+      <div class="meta">${data.clients.length} client${data.clients.length>1?'s':''}</div>
+    </div>
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span></div>
+        ${bilansATraiter.length ? `<div class="card-list">
+          ${bilansATraiter.map(b => `
+            <div class="card-list-row" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">
+              <div class="mini-avatar">${initials(b.nom)}</div>
+              <div><div class="t">${esc(b.nom)}</div><div class="s">Semaine ${esc(b.semaine||'')} · clic pour marquer traité</div></div>
+              <div class="time">${esc(b.ts||'')}</div>
+            </div>`).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
+      </div>
+      <div class="card">
+        <div class="card-head">${iClipboard()}<span class="t">Bilans en retard</span></div>
+        ${bilansEnRetard.length ? `<div class="card-list">
+          ${bilansEnRetard.map(c => `
+            <div class="card-list-row" onclick="openPanel('${c.id}')">
+              <div class="mini-avatar">${initials(c.nom)}</div>
+              <div><div class="t">${esc(c.nom)}</div><div class="s">Niveau ${c.niveau||1}</div></div>
+              <span class="chip late"><span class="dot"></span>Retard</span>
+            </div>`).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Tous vos clients sont à jour.</div>`}
+      </div>
+      <div class="card timeline-card" style="grid-row: span 2;">
+        <div class="card-head">${iGrid()}<span class="t">Activité récente</span></div>
+        <div class="card-list">
+          ${data.logs.length ? data.logs.slice(0,25).map(l => { const lib = libelleLog(l); return `
+            <div class="tl-row"><div class="tl-dot"></div><div><div class="t">${lib.icon} <b>${esc(l.nom)}</b> — ${esc(lib.txt)}</div><div class="d">${esc(l.ts)}</div></div></div>`; }).join('')
+            : '<div class="card-empty">Aucune activité sur les 7 derniers jours.</div>'}
+        </div>
+      </div>
+      <div class="card chart-card" style="grid-column: span 2;">
+        <div class="card-head" style="padding-bottom:0;">${iTrophy()}<span class="t">Activité (7 jours)</span></div>
+        <div class="chart-top"><div class="big-value">${totalActivite} <span style="font-size:13px;color:var(--text-faint);font-family:var(--font-body);font-weight:600;">événements</span></div></div>
+        ${bigChart(days,'var(--accent)')}
+      </div>
+      <div class="card">
+        <div class="card-head">${iDatabase()}<span class="t">Aliments à valider</span></div>
+        ${data.aValider.length ? `<div class="card-list">
+          ${data.aValider.slice(0,4).map(a => `
+            <div class="card-list-row">
+              <div><div class="t">${esc(a.nom)}</div><div class="s">ajouté par ${esc(a.ajoutePar||'?')}</div></div>
+            </div>`).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Rien à valider.</div>`}
+      </div>
+    </div>`;
+}
+
+async function marquerTraite(client, ts){
+  try {
+    await apiAs('marquerBilanTraiteServeur', client, { ts });
+    await rafraichir();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function renderClientsPage(el){
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Clients</h1></div>
+      <div class="meta" id="clientCount"></div>
+    </div>
+    <div class="table-card">
+      <div class="table-toolbar">
+        <div class="title">Tous les clients</div>
+        <div class="chip-filter">
+          <button class="${state.statusFilter==='all'?'active':''}" onclick="setStatusFilter('all')">Tous</button>
+          <button class="${state.statusFilter==='late'?'active':''}" onclick="setStatusFilter('late')">En retard</button>
+          <button class="${state.statusFilter==='locked'?'active':''}" onclick="setStatusFilter('locked')">Verrouillés</button>
+        </div>
+      </div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr>
+          <th onclick="setSort('nom')" class="${state.sortKey==='nom'?'sorted':''}">Client<span class="sort-arrow">${arrow('nom')}</span></th>
+          <th>Statut bilan</th>
+          <th onclick="setSort('niveau')" class="${state.sortKey==='niveau'?'sorted':''}">Niveau<span class="sort-arrow">${arrow('niveau')}</span></th>
+          <th>Titre actif</th>
+          <th>Dernière connexion</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table></div>
+    </div>`;
+  renderTable();
+}
+
+function arrow(key){ return state.sortKey===key ? (state.sortDir===1?'▲':'▼') : '▲'; }
+
+function renderTable(){
+  const list = filteredSortedClients();
+  const countEl = document.getElementById('clientCount');
+  if (countEl) countEl.textContent = list.length + ' client' + (list.length>1?'s':'');
+  const body = document.getElementById('tbody');
+  if (!body) return;
+  body.innerHTML = list.map(c => `
+    <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
+      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+      <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${c.verrouile ? ` <span class="chip off">🔒</span>` : ''}</td>
+      <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
+      <td>${esc(c.titreActif||'—')}</td>
+      <td class="mono" style="color:var(--text-faint);">${esc(c.dernConnexion||'Jamais connecté')}</td>
+      <td class="row-actions">
+        <div class="dropdown">
+          <button class="icon-btn" onclick="event.stopPropagation();toggleMenu(event,'row${c.id}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></svg>
+          </button>
+          <div class="menu" id="menu-row${c.id}">
+            <button class="menu-item" onclick="event.stopPropagation();openPanel('${c.id}')">${iUsers()}Voir la fiche</button>
+            <button class="menu-item" onclick="event.stopPropagation();window.location.href='index.html?viewAs=${encodeURIComponent(c.id)}'">${iGrid()}Ouvrir en vue client</button>
+            <button class="menu-item" onclick="event.stopPropagation();toggleChimie('${c.id}',${!!c.chimieActif})">${iFlask()}${c.chimieActif?'Désactiver':'Activer'} le protocole</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!c.verrouile})">${c.verrouile?iUnlock():iLock()}${c.verrouile?'Déverrouiller':'Verrouiller'} l'accès</button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun client ne correspond.</td></tr>`;
+}
+
+async function toggleChimie(id, actif){
+  try { await apiAs('definirChimieActif', id, { actif: !actif }); await rafraichir(); if (state.nav==='clients') renderTable(); }
+  catch(e) { alert('Erreur : ' + e.message); }
+}
+async function toggleVerrou(id, verrouille){
+  try { await apiAs(verrouille ? 'deverrouilerAccesClient' : 'verrouilerAccesClient', id); await rafraichir(); if (state.nav==='clients') renderTable(); }
+  catch(e) { alert('Erreur : ' + e.message); }
+}
+
+let panelTab = 'apercu';
+let panelNotes = null; // null = pas encore chargées
+async function openPanel(id){
+  state.selected = id;
+  panelTab = 'apercu';
+  panelNotes = null;
+  if (state.nav==='clients') renderTable();
+  const c = data.clients.find(x=>x.id===id);
+  if (!c) return;
+  document.getElementById('panel').innerHTML = panelHTML(c);
+  document.getElementById('panel').classList.add('open');
+  document.getElementById('overlay').classList.add('open');
+}
+function closePanel(){
+  state.selected = null;
+  if (state.nav==='clients') renderTable();
+  document.getElementById('panel').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+
+async function setPanelTab(t){
+  panelTab = t;
+  document.querySelectorAll('.panel-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
+  const body = document.getElementById('panelBody');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (!c) return;
+  if (t === 'notes' && panelNotes === null) {
+    body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>`;
+    try { panelNotes = await chargerNotes(c.id); } catch(e) { panelNotes = null; body.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`; return; }
+  }
+  body.innerHTML = panelTabContent(c, t);
+}
+
+function panelTabContent(c, t){
+  if (t === 'notes') return renderNotesTab();
+  return `
+    <div class="panel-row"><span class="l">Statut bilan</span><span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span></div>
+    <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(c.dernConnexion||'Jamais connecté')}</span></div>
+    <div class="panel-row"><span class="l">Accès feuille</span><span class="v">${c.verrouile ? '🔒 Verrouillé' : 'Libre'}</span></div>
+    <div class="panel-row"><span class="l">Protocole chimie</span><span class="v">${c.chimieActif ? 'Actif' : 'Inactif'}</span></div>`;
+}
+
+function renderNotesTab(){
+  const notes = panelNotes || [];
+  return `
+    <div class="note-form" style="margin-bottom:14px;">
+      <textarea id="noteInput" placeholder="Écrire une note privée sur ce client…"></textarea>
+      <button class="btn primary" style="margin-top:8px;width:100%;justify-content:center;" onclick="soumettreNote()">Ajouter la note</button>
+    </div>
+    ${notes.length ? notes.map(n => `
+      <div class="note-item">
+        <div class="txt">${esc(n.contenu)}</div>
+        <div class="meta"><span class="date">${fmtDateNote(n.created_at)}</span><button class="del" onclick="retirerNote(${n.id})">Supprimer</button></div>
+      </div>`).join('') : `<div class="empty-panel" style="padding:24px 12px;">Aucune note pour ce client.</div>`}`;
+}
+
+async function soumettreNote(){
+  const el = document.getElementById('noteInput');
+  const contenu = (el.value || '').trim();
+  if (!contenu) return;
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (!c) return;
+  try {
+    await ajouterNote(c.id, contenu);
+    panelNotes = await chargerNotes(c.id);
+    document.getElementById('panelBody').innerHTML = renderNotesTab();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+async function retirerNote(id){
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (!c) return;
+  try {
+    await supprimerNoteApi(id);
+    panelNotes = await chargerNotes(c.id);
+    document.getElementById('panelBody').innerHTML = renderNotesTab();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function panelHTML(c){
+  return `
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <div class="panel-avatar">${initials(c.nom)}</div>
+        <button class="panel-close" onclick="closePanel()">✕</button>
+      </div>
+      <div class="panel-name">${esc(c.nom)}</div>
+      <div class="panel-sub">${esc(c.titreActif || 'Aucun titre actif')}</div>
+      <div class="panel-stats">
+        <div class="panel-stat"><div class="l">Niveau</div><div class="v">${c.niveau||1}</div></div>
+        <div class="panel-stat"><div class="l">Statut</div><div class="v" style="font-size:12px;">${c.enRetard?'En retard':'À jour'}</div></div>
+        <div class="panel-stat"><div class="l">Chimie</div><div class="v" style="font-size:12px;">${c.chimieActif?'Actif':'Inactif'}</div></div>
+      </div>
+    </div>
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="apercu" onclick="setPanelTab('apercu')">Aperçu</button>
+      <button class="panel-tab" data-tab="notes" onclick="setPanelTab('notes')">Notes</button>
+    </div>
+    <div class="panel-body" id="panelBody">${panelTabContent(c, 'apercu')}</div>
+    <div class="panel-footer">
+      <a class="btn primary" href="index.html?viewAs=${encodeURIComponent(c.id)}">Ouvrir en vue client</a>
+    </div>`;
+}
+
+// ── Dropdowns génériques ──────────────────────────────────────────────────
+function toggleMenu(ev, id){
+  ev.stopPropagation();
+  const target = document.getElementById('menu-'+id);
+  const wasOpen = target.classList.contains('open');
+  document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
+  if (!wasOpen) target.classList.add('open');
+}
+document.addEventListener('click', () => document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')));
+
+function renderNotifMenu(){
+  const bilans = data.bilansCoach.filter(b=>!b.coachTraite).slice(0,3);
+  const retards = data.clients.filter(c=>c.enRetard).slice(0,3);
+  const items = [
+    ...bilans.map(b => `<div class="menu-item" style="align-items:flex-start;flex-direction:column;gap:1px;"><b>${esc(b.nom)}</b><span style="color:var(--text-faint);font-size:11.5px;">bilan à traiter · semaine ${esc(b.semaine||'')}</span></div>`),
+    ...retards.map(c => `<div class="menu-item" style="align-items:flex-start;flex-direction:column;gap:1px;"><b>${esc(c.nom)}</b><span style="color:var(--text-faint);font-size:11.5px;">bilan en retard</span></div>`),
+  ];
+  const menu = document.getElementById('menu-notif');
+  menu.innerHTML = `<div class="menu-label">À traiter</div>` + (items.length ? items.join('') : `<div class="menu-item" style="color:var(--text-faint);">Rien à signaler.</div>`);
+  const count = bilans.length + retards.length;
+  const badge = document.getElementById('notifCount');
+  if (count) { badge.style.display='flex'; badge.textContent = count; } else { badge.style.display='none'; }
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────
+(async function boot(){
+  await rafraichir();
+  renderNotifMenu();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('shell').style.display = 'grid';
+})();
+</script>
+</body>
+</html>
