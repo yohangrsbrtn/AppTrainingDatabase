@@ -472,7 +472,20 @@ async function chargerDonnees(){
   const retards = await Promise.all(
     clients.map(c => apiAs('verifierRetardBilan', c.id).catch(()=>({enRetard:false})))
   );
-  clients.forEach((c,i) => { c.enRetard = !!(retards[i] && retards[i].enRetard); });
+  // verifierRetardBilan() répond "si j'envoyais MAINTENANT, serait-ce en retard ?" — utile au moment
+  // de l'envoi côté client (bilan.js), mais ça dit "en retard" pour tout le monde une fois la fenêtre
+  // de la semaine passée, MÊME si le client a déjà envoyé son bilan à temps. On corrige ici en
+  // vérifiant si un envoi (listerBilansCoach) existe déjà dans les ~6 derniers jours pour ce client.
+  const parseTsFr = s => { const m = (s||'').match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/); return m ? new Date(+m[3], +m[2]-1, +m[1], +m[4], +m[5]) : null; };
+  const dernierEnvoi = {};
+  bilansCoach.forEach(b => { const d = parseTsFr(b.ts); if (d && (!dernierEnvoi[b.client] || d > dernierEnvoi[b.client])) dernierEnvoi[b.client] = d; });
+  const maintenant = new Date();
+  clients.forEach((c,i) => {
+    const raw = !!(retards[i] && retards[i].enRetard);
+    const dernier = dernierEnvoi[c.id];
+    const soumisRecemment = dernier && (maintenant - dernier) < 6*24*60*60*1000;
+    c.enRetard = raw && !soumisRecemment;
+  });
 
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
 }
