@@ -243,6 +243,38 @@
   .note-item .del:hover { color: var(--critical); }
   .note-form textarea { width: 100%; background: var(--surface-2); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); font-size: 12.5px; font-family: inherit; resize: vertical; min-height: 64px; }
   .note-form textarea:focus { border-color: var(--hairline); }
+  .field-row { margin-bottom: 12px; }
+  .field-row label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); font-weight: 700; margin-bottom: 6px; }
+  .field-row input, .field-row select, .field-row textarea {
+    width: 100%; background: var(--surface-2); border: 1px solid transparent; border-radius: var(--radius-sm);
+    padding: 9px 11px; color: var(--text); font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+  .field-row input:focus, .field-row select:focus, .field-row textarea:focus { border-color: var(--hairline); }
+  .field-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-box { background: var(--surface); border-radius: var(--radius); padding: 22px; width: 100%; max-width: 460px; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
+  .modal-box h3 { margin: 0 0 16px; font-family: var(--font-display); font-size: 16px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 18px; }
+  .modal-actions .btn { flex: 1; justify-content: center; }
+  .day-block { background: var(--surface); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+  .day-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; font-weight: 700; font-size: 13px; }
+  .day-head .del { margin-left: auto; }
+  .exo-row { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--hairline); font-size: 12.5px; overflow-x: auto; }
+  .exo-row .nom { flex: 1 1 110px; min-width: 90px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .exo-row .stat { color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; white-space: nowrap; }
+  .exo-row .mini-btn { border: none; background: var(--surface-2); color: var(--text-muted); width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 11px; flex-shrink: 0; }
+  .exo-row .mini-btn:hover { color: var(--text); }
+  .exo-champ { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+  .exo-champ label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+  .exo-champ input { width: 52px; background: var(--surface-2); border: 1px solid transparent; border-radius: 6px; padding: 5px 7px; color: var(--text); font-size: 12px; font-family: inherit; box-sizing: border-box; }
+  .exo-champ input:focus { border-color: var(--hairline); }
+  .drag-handle { cursor: grab; color: var(--text-faint); font-size: 14px; padding: 0 2px; flex-shrink: 0; user-select: none; }
+  .drag-handle:active { cursor: grabbing; }
+  .exo-row.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+  .tpl-card { background: var(--surface); border-radius: var(--radius); padding: 16px; cursor: pointer; box-shadow: var(--shadow-sm); }
+  .tpl-card .nom { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .tpl-card .meta { font-size: 11.5px; color: var(--text-faint); }
+  .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
   .panel-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: 12.5px; }
   .panel-row:last-child { border-bottom: none; }
   .panel-row .l { color: var(--text-muted); }
@@ -331,6 +363,7 @@ function iCheckCircle(){return svgIcon('<circle cx="12" cy="12" r="9"/><path d="
 function iSend(){return svgIcon('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>');}
 function iLock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>');}
 function iUnlock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 017.6-1.8"/>');}
+function iTrash(){return svgIcon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13"/>');}
 function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
 
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -509,6 +542,7 @@ function renderMain(){
   if (state.nav === 'classement') { renderClassementPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
+  if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
@@ -643,6 +677,590 @@ function renderProtocolePage(el){
       </table></div>
     </div>
     <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>`;
+}
+
+// ── Programmes : bibliothèque d'exercices + templates (Supabase) ──────────
+// Portage depuis AppTrainingPWA/console.html (code identique, même Supabase) — cf. CLAUDE.md du bac à sable.
+const GROUPES_MUSCULAIRES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Dos (global)','Epaules (anterieur)','Epaules (latéral)','Epaules (posterieur)','Biceps','Triceps','Abdos','Lombaires','Quadriceps','Ischios','Fessiers','Adducteurs','Abducteurs','Mollets','Cardio'];
+let progTab = 'exercices'; // 'exercices' | 'templates'
+let exercicesData = null;  // null = pas encore chargé
+let templatesData = null;
+let exoGroupeFiltre = 'all';
+let exoRecherche = '';
+let tplCategorieFiltre = 'all';
+
+async function chargerExercices(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?order=nom.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function sauvegarderExercice(ex){
+  const method = ex.id ? 'PATCH' : 'POST';
+  const url = ex.id ? `${SUPABASE_URL}/rest/v1/exercices?id=eq.${ex.id}` : `${SUPABASE_URL}/rest/v1/exercices`;
+  const body = { nom: ex.nom, groupe_musculaire: ex.groupe_musculaire || null, groupe_secondaire: ex.groupe_secondaire || null, equipement: ex.equipement || null, video_url: ex.video_url || null, notes: ex.notes || null,
+    reps_metabolique: ex.reps_metabolique || null, repos_metabolique: ex.repos_metabolique || null,
+    reps_mecanique: ex.reps_mecanique || null, repos_mecanique: ex.repos_mecanique || null,
+    reps_force: ex.reps_force || null, repos_force: ex.repos_force || null };
+  const res = await fetch(url, { method, headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return (await res.json())[0];
+}
+async function supprimerExercice(id){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
+  if (!res.ok) {
+    if (res.status === 409) throw new Error("Cet exercice est utilisé dans un template — retire-le du template d'abord.");
+    throw new Error('supabase_' + res.status);
+  }
+}
+
+async function chargerTemplates(){
+  // Compte imbriqué léger (ids seulement) pour afficher séances/exercices sur les cartes sans requête séparée.
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_templates?order=nom.asc&select=*,programme_blocs(id,programme_seances(id,programme_seance_exercices(id)))`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function chargerTemplateArbo(templateId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_blocs?template_id=eq.${templateId}&order=ordre.asc&select=*,programme_seances(*,programme_seance_exercices(*))&programme_seances.order=ordre.asc&programme_seances.programme_seance_exercices.order=ordre.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function sauvegarderTemplateComplet(tpl){
+  const method = tpl.id ? 'PATCH' : 'POST';
+  const url = tpl.id ? `${SUPABASE_URL}/rest/v1/programme_templates?id=eq.${tpl.id}` : `${SUPABASE_URL}/rest/v1/programme_templates`;
+  const res = await fetch(url, { method, headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify({ nom: tpl.nom, categorie: tpl.categorie || null, description: tpl.description || null }) });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  const saved = (await res.json())[0];
+  const templateId = saved.id;
+  if (tpl.id) {
+    // Remplacement complet de l'arborescence (comme modifierMenu côté GAS) plutôt qu'un diff fin —
+    // cascade sur programme_seances puis programme_seance_exercices.
+    await fetch(`${SUPABASE_URL}/rest/v1/programme_blocs?template_id=eq.${templateId}`, { method: 'DELETE', headers: supaHeaders() });
+  }
+  const blocsPayload = tpl.blocs.map((b, bi) => ({ template_id: templateId, type: b.type || null, nombre_semaines: b.nombre_semaines || null, ordre: bi }));
+  const resBlocs = await fetch(`${SUPABASE_URL}/rest/v1/programme_blocs`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(blocsPayload) });
+  if (!resBlocs.ok) throw new Error('supabase_' + resBlocs.status);
+  const blocsSaved = await resBlocs.json();
+  // Lookup par 'ordre' (qu'on a nous-même assigné = bi) plutôt que par position du tableau retourné —
+  // l'ordre de retour d'un insert multi-lignes n'est pas garanti par Postgres.
+  const blocIdByOrdre = {};
+  blocsSaved.forEach(b => { blocIdByOrdre[b.ordre] = b.id; });
+
+  const seancesPayload = [];
+  tpl.blocs.forEach((b, bi) => {
+    b.seances.forEach((s, si) => {
+      seancesPayload.push({ bloc_id: blocIdByOrdre[bi], titre: s.titre || ('Séance ' + (si + 1)), ordre: si });
+    });
+  });
+  let seancesSaved = [];
+  if (seancesPayload.length) {
+    const resSeances = await fetch(`${SUPABASE_URL}/rest/v1/programme_seances`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(seancesPayload) });
+    if (!resSeances.ok) throw new Error('supabase_' + resSeances.status);
+    seancesSaved = await resSeances.json();
+  }
+  const seanceIdByBlocOrdre = {};
+  seancesSaved.forEach(s => { seanceIdByBlocOrdre[s.bloc_id + '|' + s.ordre] = s.id; });
+
+  const exercicesPayload = [];
+  tpl.blocs.forEach((b, bi) => {
+    const blocId = blocIdByOrdre[bi];
+    b.seances.forEach((s, si) => {
+      const seanceId = seanceIdByBlocOrdre[blocId + '|' + si];
+      s.exercices.forEach((ex, ei) => {
+        exercicesPayload.push({ seance_id: seanceId, exercice_id: ex.exercice_id, ordre: ei, series: parseInt(ex.series) || null, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '' });
+      });
+    });
+  });
+  if (exercicesPayload.length) {
+    const resExo = await fetch(`${SUPABASE_URL}/rest/v1/programme_seance_exercices`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(exercicesPayload) });
+    if (!resExo.ok) throw new Error('supabase_' + resExo.status);
+  }
+  return saved;
+}
+async function supprimerTemplate(id){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_templates?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
+async function renderProgrammesPage(el){
+  el.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Programmes</h1></div></div>
+    <div class="chip-filter" style="margin-bottom:16px;">
+      <button class="${progTab==='exercices'?'active':''}" onclick="progTab='exercices';renderProgrammesPage(document.getElementById('main'))">Exercices</button>
+      <button class="${progTab==='templates'?'active':''}" onclick="progTab='templates';renderProgrammesPage(document.getElementById('main'))">Templates</button>
+    </div>
+    <div id="progrSub"><div style="text-align:center;padding:30px;color:var(--text-faint);">Chargement…</div></div>`;
+  try {
+    if (progTab === 'exercices') {
+      if (exercicesData === null) exercicesData = await chargerExercices();
+      renderExercicesSub();
+    } else {
+      if (templatesData === null) templatesData = await chargerTemplates();
+      renderTemplatesSub();
+    }
+  } catch(e) {
+    document.getElementById('progrSub').innerHTML = `<div class="empty-panel"><strong>Erreur de chargement</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="renderProgrammesPage(document.getElementById('main'))" style="margin-top:10px;">Réessayer</button></div>`;
+  }
+}
+
+// ── Sous-onglet Exercices ──────────────────────────────────────────────
+function renderExercicesSub(){
+  const sub = document.getElementById('progrSub');
+  const list = (exercicesData || [])
+    .filter(e => exoGroupeFiltre === 'all' || e.groupe_musculaire === exoGroupeFiltre)
+    .filter(e => e.nom.toLowerCase().includes(exoRecherche.toLowerCase()));
+  sub.innerHTML = `
+    <div class="table-card">
+      <div class="table-toolbar">
+        <div class="title">${list.length} exercice${list.length>1?'s':''}</div>
+        <input type="text" placeholder="Rechercher…" value="${esc(exoRecherche)}" oninput="exoRecherche=this.value;renderExercicesSub()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12px;width:160px;">
+        <div class="chip-filter">
+          <button class="${exoGroupeFiltre==='all'?'active':''}" onclick="exoGroupeFiltre='all';renderExercicesSub()">Tous</button>
+          ${GROUPES_MUSCULAIRES.map(g => `<button class="${exoGroupeFiltre===g?'active':''}" onclick="exoGroupeFiltre='${g}';renderExercicesSub()">${g}</button>`).join('')}
+        </div>
+        <button class="btn primary" onclick="ouvrirFormExercice(null)">+ Nouvel exercice</button>
+      </div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Nom</th><th>Groupe</th><th>Équipement</th><th>Vidéo</th><th></th></tr></thead>
+        <tbody>
+          ${list.map(e => `
+            <tr onclick="ouvrirFormExercice(${e.id})">
+              <td style="font-weight:600;">${esc(e.nom)}</td>
+              <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
+              <td class="mono" style="color:var(--text-faint);">${esc(e.equipement||'—')}</td>
+              <td>${e.video_url ? `<a href="${esc(e.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);">▶ Voir</a>` : '—'}</td>
+              <td class="row-actions"><button class="icon-btn" onclick="event.stopPropagation();retirerExercice(${e.id})">${iTrash()}</button></td>
+            </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+function ouvrirFormExercice(id){
+  const ex = id ? exercicesData.find(e => e.id === id) : { nom:'', groupe_musculaire:'', groupe_secondaire:'', equipement:'', video_url:'', notes:'',
+    reps_metabolique:'', repos_metabolique:'', reps_mecanique:'', repos_mecanique:'', reps_force:'', repos_force:'' };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-exercice';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>${id ? 'Modifier' : 'Nouvel'} exercice</h3>
+      <div class="field-row"><label>Nom</label><input id="fExoNom" type="text" value="${esc(ex.nom)}" placeholder="ex: Développé couché"></div>
+      <div class="field-grid">
+        <div class="field-row"><label>Groupe musculaire</label>
+          <select id="fExoGroupe">
+            <option value="">—</option>
+            ${GROUPES_MUSCULAIRES.map(g => `<option value="${g}" ${ex.groupe_musculaire===g?'selected':''}>${g}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field-row"><label>Groupe secondaire</label>
+          <select id="fExoGroupeSec">
+            <option value="">—</option>
+            ${GROUPES_MUSCULAIRES.map(g => `<option value="${g}" ${ex.groupe_secondaire===g?'selected':''}>${g}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field-row"><label>Équipement</label><input id="fExoEquip" type="text" value="${esc(ex.equipement||'')}" placeholder="ex: Barre, haltères, machine…"></div>
+      <div class="field-row"><label>Lien vidéo (YouTube, Instagram…)</label><input id="fExoVideo" type="text" value="${esc(ex.video_url||'')}" placeholder="https://…"></div>
+      <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos par bloc</label>
+      <div class="field-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="field-row"><label>Métabolique — reps</label><input id="fExoRepsMeta" type="text" value="${esc(ex.reps_metabolique||'')}" placeholder="15-20"></div>
+        <div class="field-row"><label>Mécanique — reps</label><input id="fExoRepsMeca" type="text" value="${esc(ex.reps_mecanique||'')}" placeholder="12-15"></div>
+        <div class="field-row"><label>Force — reps</label><input id="fExoRepsForce" type="text" value="${esc(ex.reps_force||'')}" placeholder="10-12"></div>
+        <div class="field-row"><label>Métabolique — repos</label><input id="fExoReposMeta" type="text" value="${esc(ex.repos_metabolique||'')}" placeholder="1'"></div>
+        <div class="field-row"><label>Mécanique — repos</label><input id="fExoReposMeca" type="text" value="${esc(ex.repos_mecanique||'')}" placeholder="1'30"></div>
+        <div class="field-row"><label>Force — repos</label><input id="fExoReposForce" type="text" value="${esc(ex.repos_force||'')}" placeholder="2'"></div>
+      </div>
+      <div class="field-row"><label>Notes / consignes</label><textarea id="fExoNotes" rows="3">${esc(ex.notes||'')}</textarea></div>
+      <div id="fExoErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-exercice').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerFormExercice(${id||'null'})">Enregistrer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmerFormExercice(id){
+  const nom = document.getElementById('fExoNom').value.trim();
+  const errEl = document.getElementById('fExoErr');
+  if (!nom) { errEl.textContent = 'Le nom est obligatoire.'; errEl.style.display = 'block'; return; }
+  const payload = {
+    id: id || null,
+    nom,
+    groupe_musculaire: document.getElementById('fExoGroupe').value,
+    groupe_secondaire: document.getElementById('fExoGroupeSec').value,
+    equipement: document.getElementById('fExoEquip').value.trim(),
+    video_url: document.getElementById('fExoVideo').value.trim(),
+    notes: document.getElementById('fExoNotes').value.trim(),
+    reps_metabolique: document.getElementById('fExoRepsMeta').value.trim(),
+    repos_metabolique: document.getElementById('fExoReposMeta').value.trim(),
+    reps_mecanique: document.getElementById('fExoRepsMeca').value.trim(),
+    repos_mecanique: document.getElementById('fExoReposMeca').value.trim(),
+    reps_force: document.getElementById('fExoRepsForce').value.trim(),
+    repos_force: document.getElementById('fExoReposForce').value.trim(),
+  };
+  try {
+    const saved = await sauvegarderExercice(payload);
+    if (id) { const i = exercicesData.findIndex(e=>e.id===id); if (i>=0) exercicesData[i] = saved; }
+    else exercicesData.push(saved);
+    document.getElementById('modal-exercice').remove();
+    renderExercicesSub();
+  } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function retirerExercice(id){
+  if (!confirm('Supprimer cet exercice ?')) return;
+  try {
+    await supprimerExercice(id);
+    exercicesData = exercicesData.filter(e => e.id !== id);
+    renderExercicesSub();
+  } catch(e) { alert(e.message); }
+}
+
+// ── Sous-onglet Templates ──────────────────────────────────────────────
+function renderTemplatesSub(){
+  const sub = document.getElementById('progrSub');
+  const categories = [...new Set((templatesData||[]).map(t=>t.categorie).filter(Boolean))];
+  const list = (templatesData || []).filter(t => tplCategorieFiltre === 'all' || t.categorie === tplCategorieFiltre);
+  sub.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+      <div class="chip-filter">
+        <button class="${tplCategorieFiltre==='all'?'active':''}" onclick="tplCategorieFiltre='all';renderTemplatesSub()">Tous</button>
+        ${categories.map(c => `<button class="${tplCategorieFiltre===c?'active':''}" onclick="tplCategorieFiltre='${esc(c)}';renderTemplatesSub()">${esc(c)}</button>`).join('')}
+      </div>
+      <button class="btn primary" style="margin-left:auto;" onclick="ouvrirEditeurTemplate(null)">+ Nouveau template</button>
+    </div>
+    <div class="tpl-grid">
+      ${list.map(t => {
+        const blocs = t.programme_blocs || [];
+        const nbSeances = blocs.reduce((s,b)=>s+(b.programme_seances||[]).length,0);
+        const nbExercices = blocs.reduce((s,b)=>s+(b.programme_seances||[]).reduce((s2,se)=>s2+(se.programme_seance_exercices||[]).length,0),0);
+        return `
+        <div class="tpl-card" onclick="ouvrirEditeurTemplate(${t.id})">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+            <div class="nom">${esc(t.nom)}</div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button class="icon-btn" style="width:24px;height:24px;" title="Assigner à un client" onclick="event.stopPropagation();ouvrirAssignerTemplate(${t.id})">${iUsers()}</button>
+              <button class="icon-btn" style="width:24px;height:24px;" onclick="event.stopPropagation();supprimerTemplateAction(${t.id})">${iTrash()}</button>
+            </div>
+          </div>
+          ${t.categorie ? `<span class="chip off">${esc(t.categorie)}</span>` : ''}
+          <div class="meta" style="margin-top:8px;">${blocs.length>1 ? blocs.length+' blocs · ' : ''}${nbSeances} séance${nbSeances>1?'s':''} · ${nbExercices} exercice${nbExercices>1?'s':''}</div>
+        </div>`;}).join('') || `<div class="empty-panel">Aucun template. Crée le premier avec "+ Nouveau template".</div>`}
+    </div>`;
+}
+
+// { id, nom, categorie, description, blocs: [{ type, nombre_semaines, seances: [{ titre, exercices:[{exercice_id, nom, series, reps, repos, tempo}] }] }] }
+let tplEnEdition = null;
+let tplPickerCible = null; // { bi, si }
+const BLOCS_TYPES = [{value:'',label:'Générique'},{value:'metabolique',label:'Métabolique'},{value:'mecanique',label:'Mécanique'},{value:'force',label:'Force'}];
+
+function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ titre: 'Séance 1', exercices: [] }] }; }
+
+async function ouvrirEditeurTemplate(id){
+  if (exercicesData === null) { try { exercicesData = await chargerExercices(); } catch(e) { exercicesData = []; } }
+  if (id) {
+    const tpl = templatesData.find(t => t.id === id);
+    const blocsRaw = await chargerTemplateArbo(id);
+    tplEnEdition = {
+      id: tpl.id, nom: tpl.nom, categorie: tpl.categorie || '', description: tpl.description || '',
+      blocs: blocsRaw.map(b => ({
+        type: b.type || null,
+        nombre_semaines: b.nombre_semaines || null,
+        seances: (b.programme_seances || []).map(s => ({
+          titre: s.titre,
+          exercices: (s.programme_seance_exercices || []).map(l => {
+            const ex = exercicesData.find(e=>e.id===l.exercice_id);
+            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir };
+          })
+        }))
+      }))
+    };
+    if (!tplEnEdition.blocs.length) tplEnEdition.blocs = [blocVide()];
+    tplEnEdition.blocs.forEach(b => { if (!b.seances.length) b.seances.push({ titre: 'Séance 1', exercices: [] }); });
+  } else {
+    tplEnEdition = { id: null, nom: '', categorie: '', description: '', blocs: [blocVide()] };
+  }
+  renderEditeurTemplate();
+}
+
+function renderEditeurTemplate(){
+  const el = document.getElementById('main');
+  const t = tplEnEdition;
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>${t.id ? 'Modifier' : 'Nouveau'} template</h1></div>
+      <button class="btn" onclick="progTab='templates';renderProgrammesPage(document.getElementById('main'))">‹ Retour</button>
+    </div>
+    <div class="table-card" style="padding:18px;margin-bottom:16px;">
+      <div class="field-grid" style="grid-template-columns:2fr 1fr;">
+        <div class="field-row" style="margin-bottom:0;"><label>Nom</label><input id="fTplNom" type="text" value="${esc(t.nom)}" placeholder="ex: Prise de masse — Bloc 1" oninput="tplEnEdition.nom=this.value"></div>
+        <div class="field-row" style="margin-bottom:0;"><label>Catégorie</label><input id="fTplCat" type="text" value="${esc(t.categorie)}" placeholder="ex: Prise de masse" oninput="tplEnEdition.categorie=this.value"></div>
+      </div>
+      <div class="field-row" style="margin-top:12px;margin-bottom:0;"><label>Description</label><textarea id="fTplDesc" rows="2" oninput="tplEnEdition.description=this.value">${esc(t.description)}</textarea></div>
+    </div>
+    <div id="blocsContainer"></div>
+    <button class="btn" style="width:100%;margin-bottom:16px;" onclick="ajouterBlocTemplate()">+ Ajouter un bloc de périodisation</button>
+    <div id="tplErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" style="flex:1;justify-content:center;" onclick="progTab='templates';renderProgrammesPage(document.getElementById('main'))">Annuler</button>
+      <button class="btn primary" style="flex:1;justify-content:center;" onclick="confirmerSauvegardeTemplate()">Enregistrer le template</button>
+    </div>`;
+  renderBlocsTemplate();
+}
+
+function renderBlocsTemplate(){
+  const cont = document.getElementById('blocsContainer');
+  const t = tplEnEdition;
+  const simple = t.blocs.length === 1 && !t.blocs[0].type && !t.blocs[0].nombre_semaines;
+  cont.innerHTML = t.blocs.map((bloc, bi) => `
+    <div class="day-block" style="margin-bottom:18px;">
+      ${simple ? '' : `
+      <div class="day-head" style="flex-wrap:wrap;">
+        <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+          ${BLOCS_TYPES.map(o => `<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+        <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="tplEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        ${t.blocs.length>1 ? `<button class="icon-btn del" style="margin-left:auto;" onclick="retirerBlocTemplate(${bi})">${iTrash()}</button>` : ''}
+      </div>`}
+      ${bloc.seances.map((seance, si) => `
+        <div style="border-top:1px solid var(--hairline);">
+          <div class="day-head">
+            <input type="text" value="${esc(seance.titre)}" oninput="tplEnEdition.blocs[${bi}].seances[${si}].titre=this.value" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;">
+            <button class="icon-btn del" onclick="retirerSeanceTemplate(${bi},${si})">${iTrash()}</button>
+          </div>
+          ${seance.exercices.map((ex, ei) => `
+            <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropExo(event,${bi},${si},${ei})">
+              <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
+              <span class="nom" title="${esc(ex.nom)}">${esc(ex.nom)}</span>
+              <div class="exo-champ"><label>Séries</label><input type="text" inputmode="numeric" value="${esc(ex.series||'')}" placeholder="3" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].series=this.value"></div>
+              <div class="exo-champ"><label>Reps</label><input type="text" value="${esc(ex.reps||'')}" placeholder="8-12" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].reps=this.value"></div>
+              <div class="exo-champ"><label>Repos</label><input type="text" value="${esc(ex.repos||'')}" placeholder="90s" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].repos=this.value"></div>
+              <div class="exo-champ"><label>Tempo</label><input type="text" value="${esc(ex.tempo||'')}" placeholder="2010" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].tempo=this.value"></div>
+              <div class="exo-champ"><label>RIR</label><input type="text" value="${esc(ex.rir||'')}" placeholder="1-2" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].rir=this.value"></div>
+              <button class="mini-btn" style="margin-left:auto;align-self:center;" onclick="retirerExoDeSeance(${bi},${si},${ei})">✕</button>
+            </div>`).join('')}
+          <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+            <button class="btn" style="width:100%;justify-content:center;" onclick="ouvrirPickerExercice(${bi},${si})">+ Ajouter un exercice</button>
+          </div>
+        </div>`).join('')}
+      <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+        <button class="btn" style="width:100%;justify-content:center;" onclick="ajouterSeanceTemplate(${bi})">+ Ajouter une séance</button>
+      </div>
+    </div>`).join('');
+}
+
+function ajouterBlocTemplate(){
+  tplEnEdition.blocs.push(blocVide());
+  renderBlocsTemplate();
+}
+function retirerBlocTemplate(bi){
+  tplEnEdition.blocs.splice(bi,1);
+  renderBlocsTemplate();
+}
+function ajouterSeanceTemplate(bi){
+  const seances = tplEnEdition.blocs[bi].seances;
+  seances.push({ titre: 'Séance ' + (seances.length+1), exercices: [] });
+  renderBlocsTemplate();
+}
+function retirerSeanceTemplate(bi, si){
+  tplEnEdition.blocs[bi].seances.splice(si,1);
+  renderBlocsTemplate();
+}
+function retirerExoDeSeance(bi, si, ei){
+  tplEnEdition.blocs[bi].seances[si].exercices.splice(ei,1);
+  renderBlocsTemplate();
+}
+
+let dragExoSource = null;
+function onDragStartExo(e, bi, si, ei){
+  dragExoSource = { bi, si, ei };
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragEndExo(){
+  dragExoSource = null;
+}
+function onDropExo(e, bi, si, ei){
+  e.preventDefault();
+  const src = dragExoSource;
+  dragExoSource = null;
+  if (!src || src.bi !== bi || src.si !== si || src.ei === ei) { renderBlocsTemplate(); return; }
+  const arr = tplEnEdition.blocs[bi].seances[si].exercices;
+  const [moved] = arr.splice(src.ei, 1);
+  const cible = src.ei < ei ? ei - 1 : ei;
+  arr.splice(cible, 0, moved);
+  renderBlocsTemplate();
+}
+
+let pickerGroupeFiltre = 'all';
+let pickerRecherche = '';
+
+function ouvrirPickerExercice(bi, si){
+  tplPickerCible = { bi, si };
+  pickerGroupeFiltre = 'all';
+  pickerRecherche = '';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-picker';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Choisir un exercice</h3>
+      <div class="field-row"><input type="text" id="pickerSearch" placeholder="Rechercher…" oninput="pickerRecherche=this.value;renderPickerListe()"></div>
+      <div class="chip-filter" style="flex-wrap:wrap;margin-bottom:10px;">
+        <button class="${pickerGroupeFiltre==='all'?'active':''}" onclick="pickerGroupeFiltre='all';renderPickerListe()">Tous</button>
+        ${GROUPES_MUSCULAIRES.map(g => `<button class="${pickerGroupeFiltre===g?'active':''}" onclick="pickerGroupeFiltre='${g}';renderPickerListe()">${g}</button>`).join('')}
+      </div>
+      <div id="pickerListe" style="max-height:280px;overflow-y:auto;"></div>
+      <div class="modal-actions"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-picker').remove()">Fermer</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  renderPickerListe();
+}
+function renderPickerListe(){
+  // Re-rendre tout le modal pour que les chips actifs restent en phase avec pickerGroupeFiltre,
+  // mais sans perdre le focus du champ recherche (on ne touche pas à sa valeur).
+  const chips = document.querySelector('#modal-picker .chip-filter');
+  if (chips) chips.innerHTML = `
+    <button class="${pickerGroupeFiltre==='all'?'active':''}" onclick="pickerGroupeFiltre='all';renderPickerListe()">Tous</button>
+    ${GROUPES_MUSCULAIRES.map(g => `<button class="${pickerGroupeFiltre===g?'active':''}" onclick="pickerGroupeFiltre='${g}';renderPickerListe()">${g}</button>`).join('')}`;
+  const list = (exercicesData||[])
+    .filter(e => pickerGroupeFiltre === 'all' || e.groupe_musculaire === pickerGroupeFiltre)
+    .filter(e => e.nom.toLowerCase().includes(pickerRecherche.toLowerCase()));
+  document.getElementById('pickerListe').innerHTML = list.map(e => `
+    <div class="exo-row" style="cursor:pointer;" onclick="ajouterExerciceASeance(${e.id})">
+      <span class="nom">${esc(e.nom)}</span>
+      <span class="stat">${esc(e.groupe_musculaire||'')}</span>
+    </div>`).join('') || `<div style="padding:16px;text-align:center;color:var(--text-faint);">Aucun résultat.</div>`;
+}
+function ajouterExerciceASeance(exerciceId){
+  const ex = exercicesData.find(e => e.id === exerciceId);
+  const { bi, si } = tplPickerCible;
+  // Standard/générique (pas de bloc typé) : rien ne se préremplit, l'ajustement se fait à la main
+  // directement dans les colonnes de la séance. Bloc typé : reps/repos de l'exercice pour ce bloc.
+  const blocType = tplEnEdition.blocs[bi].type;
+  const reps = blocType && ex['reps_'+blocType] ? ex['reps_'+blocType] : '';
+  const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
+  tplEnEdition.blocs[bi].seances[si].exercices.push({
+    exercice_id: exerciceId, nom: ex.nom,
+    series: null, reps, repos, tempo: '', rir: '',
+  });
+  document.getElementById('modal-picker').remove();
+  renderBlocsTemplate();
+}
+
+async function confirmerSauvegardeTemplate(){
+  const errEl = document.getElementById('tplErr');
+  if (!tplEnEdition.nom.trim()) { errEl.textContent = 'Le nom du template est obligatoire.'; errEl.style.display = 'block'; return; }
+  try {
+    const saved = await sauvegarderTemplateComplet(tplEnEdition);
+    if (tplEnEdition.id) { const i = templatesData.findIndex(t=>t.id===tplEnEdition.id); if (i>=0) templatesData[i] = saved; }
+    else templatesData.push(saved);
+    progTab = 'templates';
+    renderProgrammesPage(document.getElementById('main'));
+  } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
+}
+async function supprimerTemplateAction(id){
+  if (!confirm('Supprimer ce template ?')) return;
+  try {
+    await supprimerTemplate(id);
+    templatesData = templatesData.filter(t => t.id !== id);
+    renderTemplatesSub();
+  } catch(e) { alert(e.message); }
+}
+
+// ── Assignation d'un template à un client (Supabase pur, snapshot — aucun Sheets) ──
+function ouvrirAssignerTemplate(templateId){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-assigner';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Assigner ce template à un client</h3>
+      <div class="field-row"><label>Client</label>
+        <select id="fAssignClient">
+          <option value="yohan">Yohan (compte de test coach)</option>
+          ${data.clients.map(c => `<option value="${esc(c.id)}">${esc(c.nom)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="assignErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-assigner').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerAssignerTemplate(${templateId})">Assigner</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+async function confirmerAssignerTemplate(templateId){
+  const clientId = document.getElementById('fAssignClient').value;
+  const errEl = document.getElementById('assignErr');
+  try {
+    await assignerTemplateAuClient(templateId, clientId);
+    document.getElementById('modal-assigner').remove();
+    alert('Programme assigné.');
+  } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
+}
+async function assignerTemplateAuClient(templateId, clientId){
+  if (exercicesData === null) exercicesData = await chargerExercices();
+  const tpl = templatesData.find(t => t.id === templateId);
+  const blocsArbo = await chargerTemplateArbo(templateId);
+
+  // Un seul programme actif à la fois pour ce client — on désactive les précédents plutôt que les supprimer
+  // (garde l'historique de logs des anciens programmes accessible).
+  await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true`, {
+    method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ actif: false })
+  });
+
+  const resCp = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, source_template_id: templateId, actif: true })
+  });
+  if (!resCp.ok) throw new Error('supabase_' + resCp.status);
+  const cp = (await resCp.json())[0];
+
+  const blocsPayload = blocsArbo.map((b, bi) => ({ client_programme_id: cp.id, type: b.type || null, nombre_semaines: b.nombre_semaines || null, ordre: bi }));
+  const resBlocs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(blocsPayload) });
+  if (!resBlocs.ok) throw new Error('supabase_' + resBlocs.status);
+  const blocsSaved = await resBlocs.json();
+  const blocIdByOrdre = {};
+  blocsSaved.forEach(b => { blocIdByOrdre[b.ordre] = b.id; });
+
+  const seancesPayload = [];
+  blocsArbo.forEach((b, bi) => {
+    (b.programme_seances||[]).forEach((s, si) => {
+      seancesPayload.push({ bloc_id: blocIdByOrdre[bi], titre: s.titre, ordre: si });
+    });
+  });
+  let seancesSaved = [];
+  if (seancesPayload.length) {
+    const resSeances = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(seancesPayload) });
+    if (!resSeances.ok) throw new Error('supabase_' + resSeances.status);
+    seancesSaved = await resSeances.json();
+  }
+  const seanceIdByBlocOrdre = {};
+  seancesSaved.forEach(s => { seanceIdByBlocOrdre[s.bloc_id + '|' + s.ordre] = s.id; });
+
+  const exercicesPayload = [];
+  blocsArbo.forEach((b, bi) => {
+    const blocId = blocIdByOrdre[bi];
+    (b.programme_seances||[]).forEach((s, si) => {
+      const seanceId = seanceIdByBlocOrdre[blocId + '|' + si];
+      (s.programme_seance_exercices||[]).forEach((ex, ei) => {
+        const source = exercicesData.find(e => e.id === ex.exercice_id);
+        exercicesPayload.push({
+          seance_id: seanceId, exercice_id: ex.exercice_id, nom: source ? source.nom : '(exercice supprimé)',
+          ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir,
+        });
+      });
+    });
+  });
+  if (exercicesPayload.length) {
+    const resExo = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(exercicesPayload) });
+    if (!resExo.ok) throw new Error('supabase_' + resExo.status);
+  }
+  return cp;
 }
 
 function renderDashboard(el){
