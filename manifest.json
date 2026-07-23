@@ -1,7 +1,7 @@
 {
   "name": "AppTraining",
   "short_name": "AppTraining",
-  "start_url": "/AppTraining/",
+  "start_url": "/AppTrainingDatabase/",
   "display": "standalone",
   "background_color": "#0d0f1a",
   "theme_color": "#0d0f1a",

@@ -1,5 +1,5 @@
-const CACHE = 'apptraining-v2';
-const ASSETS = ['/AppTraining/', '/AppTraining/index.html', '/AppTraining/manifest.json'];
+const CACHE = 'apptrainingdatabase-v3';
+const ASSETS = ['/AppTrainingDatabase/', '/AppTrainingDatabase/index.html', '/AppTrainingDatabase/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
@@ -24,8 +24,8 @@ self.addEventListener('push', e => {
   const data = e.data ? e.data.json() : { title: 'AppTraining', body: '' };
   e.waitUntil(self.registration.showNotification(data.title, {
     body: data.body,
-    icon: '/AppTraining/icons/icon-192.png',
-    badge: '/AppTraining/icons/icon-192.png'
+    icon: '/AppTrainingDatabase/icons/icon-192.png',
+    badge: '/AppTrainingDatabase/icons/icon-192.png'
   }));
 });
 
@@ -33,9 +33,9 @@ self.addEventListener('notificationclick', e => {
   e.notification.close();
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
-      const existant = clientsArr.find(c => c.url.includes('/AppTraining/'));
+      const existant = clientsArr.find(c => c.url.includes('/AppTrainingDatabase/'));
       if (existant) return existant.focus();
-      return self.clients.openWindow('/AppTraining/');
+      return self.clients.openWindow('/AppTrainingDatabase/');
     })
   );
 });
