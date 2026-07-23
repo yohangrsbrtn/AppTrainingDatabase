@@ -144,6 +144,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 <div id="app"></div>
 <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=2"></script>
 <script src="bilan.js?v=2"></script>
 <script src="training.js?v=2"></script>
@@ -164,6 +165,10 @@ const S = {
   isCoach: localStorage.getItem('at_coach') === '1' || localStorage.getItem('at_client') === 'yohan',
   data: {}
 };
+
+// Client 100% Supabase (connexion + données, aucun Sheets) — première brique : la connexion.
+// SUPABASE_URL/SUPABASE_ANON_KEY/supaHeaders() viennent déjà de programme-client.js (chargé avant ce script).
+const sbAuth = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function setPage(name) {
   S.page = name;
@@ -235,6 +240,7 @@ function render() {
     case 'loading':       app.innerHTML = renderFullSpinner(); break;
     case 'login':         app.innerHTML = renderLogin();   bindLogin(); break;
     case 'home':          document.body.innerHTML = renderHome(); break;
+    case 'home-supabase': document.body.innerHTML = renderHomeSupabase(); break;
     case 'training':
     case 'training-loading': document.body.innerHTML = renderTrainingPage(); break;
     case 'bilan':
@@ -310,6 +316,7 @@ function hideLoadingOverlay() {
 // 'sans_mot_de_passe') qu'on bascule sur l'écran de création.
 let _loginStep   = 'identifiant'; // 'identifiant' | 'password' | 'create'
 let _loginClient = '';
+let _loginAuthMode = 'gas'; // 'gas' | 'supabase' — détecté via client_profils.supabase_only à l'étape identifiant
 
 function renderLogin() {
   if (_loginStep === 'password') return renderLoginPassword();
@@ -366,11 +373,13 @@ function bindLogin() {
     btn.addEventListener('click', doVerifierClient);
     document.getElementById('l-client').addEventListener('keydown', e => { if (e.key === 'Enter') doVerifierClient(); });
   } else if (_loginStep === 'password') {
-    btn.addEventListener('click', doLogin);
-    document.getElementById('l-mdp').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    const handler = _loginAuthMode === 'supabase' ? doLoginSupabase : doLogin;
+    btn.addEventListener('click', handler);
+    document.getElementById('l-mdp').addEventListener('keydown', e => { if (e.key === 'Enter') handler(); });
   } else if (_loginStep === 'create') {
-    btn.addEventListener('click', doCreerMotDePasse);
-    document.getElementById('l-mdp2').addEventListener('keydown', e => { if (e.key === 'Enter') doCreerMotDePasse(); });
+    const handler = _loginAuthMode === 'supabase' ? doCreerMotDePasseSupabase : doCreerMotDePasse;
+    btn.addEventListener('click', handler);
+    document.getElementById('l-mdp2').addEventListener('keydown', e => { if (e.key === 'Enter') handler(); });
   }
 }
 
@@ -382,16 +391,93 @@ async function doVerifierClient() {
   btn.disabled = true; btn.textContent = '…';
   err.textContent = '';
   try {
+    // Client 100% Supabase (marqué client_profils.supabase_only) : flux d'auth Supabase, jamais GAS.
+    // Tous les autres identifiants suivent le flux GAS existant, inchangé.
+    const resProfil = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(client)}&select=client_id,supabase_only`, { headers: supaHeaders() });
+    const profils = resProfil.ok ? await resProfil.json() : [];
+    if (profils[0] && profils[0].supabase_only) {
+      _loginClient = client;
+      _loginAuthMode = 'supabase';
+      _loginStep = 'password';
+      setPage('login');
+      return;
+    }
     const res  = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'verifierClient', client }) });
     const json = await res.json();
     if (!json.ok || !json.existe) throw new Error('Identifiant inconnu.');
     _loginClient = client;
+    _loginAuthMode = 'gas';
     _loginStep = 'password';
     setPage('login');
   } catch(e) {
     err.textContent = e.message || 'Erreur de connexion.';
     btn.disabled = false; btn.textContent = 'Continuer →';
   }
+}
+
+// ── Connexion 100% Supabase (aucun appel GAS) ──────────────────────────
+async function doLoginSupabase() {
+  const mdp = document.getElementById('l-mdp').value;
+  const btn = document.getElementById('l-btn');
+  const err = document.getElementById('l-err');
+  if (!mdp) { err.textContent = 'Entre ton mot de passe.'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  err.textContent = '';
+  const email = _loginClient + '@apptraining.local';
+  try {
+    const { data, error } = await sbAuth.auth.signInWithPassword({ email, password: mdp });
+    if (error) {
+      // Supabase renvoie le même message générique "invalid credentials" que le compte n'existe pas
+      // encore ou que le mot de passe soit faux (volontaire, pour ne pas révéler quels comptes existent) —
+      // ici on bascule sur l'écran de création, comme le fait 'sans_mot_de_passe' côté GAS.
+      _loginStep = 'create'; setPage('login'); return;
+    }
+    await _completerConnexionSupabase(data.session);
+  } catch(e) {
+    err.textContent = e.message || 'Erreur de connexion.';
+    btn.disabled = false; btn.textContent = 'Se connecter';
+  }
+}
+
+async function doCreerMotDePasseSupabase() {
+  const mdp1 = document.getElementById('l-mdp1').value;
+  const mdp2 = document.getElementById('l-mdp2').value;
+  const btn  = document.getElementById('l-btn');
+  const err  = document.getElementById('l-err');
+  err.textContent = '';
+  if (mdp1.length < 6) { err.textContent = 'Minimum 6 caractères.'; return; }
+  if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  const email = _loginClient + '@apptraining.local';
+  try {
+    const { data, error } = await sbAuth.auth.signUp({ email, password: mdp1 });
+    if (error) throw new Error(error.message);
+    if (!data.session) {
+      // Pas de session immédiate (ex: confirmation email activée côté projet) — on retente un signIn direct.
+      const retry = await sbAuth.auth.signInWithPassword({ email, password: mdp1 });
+      if (retry.error) throw new Error(retry.error.message);
+      await _completerConnexionSupabase(retry.data.session);
+      return;
+    }
+    await _completerConnexionSupabase(data.session);
+  } catch(e) {
+    err.textContent = e.message || 'Erreur serveur.';
+    btn.disabled = false; btn.textContent = 'Créer mon mot de passe →';
+  }
+}
+
+async function _completerConnexionSupabase(session) {
+  localStorage.setItem('at_client', _loginClient);
+  localStorage.setItem('at_token', session.access_token);
+  localStorage.setItem('at_coach', '0');
+  localStorage.setItem('at_auth_mode', 'supabase');
+  S.client = _loginClient;
+  S.token = session.access_token;
+  S.isCoach = false;
+  _loginStep = 'identifiant';
+  _loginClient = '';
+  _loginAuthMode = 'gas';
+  setPage('home-supabase');
 }
 
 async function doLogin() {
@@ -455,6 +541,29 @@ async function _completerConnexion(json) {
   _loginClient = '';
   _resetPrechargement();
   await loadHome();
+}
+
+// ── Home 100% Supabase (client sans Sheets) ────────────────────────────
+// Ne déclenche AUCUN appel api()/GAS — tant que diète/bilan/XP ne sont pas
+// reconstruits côté Supabase, cet accueil n'affiche que ce qui existe déjà.
+async function loadHomeSupabase(){
+  setPage('home-supabase');
+}
+function renderHomeSupabase(){
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="font-size:20px;font-weight:700;color:#f0f2ff;">Bonjour, ${esc(S.client)}</div>
+      <button onclick="deconnexion()" style="background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:8px 12px;color:#8892a4;font-size:12px;cursor:pointer;">Déconnexion</button>
+    </div>
+    <div class="card" style="margin-bottom:12px;font-size:11.5px;color:#8892a4;">Compte 100% base de données — aucun Google Sheets. Construit brique par brique ; pour l'instant, seul le programme est disponible.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div onclick="goTo('programme-client')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #E8A838;-webkit-tap-highlight-color:transparent;">
+        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🗓️</div>
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mon programme</div>
+        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Séries, charges, historique</div>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ── Home ──────────────────────────────────────────────────────────────
@@ -1288,11 +1397,13 @@ async function validerJourneeClient() {
 }
 
 function deconnexion() {
+  if (localStorage.getItem('at_auth_mode') === 'supabase') { sbAuth.auth.signOut().catch(()=>{}); }
   localStorage.removeItem('at_token');
   localStorage.removeItem('at_client');
   localStorage.removeItem('at_coach');
+  localStorage.removeItem('at_auth_mode');
   S.client = ''; S.token = ''; S.isCoach = false; S.data = {};
-  _loginStep = 'identifiant'; _loginClient = '';
+  _loginStep = 'identifiant'; _loginClient = ''; _loginAuthMode = 'gas';
   _resetPrechargement();
   setPage('login');
 }
@@ -1361,6 +1472,9 @@ function goTo(page) {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 if (S.token && S.client) {
+  if (localStorage.getItem('at_auth_mode') === 'supabase') {
+    loadHomeSupabase();
+  } else {
   const _urlParams = new URLSearchParams(window.location.search);
   const _viewAsParam = _urlParams.get('viewAs');
   const _forceMobile = _urlParams.get('mobile');
@@ -1373,6 +1487,7 @@ if (S.token && S.client) {
     window.location.replace('console.html');
   } else {
     loadHome();
+  }
   }
 } else {
   setPage('login');
