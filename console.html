@@ -1617,7 +1617,7 @@ function ouvrirNouveauClient(){
   overlay.innerHTML = `
     <div class="modal-box">
       <h3>Nouveau client (Supabase)</h3>
-      <div class="empty-panel" style="margin-bottom:14px;font-size:11.5px;padding:12px;">Ce client existera uniquement dans la base de données — il ne pourra pas se connecter à l'app tant qu'il n'a pas aussi un compte dans la feuille Google Sheets "Clients" (l'authentification n'est pas encore migrée).</div>
+      <div class="empty-panel" style="margin-bottom:14px;font-size:11.5px;padding:12px;">Ce client existera uniquement dans la base de données — il ne pourra pas se connecter à l'app tant qu'un développeur ne l'a pas aussi ajouté dans la liste <code>CLIENTS</code> codée en dur du fichier <code>Code.js</code> (GAS) et redéployé (l'authentification n'est pas encore migrée hors Sheets).</div>
       <div class="field-row"><label>Identifiant (unique, sans espace)</label><input id="fNewClientId" type="text" placeholder="ex: marie-d"></div>
       <div class="field-row"><label>Prénom</label><input id="fNewClientPrenom" type="text"></div>
       <div class="field-row"><label>Nom</label><input id="fNewClientNom" type="text"></div>
