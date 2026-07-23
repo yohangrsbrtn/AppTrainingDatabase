@@ -423,7 +423,7 @@ async function doLoginSupabase() {
   if (!mdp) { err.textContent = 'Entre ton mot de passe.'; return; }
   btn.disabled = true; btn.textContent = '…';
   err.textContent = '';
-  const email = _loginClient + '@apptraining.local';
+  const email = _loginClient + '@apptraining-users.com';
   try {
     const { data, error } = await sbAuth.auth.signInWithPassword({ email, password: mdp });
     if (error) {
@@ -448,7 +448,7 @@ async function doCreerMotDePasseSupabase() {
   if (mdp1.length < 6) { err.textContent = 'Minimum 6 caractères.'; return; }
   if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
   btn.disabled = true; btn.textContent = '…';
-  const email = _loginClient + '@apptraining.local';
+  const email = _loginClient + '@apptraining-users.com';
   try {
     const { data, error } = await sbAuth.auth.signUp({ email, password: mdp1 });
     if (error) throw new Error(error.message);
