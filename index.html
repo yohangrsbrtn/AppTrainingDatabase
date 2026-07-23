@@ -782,7 +782,7 @@ function renderHome() {
         <div style="font-size:11px;color:#8892a4;margin-top:3px;">Cycle en cours</div>
       </div>` : ''}
 
-      ${S.client === 'yohan' ? `
+      ${(S.client === 'yohan' || S.client === 'yohanp') ? `
       <div onclick="goTo('programme-client')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #E8A838;-webkit-tap-highlight-color:transparent;">
         <div style="font-size:38px;margin-bottom:8px;line-height:1;">🗓️</div>
         <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mon programme (BETA)</div>
