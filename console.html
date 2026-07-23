@@ -520,6 +520,27 @@ async function chargerDonnees(){
     c.enRetard = raw && !soumisRecemment;
   });
 
+  // Fusionne les fiches Supabase (client_profils) — un client peut n'exister que dans Supabase
+  // (créé depuis la console, pas encore dans la feuille Clients) : on l'ajoute comme entrée
+  // synthétique pour qu'il apparaisse dans le tableau/panneau, avec un badge "pas de connexion possible".
+  let profils = [];
+  try {
+    const resProfils = await fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { headers: supaHeaders() });
+    if (resProfils.ok) profils = await resProfils.json();
+  } catch(e) {}
+  const idsExistants = new Set(clients.map(c=>c.id));
+  profils.forEach(p => {
+    if (!idsExistants.has(p.client_id)) {
+      clients.push({
+        id: p.client_id,
+        nom: [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id,
+        niveau: null, enRetard: false, chimieActif: false, verrouile: false,
+        dernConnexion: null, titreActif: null,
+        _supabaseOnly: true,
+      });
+    }
+  });
+
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
 }
 
@@ -1339,7 +1360,10 @@ function renderClientsPage(el){
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Clients</h1></div>
-      <div class="meta" id="clientCount"></div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="meta" id="clientCount"></div>
+        <button class="btn primary" onclick="ouvrirNouveauClient()">+ Nouveau client</button>
+      </div>
     </div>
     <div class="table-card">
       <div class="table-toolbar">
@@ -1375,7 +1399,7 @@ function renderTable(){
   if (!body) return;
   body.innerHTML = list.map(c => `
     <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
-      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : ''}</div></td>
       <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${c.verrouile ? ` <span class="chip off">🔒</span>` : ''}</td>
       <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
       <td>${esc(c.titreActif||'—')}</td>
@@ -1409,11 +1433,13 @@ async function toggleVerrou(id, verrouille){
 
 let panelTab = 'apercu';
 let panelNotes = null; // null = pas encore chargées
+let panelFiche = null;
 async function openPanel(id){
   state.selected = id;
   panelTab = 'apercu';
   panelNotes = null;
   panelProgression = null;
+  panelFiche = null;
   if (state.nav==='clients') renderTable();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
@@ -1442,12 +1468,17 @@ async function setPanelTab(t){
     body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>`;
     try { panelProgression = await chargerProgression(c.id); } catch(e) { panelProgression = null; body.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`; return; }
   }
+  if (t === 'fiche' && panelFiche === null) {
+    body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>`;
+    try { panelFiche = await chargerFiche(c.id); } catch(e) { panelFiche = null; body.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`; return; }
+  }
   body.innerHTML = panelTabContent(c, t);
 }
 
 function panelTabContent(c, t){
   if (t === 'notes') return renderNotesTab();
   if (t === 'progression') return renderProgressionTab();
+  if (t === 'fiche') return renderFicheTab();
   return `
     <div class="panel-row"><span class="l">Statut bilan</span><span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span></div>
     <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(c.dernConnexion||'Jamais connecté')}</span></div>
@@ -1530,6 +1561,97 @@ function renderProgressionTab(){
       </div>`).join('') : `<div class="empty-panel" style="padding:24px 12px;">Aucun bilan enregistré pour ce client.</div>`}`;
 }
 
+// ── Fiche client (client_profils, Supabase) ────────────────────────────
+async function chargerFiche(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  const rows = await res.json();
+  return rows[0] || { client_id: clientId, prenom:'', nom:'', date_naissance:null, email:'' };
+}
+function ageDepuisDate(dateStr){
+  if (!dateStr) return null;
+  const naissance = new Date(dateStr);
+  if (isNaN(naissance)) return null;
+  const auj = new Date();
+  let age = auj.getFullYear() - naissance.getFullYear();
+  const m = auj.getMonth() - naissance.getMonth();
+  if (m < 0 || (m === 0 && auj.getDate() < naissance.getDate())) age--;
+  return age;
+}
+function renderFicheTab(){
+  const f = panelFiche || {};
+  const age = ageDepuisDate(f.date_naissance);
+  return `
+    <div class="field-row"><label>Prénom</label><input id="fFichePrenom" type="text" value="${esc(f.prenom||'')}"></div>
+    <div class="field-row"><label>Nom</label><input id="fFicheNom" type="text" value="${esc(f.nom||'')}"></div>
+    <div class="field-row"><label>Date de naissance${age!=null?' ('+age+' ans)':''}</label><input id="fFicheNaissance" type="date" value="${esc(f.date_naissance||'')}"></div>
+    <div class="field-row"><label>Email</label><input id="fFicheEmail" type="email" value="${esc(f.email||'')}"></div>
+    <div id="ficheMsg" style="font-size:11.5px;color:var(--accent);height:16px;margin-bottom:6px;"></div>
+    <button class="btn primary" style="width:100%;justify-content:center;" onclick="sauvegarderFiche('${(panelFiche||{}).client_id||state.selected}')">Enregistrer</button>`;
+}
+async function sauvegarderFiche(clientId){
+  const body = {
+    client_id: clientId,
+    prenom: document.getElementById('fFichePrenom').value.trim(),
+    nom: document.getElementById('fFicheNom').value.trim(),
+    date_naissance: document.getElementById('fFicheNaissance').value || null,
+    email: document.getElementById('fFicheEmail').value.trim(),
+    updated_at: new Date().toISOString(),
+  };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    panelFiche = (await res.json())[0];
+    const msg = document.getElementById('ficheMsg');
+    if (msg) { msg.textContent = 'Enregistré ✓'; setTimeout(()=>{ if (msg) msg.textContent=''; }, 2000); }
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function ouvrirNouveauClient(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-nouveau-client';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Nouveau client (Supabase)</h3>
+      <div class="empty-panel" style="margin-bottom:14px;font-size:11.5px;padding:12px;">Ce client existera uniquement dans la base de données — il ne pourra pas se connecter à l'app tant qu'il n'a pas aussi un compte dans la feuille Google Sheets "Clients" (l'authentification n'est pas encore migrée).</div>
+      <div class="field-row"><label>Identifiant (unique, sans espace)</label><input id="fNewClientId" type="text" placeholder="ex: marie-d"></div>
+      <div class="field-row"><label>Prénom</label><input id="fNewClientPrenom" type="text"></div>
+      <div class="field-row"><label>Nom</label><input id="fNewClientNom" type="text"></div>
+      <div class="field-row"><label>Date de naissance</label><input id="fNewClientNaissance" type="date"></div>
+      <div class="field-row"><label>Email</label><input id="fNewClientEmail" type="email"></div>
+      <div id="newClientErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-nouveau-client').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerNouveauClient()">Créer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+async function confirmerNouveauClient(){
+  const id = document.getElementById('fNewClientId').value.trim();
+  const errEl = document.getElementById('newClientErr');
+  if (!id) { errEl.textContent = "L'identifiant est obligatoire."; errEl.style.display = 'block'; return; }
+  if (data.clients.some(c => c.id === id)) { errEl.textContent = 'Cet identifiant existe déjà.'; errEl.style.display = 'block'; return; }
+  const body = {
+    client_id: id,
+    prenom: document.getElementById('fNewClientPrenom').value.trim(),
+    nom: document.getElementById('fNewClientNom').value.trim(),
+    date_naissance: document.getElementById('fNewClientNaissance').value || null,
+    email: document.getElementById('fNewClientEmail').value.trim(),
+    supabase_only: true,
+  };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    document.getElementById('modal-nouveau-client').remove();
+    await rafraichir();
+  } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
+}
+
 function panelHTML(c){
   return `
     <div class="panel-head">
@@ -1539,6 +1661,7 @@ function panelHTML(c){
       </div>
       <div class="panel-name">${esc(c.nom)}</div>
       <div class="panel-sub">${esc(c.titreActif || 'Aucun titre actif')}</div>
+      ${c._supabaseOnly ? `<div class="empty-panel" style="margin:10px 0 0;padding:10px 12px;font-size:11px;">⚠️ Client Supabase uniquement — pas encore de connexion possible (n'existe pas dans la feuille Clients).</div>` : ''}
       <div class="panel-stats">
         <div class="panel-stat"><div class="l">Niveau</div><div class="v">${c.niveau||1}</div></div>
         <div class="panel-stat"><div class="l">Statut</div><div class="v" style="font-size:12px;">${c.enRetard?'En retard':'À jour'}</div></div>
@@ -1547,12 +1670,13 @@ function panelHTML(c){
     </div>
     <div class="panel-tabs">
       <button class="panel-tab active" data-tab="apercu" onclick="setPanelTab('apercu')">Aperçu</button>
+      <button class="panel-tab" data-tab="fiche" onclick="setPanelTab('fiche')">Fiche</button>
       <button class="panel-tab" data-tab="progression" onclick="setPanelTab('progression')">Progression</button>
       <button class="panel-tab" data-tab="notes" onclick="setPanelTab('notes')">Notes</button>
     </div>
     <div class="panel-body" id="panelBody">${panelTabContent(c, 'apercu')}</div>
     <div class="panel-footer">
-      <a class="btn primary" href="index.html?viewAs=${encodeURIComponent(c.id)}">Ouvrir en vue client</a>
+      ${c._supabaseOnly ? `<button class="btn" style="flex:1;justify-content:center;" disabled title="Pas de connexion possible pour ce client">Ouvrir en vue client (indisponible)</button>` : `<a class="btn primary" href="index.html?viewAs=${encodeURIComponent(c.id)}">Ouvrir en vue client</a>`}
     </div>`;
 }
 
