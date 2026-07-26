@@ -521,11 +521,7 @@ let ajoutAlimTab = 'base';      // 'base' | 'off' | 'manuel'
 let ajoutAlimRI = null;
 
 // ── Notes de coaching (Supabase) ──────────────────────────────────────
-const SUPABASE_URL = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmYWNqYndpY3p3a2NqcHduZXlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjgzNTAsImV4cCI6MjEwMDIwNDM1MH0.mrjPbOuQROMihzxZWrUNbncQIos0jK2VexpQDoRZXzY';
-function supaHeaders(extra){
-  return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
-}
+// SUPABASE_URL, SUPABASE_ANON_KEY et supaHeaders() viennent de api.js
 async function chargerNotes(clientId){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/notes_coach?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
