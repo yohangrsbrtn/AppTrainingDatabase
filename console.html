@@ -334,6 +334,29 @@
   .macro-band .mn { font-family:var(--font-mono); font-size:14px; font-weight:700; }
   .macro-band .mu { font-size:10px; color:var(--text-faint); text-transform:uppercase; }
   .macro-band .mk { font-size:10px; color:var(--text-faint); font-weight:700; text-transform:uppercase; margin-bottom:2px; }
+
+  /* ── Base alimentaire ── */
+  .alim-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .alim-toolbar input[type=text] { flex:1; min-width:180px; background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:8px 12px; color:var(--text); font-size:16px; font-family:inherit; }
+  .alim-toolbar select { background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:8px 10px; color:var(--text); font-size:16px; font-family:inherit; cursor:pointer; }
+  .alim-table { width:100%; border-collapse:collapse; }
+  .alim-table th { text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:8px 10px; border-bottom:1px solid var(--hairline); }
+  .alim-table td { padding:9px 10px; border-bottom:1px solid var(--hairline); font-size:12.5px; }
+  .alim-table tr:last-child td { border-bottom:none; }
+  .alim-table tr:hover td { background:var(--surface-2); }
+  .alim-table .mono { font-family:var(--font-mono); font-size:11.5px; }
+  .alim-cat-badge { display:inline-block; background:var(--accent-soft); color:var(--accent); border-radius:6px; padding:2px 8px; font-size:10.5px; font-weight:700; }
+
+  /* ── Modal ajout aliment (onglets) ── */
+  .modal-tabs { display:flex; gap:0; border-bottom:1px solid var(--hairline); margin:-4px -4px 16px; }
+  .modal-tab { padding:8px 14px; border:none; background:none; color:var(--text-muted); font-size:12px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .modal-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .alim-pick-list { max-height:240px; overflow-y:auto; margin:0 -4px; }
+  .alim-pick-row { display:flex; align-items:center; gap:10px; padding:8px 14px; cursor:pointer; border-bottom:1px solid var(--hairline); }
+  .alim-pick-row:hover { background:var(--surface-2); }
+  .alim-pick-row:last-child { border-bottom:none; }
+  .alim-pick-nom { flex:1; font-weight:600; font-size:12.5px; }
+  .alim-pick-macros { font-size:11px; color:var(--text-faint); font-family:var(--font-mono); }
 </style>
 </head>
 <body>
@@ -479,6 +502,11 @@ let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
 let dieteTemplatesData = null;
 let dieteTplEnEdition = null;
+let alimentsCoachData = null;   // lazy-loaded
+let alimBaseSearch = '';
+let alimBaseCat = 'all';
+let ajoutAlimTab = 'base';      // 'base' | 'off' | 'manuel' (dans modal d'ajout)
+let ajoutAlimRI = null;         // index repas cible dans modal
 
 // ── Notes de coaching (Supabase) ──────────────────────────────────────
 const SUPABASE_URL = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
@@ -729,46 +757,154 @@ function renderClassementPage(el){
     </div>`;
 }
 
-// ── Page Base alimentaire ──────────────────────────────────────────────
-function renderBasePage(el){
-  const list = data.aValider;
+// ── Page Base alimentaire (Supabase) ──────────────────────────────────
+const ALIM_CATEGORIES = ['Viandes & poissons','Produits laitiers','Céréales & féculents','Légumes','Fruits','Légumineuses','Matières grasses','Boissons','Autres'];
+
+async function chargerAlimentsCoach(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?order=nom.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+
+async function renderBasePage(el){
+  el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Base alimentaire</h1></div></div><div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>`;
+  try {
+    if (!alimentsCoachData) alimentsCoachData = await chargerAlimentsCoach();
+  } catch(e) {
+    el.innerHTML += `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`;
+    return;
+  }
+  renderBaseSub(el);
+}
+
+function renderBaseSub(el){
+  if (!el) el = document.getElementById('main');
+  const cats = ALIM_CATEGORIES;
+  let list = alimentsCoachData || [];
+  if (alimBaseSearch) {
+    const q = alimBaseSearch.toLowerCase();
+    list = list.filter(a => a.nom.toLowerCase().includes(q));
+  }
+  if (alimBaseCat !== 'all') list = list.filter(a => a.categorie === alimBaseCat);
+
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Base alimentaire</h1></div>
-      <div class="meta">${list.length} en attente</div>
+      <div class="meta">${alimentsCoachData.length} aliments</div>
     </div>
-    ${list.length ? `<div class="dash-grid" style="grid-template-columns:repeat(2,1fr);">
-      ${list.map(a => `
-        <div class="card">
-          <div class="card-head">${iApple()}<span class="t">${esc(a.nom)}</span></div>
-          <div class="panel-body" style="padding-top:0;">
-            <div class="panel-row"><span class="l">Ajouté par</span><span class="v">${esc(a.ajoutePar)}</span></div>
-            <div class="panel-row"><span class="l">Date</span><span class="v mono" style="font-size:11px;">${esc(a.date)}</span></div>
-            <div class="macro-grid" style="margin:10px 0;">
-              <div><div class="n">${Math.round(a.kcal*100)}</div><div class="u">kcal</div></div>
-              <div><div class="n">${Math.round(a.prot*100)}g</div><div class="u">prot</div></div>
-              <div><div class="n">${Math.round(a.glu*100)}g</div><div class="u">gluc</div></div>
-              <div><div class="n">${Math.round(a.lip*100)}g</div><div class="u">lip</div></div>
-            </div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn primary" style="flex:1;justify-content:center;" onclick="validerAliment(${a.ligne})">Valider</button>
-              <button class="btn" style="flex:1;justify-content:center;color:var(--critical);" onclick="supprimerAliment(${a.ligne})">Supprimer</button>
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>` : `<div class="empty-panel"><strong>Rien à valider</strong>Tous les ajouts communautaires sont à jour.</div>`}`;
+    <div class="alim-toolbar">
+      <input type="text" placeholder="Rechercher…" value="${esc(alimBaseSearch)}" oninput="alimBaseSearch=this.value;renderBaseSub()" style="font-size:16px;">
+      <select onchange="alimBaseCat=this.value;renderBaseSub()" style="font-size:16px;">
+        <option value="all" ${alimBaseCat==='all'?'selected':''}>Toutes catégories</option>
+        ${cats.map(c=>`<option value="${esc(c)}" ${alimBaseCat===c?'selected':''}>${esc(c)}</option>`).join('')}
+      </select>
+      <button class="btn primary" onclick="ouvrirFormulaireAliment(null)">+ Ajouter</button>
+    </div>
+    <div class="table-card">
+      <div class="table-scroll">
+        <table class="alim-table">
+          <thead><tr><th>Nom</th><th>Catégorie</th><th>Kcal/100g</th><th>Prot</th><th>Gluc</th><th>Lip</th><th></th></tr></thead>
+          <tbody>
+            ${list.length ? list.map(a => `
+              <tr>
+                <td><strong>${esc(a.nom)}</strong></td>
+                <td>${a.categorie ? `<span class="alim-cat-badge">${esc(a.categorie)}</span>` : '<span style="color:var(--text-faint)">—</span>'}</td>
+                <td class="mono">${Math.round((a.kcal_par_gramme||0)*100)}</td>
+                <td class="mono">${Math.round((a.prot_par_gramme||0)*100)}g</td>
+                <td class="mono">${Math.round((a.glu_par_gramme||0)*100)}g</td>
+                <td class="mono">${Math.round((a.lip_par_gramme||0)*100)}g</td>
+                <td style="white-space:nowrap;text-align:right;">
+                  <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
+                  <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
+                </td>
+              </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
-async function validerAliment(ligne){
-  try { await api('validerAlimentCommunaute', { ligne }); data.aValider = data.aValider.filter(a=>a.ligne!==ligne); renderSidebar(); renderMain(); }
-  catch(e) { alert('Erreur : ' + e.message); }
+
+function ouvrirFormulaireAliment(id){
+  const a = id ? (alimentsCoachData||[]).find(x=>x.id===id) : null;
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'modal-alim-form';
+  modal.onclick = e => { if(e.target===modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:460px;">
+      <h3>${a ? 'Éditer' : 'Ajouter un aliment'}</h3>
+      <div class="field-row"><label>Nom</label><input id="afNom" type="text" value="${esc(a?.nom||'')}" placeholder="ex: Riz blanc cuit" style="font-size:16px;"></div>
+      <div class="field-row"><label>Catégorie</label>
+        <select id="afCat" style="font-size:16px;">
+          <option value="">— Choisir —</option>
+          ${ALIM_CATEGORIES.map(c=>`<option value="${esc(c)}" ${a?.categorie===c?'selected':''}>${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <p style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">Valeurs pour 100g</p>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+        <div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="afGlu" type="number" min="0" step="0.1" value="${a ? Math.round((a.glu_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="afLip" type="number" min="0" step="0.1" value="${a ? Math.round((a.lip_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+      </div>
+      <div id="afErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-alim-form').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauvegarderAlimentCoach(${id||'null'})">Enregistrer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('afNom').focus(), 50);
 }
-async function supprimerAliment(ligne){
+
+async function sauvegarderAlimentCoach(id){
+  const nom = document.getElementById('afNom').value.trim();
+  const errEl = document.getElementById('afErr');
+  if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
+  const categorie = document.getElementById('afCat').value || null;
+  const kcal = (parseFloat(document.getElementById('afKcal').value)||0) / 100;
+  const prot = (parseFloat(document.getElementById('afProt').value)||0) / 100;
+  const glu  = (parseFloat(document.getElementById('afGlu').value)||0) / 100;
+  const lip  = (parseFloat(document.getElementById('afLip').value)||0) / 100;
+  const payload = { nom, categorie, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip };
   try {
-    await api('supprimerAlimentCommunaute', { ligne });
-    // deleteRow décale les lignes suivantes — refetch plutôt que filtrer localement (piège documenté CLAUDE.md).
-    data.aValider = await api('listerAlimentsCommunauteAValider');
-    renderSidebar(); renderMain();
-  } catch(e) { alert('Erreur : ' + e.message); }
+    const method = id ? 'PATCH' : 'POST';
+    const url = id ? `${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${id}` : `${SUPABASE_URL}/rest/v1/aliments_coach`;
+    const res = await fetch(url, { method, headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(payload) });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const saved = (await res.json())[0];
+    if (id) {
+      alimentsCoachData = alimentsCoachData.map(a => a.id===id ? saved : a);
+    } else {
+      alimentsCoachData = [...alimentsCoachData, saved].sort((a,b)=>a.nom.localeCompare(b.nom,'fr'));
+    }
+    document.getElementById('modal-alim-form').remove();
+    renderBaseSub();
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+async function supprimerAlimentCoach(id){
+  if (!confirm('Supprimer cet aliment ?')) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${id}`, { method:'DELETE', headers:supaHeaders() });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    alimentsCoachData = alimentsCoachData.filter(a=>a.id!==id);
+    renderBaseSub();
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+async function rechercherOpenFoodFacts(query){
+  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&page_size=12&fields=product_name,nutriments`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('OFF_' + res.status);
+  const json = await res.json();
+  return (json.products||[]).map(p => ({
+    nom: p.product_name || '?',
+    kcal: (p.nutriments?.['energy-kcal_100g']||0) / 100,
+    prot: (p.nutriments?.proteins_100g||0) / 100,
+    glu:  (p.nutriments?.carbohydrates_100g||0) / 100,
+    lip:  (p.nutriments?.fat_100g||0) / 100,
+  })).filter(p => p.nom && p.nom !== '?');
 }
 
 // ── Page Protocole ─────────────────────────────────────────────────────
@@ -2479,33 +2615,151 @@ function supprimerAlimentDiete(ri, ai){
 }
 
 function ouvrirAjoutAliment(ri){
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.id = 'modal-ajout-aliment';
-  modal.style.zIndex = '300';
-  modal.onclick = e => { if(e.target===modal) modal.remove(); };
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width:400px;">
-      <h3>Ajouter un aliment</h3>
-      <div class="field-row"><label>Nom</label><input id="aNom" type="text" placeholder="ex: Riz complet cuit" style="font-size:16px;"></div>
-      <div class="field-row"><label>Quantité (g)</label><input id="aQte" type="number" min="1" value="100" style="font-size:16px;"></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
-        <div class="field-row" style="margin:0;"><label>Kcal/100g</label><input id="aKcal" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Prot/100g</label><input id="aProt" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Gluc/100g</label><input id="aGlu" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Lip/100g</label><input id="aLip" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
-      </div>
-      <div id="aErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
-      <div class="modal-actions">
-        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
-        <button class="btn primary" onclick="confirmerAjoutAliment(${ri})">Ajouter</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  setTimeout(()=>document.getElementById('aNom').focus(), 50);
+  ajoutAlimRI = ri;
+  ajoutAlimTab = 'base';
+  _renderModalAjoutAliment();
 }
 
-function confirmerAjoutAliment(ri){
+function _renderModalAjoutAliment(){
+  let modal = document.getElementById('modal-ajout-aliment');
+  if (!modal){
+    modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.id = 'modal-ajout-aliment';
+    modal.style.zIndex = '300';
+    modal.onclick = e => { if(e.target===modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  const baseList = alimentsCoachData || [];
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:460px;">
+      <h3>Ajouter un aliment</h3>
+      <div class="modal-tabs">
+        <button class="modal-tab ${ajoutAlimTab==='base'?'active':''}" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">📦 Base coach</button>
+        <button class="modal-tab ${ajoutAlimTab==='off'?'active':''}" onclick="ajoutAlimTab='off';_renderModalAjoutAliment()">🌍 Open Food Facts</button>
+        <button class="modal-tab ${ajoutAlimTab==='manuel'?'active':''}" onclick="ajoutAlimTab='manuel';_renderModalAjoutAliment()">✏️ Manuel</button>
+      </div>
+
+      ${ajoutAlimTab === 'base' ? `
+        <input id="aBaseSearch" type="text" placeholder="Rechercher dans la base…" oninput="_filtrerBaseAlim(this.value)" style="width:100%;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-family:inherit;margin-bottom:8px;">
+        ${alimentsCoachData === null ? `<div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div>` : ''}
+        <div class="alim-pick-list" id="aBaseList">
+          ${baseList.map(a => `
+            <div class="alim-pick-row" onclick="_selectionnerAlimBase(${a.id})">
+              <div>
+                <div class="alim-pick-nom">${esc(a.nom)}</div>
+                ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
+              </div>
+              <div class="alim-pick-macros">${Math.round((a.kcal_par_gramme||0)*100)} kcal · P${Math.round((a.prot_par_gramme||0)*100)} G${Math.round((a.glu_par_gramme||0)*100)} L${Math.round((a.lip_par_gramme||0)*100)}</div>
+            </div>`).join('')}
+          ${baseList.length===0&&alimentsCoachData!==null?`<div style="text-align:center;padding:20px;color:var(--text-faint);">Base vide — ajoute des aliments depuis "Base alimentaire".</div>`:''}
+        </div>
+        <div style="margin-top:10px;font-size:11.5px;color:var(--text-faint);">La quantité sera saisie après sélection.</div>
+      ` : ajoutAlimTab === 'off' ? `
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <input id="aOffSearch" type="text" placeholder="Rechercher (ex: riz complet)…" style="flex:1;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-family:inherit;">
+          <button class="btn primary" onclick="_rechercherOFF()">Chercher</button>
+        </div>
+        <div class="alim-pick-list" id="aOffList"><div style="text-align:center;padding:20px;color:var(--text-faint);">Lance une recherche pour voir les résultats.</div></div>
+      ` : `
+        <div class="field-row"><label>Nom</label><input id="aNom" type="text" placeholder="ex: Riz complet cuit" style="font-size:16px;"></div>
+        <div class="field-row"><label>Quantité (g)</label><input id="aQte" type="number" min="1" value="100" style="font-size:16px;"></div>
+        <p style="font-size:11.5px;color:var(--text-faint);margin:0 0 8px;">Valeurs pour 100g</p>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+          <div class="field-row" style="margin:0;"><label>Kcal</label><input id="aKcal" type="number" min="0" step="0.1" placeholder="0" style="font-size:16px;"></div>
+          <div class="field-row" style="margin:0;"><label>Prot</label><input id="aProt" type="number" min="0" step="0.1" placeholder="0" style="font-size:16px;"></div>
+          <div class="field-row" style="margin:0;"><label>Gluc</label><input id="aGlu" type="number" min="0" step="0.1" placeholder="0" style="font-size:16px;"></div>
+          <div class="field-row" style="margin:0;"><label>Lip</label><input id="aLip" type="number" min="0" step="0.1" placeholder="0" style="font-size:16px;"></div>
+        </div>
+        <div id="aErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+        <div class="modal-actions">
+          <button class="btn" onclick="document.getElementById('modal-ajout-aliment').remove()">Annuler</button>
+          <button class="btn primary" onclick="confirmerAjoutAliment()">Ajouter</button>
+        </div>
+      `}
+      ${ajoutAlimTab !== 'manuel' ? `<div class="modal-actions" style="margin-top:12px;"><button class="btn" onclick="document.getElementById('modal-ajout-aliment').remove()">Annuler</button></div>` : ''}
+    </div>`;
+
+  if (ajoutAlimTab === 'base' && alimentsCoachData === null){
+    chargerAlimentsCoach().then(d => { alimentsCoachData = d; _renderModalAjoutAliment(); }).catch(()=>{});
+  }
+  if (ajoutAlimTab === 'base') setTimeout(()=>document.getElementById('aBaseSearch')?.focus(), 50);
+  if (ajoutAlimTab === 'off') setTimeout(()=>document.getElementById('aOffSearch')?.focus(), 50);
+  if (ajoutAlimTab === 'manuel') setTimeout(()=>document.getElementById('aNom')?.focus(), 50);
+}
+
+function _filtrerBaseAlim(q){
+  const list = document.getElementById('aBaseList');
+  if (!list || !alimentsCoachData) return;
+  const ql = q.toLowerCase();
+  const filtered = ql ? alimentsCoachData.filter(a=>a.nom.toLowerCase().includes(ql)) : alimentsCoachData;
+  list.innerHTML = filtered.map(a => `
+    <div class="alim-pick-row" onclick="_selectionnerAlimBase(${a.id})">
+      <div>
+        <div class="alim-pick-nom">${esc(a.nom)}</div>
+        ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
+      </div>
+      <div class="alim-pick-macros">${Math.round((a.kcal_par_gramme||0)*100)} kcal · P${Math.round((a.prot_par_gramme||0)*100)} G${Math.round((a.glu_par_gramme||0)*100)} L${Math.round((a.lip_par_gramme||0)*100)}</div>
+    </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text-faint);">Aucun résultat.</div>`;
+}
+
+function _selectionnerAlimBase(id){
+  const a = alimentsCoachData.find(x=>x.id===id);
+  if (!a) return;
+  _ouvrirSaisieQuantite(a.nom, a.kcal_par_gramme, a.prot_par_gramme, a.glu_par_gramme, a.lip_par_gramme);
+}
+
+async function _rechercherOFF(){
+  const q = document.getElementById('aOffSearch').value.trim();
+  if (!q) return;
+  const listEl = document.getElementById('aOffList');
+  listEl.innerHTML = `<div style="text-align:center;padding:20px;"><div class="spin" style="margin:auto;"></div></div>`;
+  try {
+    const results = await rechercherOpenFoodFacts(q);
+    if (!results.length){ listEl.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-faint);">Aucun résultat.</div>`; return; }
+    listEl.innerHTML = results.map((r,i) => `
+      <div class="alim-pick-row" onclick="_selectionnerOFF(${i})" data-off-idx="${i}">
+        <div class="alim-pick-nom">${esc(r.nom)}</div>
+        <div class="alim-pick-macros">${Math.round((r.kcal||0)*100)} kcal · P${Math.round((r.prot||0)*100)} G${Math.round((r.glu||0)*100)} L${Math.round((r.lip||0)*100)}</div>
+      </div>`).join('');
+    listEl._offResults = results;
+  } catch(e){ listEl.innerHTML = `<div style="text-align:center;padding:20px;color:var(--critical);">Erreur : ${esc(e.message)}</div>`; }
+}
+
+function _selectionnerOFF(idx){
+  const listEl = document.getElementById('aOffList');
+  const r = listEl?._offResults?.[idx];
+  if (!r) return;
+  _ouvrirSaisieQuantite(r.nom, r.kcal, r.prot, r.glu, r.lip);
+}
+
+function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
+  const modal = document.getElementById('modal-ajout-aliment');
+  const box = modal.querySelector('.modal-box');
+  box.innerHTML = `
+    <h3>${esc(nom)}</h3>
+    <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
+      <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*100)}</div><div class="mu">/ 100g</div></div>
+      <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*100)}g</div><div class="mu">/ 100g</div></div>
+      <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*100)}g</div><div class="mu">/ 100g</div></div>
+      <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*100)}g</div><div class="mu">/ 100g</div></div>
+    </div>
+    <div class="field-row"><label>Quantité (g)</label><input id="aQteSelected" type="number" min="1" value="100" style="font-size:16px;"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">← Retour</button>
+      <button class="btn primary" onclick="_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg})">Ajouter</button>
+    </div>`;
+  setTimeout(()=>document.getElementById('aQteSelected')?.select(), 50);
+}
+
+function _confirmerAlimSelectionne(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
+  const qte = parseFloat(document.getElementById('aQteSelected').value)||0;
+  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal_pg, prot_par_gramme:prot_pg, glu_par_gramme:glu_pg, lip_par_gramme:lip_pg });
+  document.getElementById('modal-ajout-aliment').remove();
+  renderEditeurDiete();
+}
+
+function confirmerAjoutAliment(){
   const nom = document.getElementById('aNom').value.trim();
   const errEl = document.getElementById('aErr');
   if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
@@ -2514,7 +2768,7 @@ function confirmerAjoutAliment(ri){
   const prot = (parseFloat(document.getElementById('aProt').value)||0) / 100;
   const glu  = (parseFloat(document.getElementById('aGlu').value)||0) / 100;
   const lip  = (parseFloat(document.getElementById('aLip').value)||0) / 100;
-  dieteTplEnEdition.repas[ri].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip });
+  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip });
   document.getElementById('modal-ajout-aliment').remove();
   renderEditeurDiete();
 }
