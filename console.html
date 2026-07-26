@@ -4408,9 +4408,7 @@ async function migrerDieteGAS() {
       }
     }
 
-    // 3. Désactiver diètes existantes + assigner
-    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}`,
-      { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
+    // 3. Assigner (plusieurs diètes actives autorisées — ne pas désactiver les autres)
     const assignRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
       { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
     if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
