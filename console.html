@@ -4373,27 +4373,38 @@ async function migrerDieteGAS() {
     if (!tplRes.ok) throw new Error('template ' + tplRes.status);
     const tpl = (await tplRes.json())[0];
 
-    // 2. Créer les repas + aliments
+    // 2. Créer les repas + aliments (+ équivalences comme variantes)
+    const saveAliments = async (repasId, aliments) => {
+      if (!aliments || !aliments.length) return;
+      const payload = aliments.map((a, ai) => {
+        const q = a.qte || 1;
+        return {
+          repas_id: repasId, nom: a.nom, quantite_g: q, ordre: ai,
+          kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
+          prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
+          glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
+          lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
+        };
+      });
+      await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(payload) });
+    };
     for (let ri = 0; ri < repasGAS.length; ri++) {
       const r = repasGAS[ri];
       const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
-        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: r.nom, ordre: ri }) });
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: r.nom, ordre: ri, variante_index: 0 }) });
       if (!rRes.ok) throw new Error('repas ' + rRes.status);
       const savedR = (await rRes.json())[0];
-      const aliments = r.aliments || [];
-      if (aliments.length) {
-        const payload = aliments.map((a, ai) => {
-          const q = a.qte || 1;
-          return {
-            repas_id: savedR.id, nom: a.nom, quantite_g: q, ordre: ai,
-            kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
-            prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
-            glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
-            lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
-          };
-        });
-        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
-          { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(payload) });
+      await saveAliments(savedR.id, r.aliments);
+      // Équivalences → variantes du même repas (variante_index 1, 2, …)
+      const equivs = r.equivalences || [];
+      for (let vi = 0; vi < equivs.length; vi++) {
+        const eq = equivs[vi];
+        const eqRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
+          { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: eq.nom, ordre: ri, variante_index: vi + 1 }) });
+        if (!eqRes.ok) continue;
+        const savedEq = (await eqRes.json())[0];
+        await saveAliments(savedEq.id, eq.aliments);
       }
     }
 
@@ -4542,28 +4553,63 @@ async function migrerProgrammeGAS() {
       if (!sRes.ok) throw new Error('seance ' + sRes.status);
       const savedSeance = (await sRes.json())[0];
 
-      // Charger les exercices de cette séance en semaine 1
+      // Charger les exercices (sem1) + logs toutes semaines
       try {
         const seanceData = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: semaine1 });
         const sd = typeof seanceData === 'string' ? JSON.parse(seanceData) : seanceData;
         const exercices = (sd && sd.exercices) || [];
+        let savedExercices = [];
         if (exercices.length) {
           const exPayload = exercices.map((ex, ei) => ({
             seance_id: savedSeance.id, nom: ex.nom||'Exercice', ordre: ei,
             series: ex.series || null, reps: ex.repsCible || ex.reps || null,
             repos: null, tempo: null, rir: null,
           }));
-          await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,
-            { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(exPayload) });
+          const exRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,
+            { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(exPayload) });
+          if (exRes.ok) savedExercices = await exRes.json();
         }
-      } catch(e2) { /* exercices non critiques */ }
+        // Logs : charger toutes les semaines en parallèle
+        if (savedExercices.length && semaines.length) {
+          const semLogsData = await Promise.all(semaines.map(async sem => {
+            try {
+              const raw = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: sem });
+              const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              return { sem, exercices: (d && d.exercices) || [] };
+            } catch(e) { return { sem, exercices: [] }; }
+          }));
+          const logsPayload = [];
+          semLogsData.forEach(({ sem, exercices: exsSem }) => {
+            exsSem.forEach((ex, ei) => {
+              const exId = savedExercices[ei]?.id;
+              if (!exId) return;
+              (ex.sets || []).forEach((set, si) => {
+                if (set.charge === '' && set.reps === '' && set.rir === '') return;
+                logsPayload.push({
+                  client_programme_exercice_id: exId,
+                  semaine: sem,
+                  numero_serie: set.serie,
+                  charge: parseFloat(set.charge) || null,
+                  reps: parseInt(set.reps) || null,
+                  rir: set.rir !== '' ? (parseInt(set.rir) ?? null) : null,
+                  commentaire: si === 0 && ex.note ? ex.note : null,
+                });
+              });
+            });
+          });
+          if (logsPayload.length) {
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
+              { method:'POST', headers:supaHeaders({ Prefer:'return=minimal,resolution=merge-duplicates' }), body:JSON.stringify(logsPayload) });
+          }
+        }
+      } catch(e2) { /* non critique */ }
     }
 
     // 4. Recharger supaClientProgs
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
     migPreviewData.supaClientProgs = r2.ok ? await r2.json() : migPreviewData.supaClientProgs;
 
-    if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Programme importé et assigné. ${seances.length} séances créées.</div>`;
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Programme importé. ${seances.length} séances · ${semaines.length} semaines de logs.</div>`;
     document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = false);
     const c = document.getElementById('migProgDetail');
     if (c) c.innerHTML = _renderProgGASDetail(migPreviewFeuilleData, migPreviewData.supaClientProgs);
