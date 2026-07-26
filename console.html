@@ -908,6 +908,10 @@ async function lancerImportSheets(){
   const communaute = (baseData.communaute || []).filter(a => a.valide);
   const total = coach.length + communaute.length;
 
+  // Stocker les données dans des variables globales pour éviter les guillemets dans onclick
+  window._importCoach = coach;
+  window._importCommunaute = communaute;
+
   modal.innerHTML = `<div class="modal-box" style="max-width:480px;">
     <h3>Importer depuis Google Sheets</h3>
     <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
@@ -927,7 +931,7 @@ async function lancerImportSheets(){
     <div id="importSheetsErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('modal-import-sheets').remove()">Annuler</button>
-      <button class="btn primary" id="btnLancerImport" onclick="executerImportSheets(${JSON.stringify(coach)},${JSON.stringify(communaute)})">Importer ${total} aliments</button>
+      <button class="btn primary" id="btnLancerImport" onclick="executerImportSheets(window._importCoach, window._importCommunaute)">Importer ${total} aliments</button>
     </div>
   </div>`;
 }
