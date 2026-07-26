@@ -107,7 +107,8 @@ async function ouvrirSaisieMensuration(ligne) {
   } catch(e) { setPage('mensurations'); }
 }
 
-function ouvrirSaisieMensurationSupabase(dateISO, existant) {
+function ouvrirSaisieMensurationSupabase(dateISO) {
+  const existant = _mReleves.find(r => r.date === dateISO);
   _mFormData = {
     date:   dateISO,
     poids:  existant ? existant.poids  : null,
@@ -244,7 +245,7 @@ function renderSaisieList() {
 function renderSaisieListSupabase() {
   const today = isoDate(new Date());
   const rows = _mReleves.slice().reverse().map(r => `
-    <div class="list-item" onclick="ouvrirSaisieMensurationSupabase('${r.date}', _mReleves.find(x=>x.date==='${r.date}'))">
+    <div class="list-item" onclick="ouvrirSaisieMensurationSupabase('${r.date}')">
       <div class="list-text">
         <div class="list-title">${_mAfficherDate(r.date)}</div>
         <div class="list-sub">${r.poids ? r.poids + ' kg' : 'Poids non renseigné'}${r.taille ? ' · ' + r.taille + ' cm' : ''}</div>

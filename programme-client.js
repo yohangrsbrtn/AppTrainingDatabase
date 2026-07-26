@@ -60,23 +60,23 @@ async function chargerLogsProgramme(){
 
 function renderProgrammeClientPage(){
   if (S.page === 'programme-client-loading') {
-    return `<div id="app">${renderHeader('Mon programme','',true)}<div class="page">${renderSpinner()}</div></div>`;
+    return `<div id="app">${renderHeader('Programme','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('training')}</div>`;
   }
   if (_pcClientProgramme === 'error') {
-    return `<div id="app">${renderHeader('Mon programme','',true)}<div class="page">
+    return `<div id="app">${renderHeader('Programme','',false)}<div class="page">
       <div class="empty"><div class="empty-text">Erreur de chargement.</div>
       <button class="btn-secondary" style="margin-top:12px;" onclick="loadProgrammeClient()">Réessayer</button></div>
-    </div></div>`;
+    </div>${renderNavBar('training')}</div>`;
   }
   if (!_pcClientProgramme) {
-    return `<div id="app">${renderHeader('Mon programme','',true)}<div class="page">
+    return `<div id="app">${renderHeader('Programme','',false)}<div class="page">
       <div class="empty"><div class="empty-text">Aucun programme assigné pour l'instant.</div></div>
-    </div></div>`;
+    </div>${renderNavBar('training')}</div>`;
   }
   const cp = _pcClientProgramme;
   const totalSemaines = cp.blocs.reduce((s,b) => s + (b.nombre_semaines || 1), 0) || 1;
   return `<div id="app">
-    ${renderHeader('Mon programme', cp.nom, true)}
+    ${renderHeader(esc(cp.nom), 'Mon programme', false)}
     <div class="page">
       <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <button class="btn-secondary" style="width:auto;padding:8px 14px;margin:0;" onclick="pcChangerSemaine(-1)">‹</button>
@@ -91,6 +91,7 @@ function renderProgrammeClientPage(){
         ${(bloc.client_programme_seances||[]).map(seance => renderPcSeance(seance)).join('')}
       `).join('') || `<div class="empty"><div class="empty-text">Ce programme n'a pas encore de séance.</div></div>`}
     </div>
+    ${renderNavBar('training')}
   </div>`;
 }
 
