@@ -109,7 +109,7 @@ async function ouvrirDieteSupabase(templateNom) {
   setPage('diete-loading');
   try {
     const tmplRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&select=id,nom`,
+      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id,nom`,
       { headers: supaHeaders() }
     );
     const templates = tmplRes.ok ? await tmplRes.json() : [];
@@ -120,7 +120,7 @@ async function ouvrirDieteSupabase(templateNom) {
     const tmplId = templates[0].id;
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
-      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
@@ -135,11 +135,17 @@ async function ouvrirDieteSupabase(templateNom) {
     const toAliments = r => (r.repas_aliments || []).map(a => {
       const al = a.aliments_coach || {};
       const q  = a.quantite_g || 0;
-      return { nom: al.nom||'?', qte: q,
-        cals: Math.round((al.kcal_par_gramme||0)*q),
-        prot: Math.round((al.prot_par_gramme||0)*q*10)/10,
-        glu:  Math.round((al.glu_par_gramme ||0)*q*10)/10,
-        lip:  Math.round((al.lip_par_gramme ||0)*q*10)/10 };
+      // Fallback sur colonnes directes pour aliments migrés (sans FK aliments_coach)
+      const nom  = al.nom  || a.nom  || '?';
+      const kcal = al.kcal_par_gramme ?? a.kcal_par_gramme ?? 0;
+      const prot = al.prot_par_gramme ?? a.prot_par_gramme ?? 0;
+      const glu  = al.glu_par_gramme  ?? a.glu_par_gramme  ?? 0;
+      const lip  = al.lip_par_gramme  ?? a.lip_par_gramme  ?? 0;
+      return { nom, qte: q,
+        cals: Math.round(kcal*q),
+        prot: Math.round(prot*q*10)/10,
+        glu:  Math.round(glu*q*10)/10,
+        lip:  Math.round(lip*q*10)/10 };
     });
 
     _dDetail = {
