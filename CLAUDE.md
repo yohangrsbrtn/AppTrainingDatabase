@@ -26,9 +26,10 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 - `programme-client.js` — page "Mon programme" côté client : **lecture seule** (logs charge/reps/RIR/commentaire via `pcSauverLog()`). ✅ Supabase-only opérationnel.
 - `bilan.js` — page Bilan client. Appelle encore GAS → **à porter sur Supabase**.
 - `training.js` — page Training client. Appelle encore GAS → **à porter**.
-- `diete.js` — page Diète client. Appelle encore GAS → **à porter**.
+- `diete.js` — page Diète client. ✅ Mode Supabase opérationnel (multi-diètes, repas équivalents swipeables). Mode GAS encore actif pour les autres fonctions (menus, journal).
 - `mensurations.js` — page Mensurations client. Appelle encore GAS → **à porter** (table `mensurations` Supabase existe déjà).
-- `recettes.js`, `progression.js`, `collection.js`, `coach.js`, `protocole.js` — autres pages, portage à faire.
+- `recettes.js` — page Recettes client. ✅ Mode Supabase opérationnel (lecture depuis table `recettes`).
+- `progression.js`, `collection.js`, `coach.js`, `protocole.js` — autres pages, portage à faire.
 
 ## Schéma Supabase
 
@@ -50,8 +51,10 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 ### Diète
 
 - **`diete_templates`** → **`repas`** → **`repas_aliments`**
-- **`client_dietes`** : `{ id, client_id, nom, actif, created_at }` — une seule active à la fois
+- **`repas`** : `{ id, template_id, nom, ordre, variante_index INT DEFAULT 0, ... }` — repas avec même `(template_id, ordre)` mais `variante_index` différent = repas équivalents (swipeables côté client). FK column = **`template_id`** (pas `diete_template_id`).
+- **`client_dietes`** : `{ id, client_id, nom, actif, created_at }` — **plusieurs diètes actives simultanées** autorisées (Jour On, Jour Off, etc.). `actif=false` = archivée.
 - **`aliments_coach`** : `{ id, nom, categorie, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme }`
+- **`recettes`** : `{ id, nom, emoji, categorie, description, temps_prep_min, portions, kcal_par_portion, prot_par_portion, glu_par_portion, lip_par_portion, ingredients JSONB, etapes JSONB }` — éditables uniquement par le coach depuis console.html → onglet Recettes dans Diètes.
 
 ### Mensurations
 
@@ -91,26 +94,42 @@ Dropdown client → charge Supabase. Bouton "⬇ Migrer depuis GAS".
 
 5 onglets : profil, programmes, diète, progression, notes.
 
+### Diètes (`state.nav='dietes'`) ✅
+
+2 onglets :
+- **Templates diète** : liste, éditeur (repas groupés par `ordre`, bouton "≡ + Variante" pour repas équivalents)
+- **Recettes** : CRUD recettes coach (table `recettes` Supabase)
+
+### Migration (`state.nav='migration'`) ✅
+
+Prévisualisation + import depuis GAS prod. 4 onglets : infos | mensurations | diète | programme.
+
+### Fiche client (`state.nav='fiche-client'`) ✅
+
+5 onglets : profil, programmes, diète, progression, notes.
+- Diète : liste toutes les diètes assignées (plusieurs simultanées OK), boutons "+ Assigner" / "+ Créer" / "Retirer".
+
 ### Pages coach opérationnelles ✅
 
-Dashboard, Clients, Classement, Base alimentaire, Programmes, Diètes, Protocole.
+Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocole.
 
 ## Pages cliente (index.html) — État
 
 ### ✅ Opérationnelles Supabase
 
-- **Login supabase_only** : flux d'auth Supabase (verifierClientSupabase)
-- **Home Supabase** (`renderHomeSupabase`) : affiche uniquement "Mon programme" pour l'instant
-- **Mon programme** (`programme-client.js`) : lecture arborescence + logs charge/reps/RIR
+- **Login supabase_only** : flux d'auth Supabase (`verifierClientSupabase`)
+- **Home Supabase** (`renderHomeSupabase`) : affiche "Mon programme"
+- **Mon programme** (`programme-client.js`) : arborescence blocs/séances, logs charge/reps/RIR, chrono, semaine selector
+- **Ma diète** (`diete.js`) : multi-diètes (Jour On/Off…), repas équivalents swipeables, recalcul macros en temps réel
+- **Recettes** (`recettes.js`) : liste + détail depuis table `recettes` Supabase
 
 ### 🔧 À porter sur Supabase (appellent encore GAS)
 
-- **Mensurations** : table `mensurations` existe → priorité haute, portage rapide
-- **Ma diète** : `client_dietes` + `diete_templates` existent → priorité haute
+- **Mensurations** : table `mensurations` existe → portage rapide
 - **Bilan** : logique complexe, schema Supabase à définir
 - **Training/Séance** : dépend du bilan
 - **Progression/Collection** : XP, niveaux, titres — à définir en Supabase
-- **Recettes, Classement, Profil** : secondaires
+- **Classement, Profil** : secondaires
 
 ## Pièges connus
 
@@ -118,7 +137,8 @@ Dashboard, Clients, Classement, Base alimentaire, Programmes, Diètes, Protocole
 - **`assignerTemplateAuClient`** : vérifier `templatesData` chargé avant `.find()`.
 - **Règle permanente : `font-size` ≥ 16px** sur tout `input`/`textarea`/`select` — Safari iOS zoome sinon
 - **`supaHeaders(extra)`** — toujours `{ Prefer: 'return=representation,resolution=merge-duplicates' }` pour les upserts
-- **Un seul programme actif / une seule diète active** par client
+- **Un seul programme actif** par client (contrainte maintenue). **Plusieurs diètes actives** simultanées autorisées (Jour On/Off).
+- **`repas.template_id`** (pas `diete_template_id`) — bug connu dans ancien code diete.js, corrigé.
 - **`client_profils`** (avec 's') ≠ `client_profiles` (table PWA prod avec 'es')
 - **Deux GAS distincts** : `api.js` → GAS sandbox. Migrations → `GAS_PROD_URL` via `apiGasProd()`. Ne pas mélanger.
 - **`GAS_ID_MAP`** : `yohanp` → `yohan` pour toute lecture GAS.
