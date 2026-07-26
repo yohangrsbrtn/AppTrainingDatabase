@@ -26,7 +26,7 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 - `programme-client.js` — page "Mon programme" côté client : **lecture seule** (logs charge/reps/RIR/commentaire via `pcSauverLog()`). ✅ Supabase-only opérationnel.
 - `bilan.js` — page Bilan client. Appelle encore GAS → **à porter sur Supabase**.
 - `training.js` — page Training client. Appelle encore GAS → **à porter**.
-- `diete.js` — page Diète client. ✅ Mode Supabase opérationnel (multi-diètes, repas équivalents swipeables). Mode GAS encore actif pour les autres fonctions (menus, journal).
+- `diete.js` — page Diète client. ✅ Mode Supabase opérationnel (multi-diètes, repas équivalents swipeables, aliments migrés). Mode GAS encore actif pour les autres fonctions (menus, journal).
 - `mensurations.js` — page Mensurations client. Appelle encore GAS → **à porter** (table `mensurations` Supabase existe déjà).
 - `recettes.js` — page Recettes client. ✅ Mode Supabase opérationnel (lecture depuis table `recettes`).
 - `progression.js`, `collection.js`, `coach.js`, `protocole.js` — autres pages, portage à faire.
@@ -50,9 +50,10 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 
 ### Diète
 
-- **`diete_templates`** → **`repas`** → **`repas_aliments`**
-- **`repas`** : `{ id, template_id, nom, ordre, variante_index INT DEFAULT 0, ... }` — repas avec même `(template_id, ordre)` mais `variante_index` différent = repas équivalents (swipeables côté client). FK column = **`template_id`** (pas `diete_template_id`).
-- **`client_dietes`** : `{ id, client_id, nom, actif, created_at }` — **plusieurs diètes actives simultanées** autorisées (Jour On, Jour Off, etc.). `actif=false` = archivée.
+- **`diete_templates`** : `{ id, nom, description, client_only BOOL DEFAULT false }` — `client_only=true` = diète privée créée pour un client spécifique (migration ou "+ Créer" sans cocher "template réutilisable"). Filtrée de la liste des templates réutilisables dans `chargerDieteTemplates()`.
+- **`repas`** : `{ id, template_id, nom, ordre, variante_index INT DEFAULT 0 }` — repas avec même `(template_id, ordre)` mais `variante_index` différent = repas équivalents (swipeables côté client). FK column = **`template_id`** (pas `diete_template_id`).
+- **`repas_aliments`** : `{ id, repas_id, nom, quantite_g, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme, ordre }` — les aliments migrés depuis GAS stockent leurs macros **directement** dans ces colonnes (pas de FK `aliments_coach`). `diete.js` lit `aliments_coach` en priorité, puis fallback sur les colonnes directes.
+- **`client_dietes`** : `{ id, client_id, nom, actif, created_at }` — **plusieurs diètes actives simultanées** autorisées (Jour On, Jour Off, etc.). `actif=false` = archivée. Lien vers template via `nom` (pas de FK directe).
 - **`aliments_coach`** : `{ id, nom, categorie, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme }`
 - **`recettes`** : `{ id, nom, emoji, categorie, description, temps_prep_min, portions, kcal_par_portion, prot_par_portion, glu_par_portion, lip_par_portion, ingredients JSONB, etapes JSONB }` — éditables uniquement par le coach depuis console.html → onglet Recettes dans Diètes.
 
@@ -80,11 +81,12 @@ Page refaite avec 2 onglets :
 
 ### Migration (`state.nav='migration'`) ✅
 
-Outil migration GAS prod → Supabase.
-- **Prévisualisation** (`state.nav='migration-preview'`) : par client, 2 onglets (Dashboard profil, Mensurations avec sélection ligne par ligne). Onglet Bilans = placeholder.
+Prévisualisation + import depuis GAS prod. 4 onglets : infos | mensurations | diète | programme.
 - **`GAS_PROD_URL`** : URL GAS prod, distincte du GAS sandbox.
 - **`GAS_ID_MAP`** : `{ 'yohanp': 'yohan' }` — mapping ID Supabase → ID GAS.
 - **`apiGasProd(action, clientId, params)`** : lit toujours le GAS prod.
+- **Diète** : preview avec équivalences visibles, checkbox "Créer un template réutilisable" (décoché = `client_only=true`). Import crée template + repas + variantes (équivalences) + aliments + `client_dietes`. Ne désactive **pas** les diètes existantes (multi-diètes).
+- **Programme** : import structure (blocs/séances/exercices) + logs (charge/reps/rir/note) pour toutes les semaines. Semaines chargées en parallèle par séance.
 
 ### Mensurations (`state.nav='mensurations'`) ✅
 
@@ -92,22 +94,15 @@ Dropdown client → charge Supabase. Bouton "⬇ Migrer depuis GAS".
 
 ### Fiche client (`state.nav='fiche-client'`) ✅
 
-5 onglets : profil, programmes, diète, progression, notes.
+5 onglets : profil, programmes, diète, progression, notes. Onglets surlignés en jaune correctement au changement.
+- **Diète** : liste toutes les diètes assignées (plusieurs simultanées OK), boutons "+ Assigner" / "+ Créer" / "Éditer" / "Retirer". "Éditer" charge le template par `nom` (sans filtre `client_only`) et ouvre l'éditeur ; après save, retour automatique sur la fiche.
+- **`_ficheCreateClientId`** : clientId pour création nouvelle diète depuis fiche. **`_ficheEditClientId`** : clientId pour édition diète depuis fiche.
 
 ### Diètes (`state.nav='dietes'`) ✅
 
 2 onglets :
-- **Templates diète** : liste, éditeur (repas groupés par `ordre`, bouton "≡ + Variante" pour repas équivalents)
+- **Templates diète** : liste (`client_only=false` uniquement), éditeur (repas groupés par `ordre`, bouton "≡ + Variante" pour repas équivalents)
 - **Recettes** : CRUD recettes coach (table `recettes` Supabase)
-
-### Migration (`state.nav='migration'`) ✅
-
-Prévisualisation + import depuis GAS prod. 4 onglets : infos | mensurations | diète | programme.
-
-### Fiche client (`state.nav='fiche-client'`) ✅
-
-5 onglets : profil, programmes, diète, progression, notes.
-- Diète : liste toutes les diètes assignées (plusieurs simultanées OK), boutons "+ Assigner" / "+ Créer" / "Retirer".
 
 ### Pages coach opérationnelles ✅
 
@@ -120,7 +115,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **Login supabase_only** : flux d'auth Supabase (`verifierClientSupabase`)
 - **Home Supabase** (`renderHomeSupabase`) : affiche "Mon programme"
 - **Mon programme** (`programme-client.js`) : arborescence blocs/séances, logs charge/reps/RIR, chrono, semaine selector
-- **Ma diète** (`diete.js`) : multi-diètes (Jour On/Off…), repas équivalents swipeables, recalcul macros en temps réel
+- **Ma diète** (`diete.js`) : multi-diètes (Jour On/Off…), repas équivalents swipeables, aliments migrés (fallback colonnes directes)
 - **Recettes** (`recettes.js`) : liste + détail depuis table `recettes` Supabase
 
 ### 🔧 À porter sur Supabase (appellent encore GAS)
@@ -146,7 +141,10 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **`chargerBilanParLigne(client, ligneTitre)`** → données complètes d'un bilan (jours, repas, commentaires).
 - **Nested select Supabase** : filtres d'ordre sur tables imbriquées → `&table_enfant.order=colonne.asc` dans le query string.
 - **`alimentsCoachData`** : lazy-loadé (null jusqu'au premier accès).
-- **Voir les assignés** : utilise `nom=eq.` sur `client_programmes`/`client_dietes` — si deux templates ont le même nom, résultats mélangés.
+- **Plusieurs templates avec le même nom** : `diete.js` prend le plus récent (`order=id.desc&limit=1`). La migration ne désactive plus les diètes existantes. Si deux templates partagent le même nom, le plus récent gagne côté client.
+- **Aliments migrés** : `repas_aliments` stocke macros directement (pas de FK `aliments_coach`). `diete.js` fait fallback sur les colonnes directes. L'éditeur coach (`editerDieteClient`) lit aussi directement via `select=*,repas_aliments(*)`.
+- **Re-migrer après ajout de fonctionnalités** : les équivalences et logs programme n'étaient pas importés dans les anciennes migrations — re-migrer pour avoir les données complètes.
+- **`client_only` sur `diete_templates`** : ajouté manuellement via SQL (`ALTER TABLE diete_templates ADD COLUMN IF NOT EXISTS client_only BOOLEAN NOT NULL DEFAULT false`). Idem `variante_index` sur `repas`.
 
 ## Workflow
 
