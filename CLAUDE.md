@@ -41,6 +41,7 @@ Bac à sable de développement pour la migration de l'app de coaching vers Supab
 
 - **`diete_templates`** → **`repas`** → **`repas_aliments`** — macros recalculées à l'affichage depuis `quantite_g × valeur_par_gramme`
 - **`client_dietes`** : programme de diète assigné à un client
+- **`aliments_coach`** : `{ id, nom, categorie, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme, created_at }` — bibliothèque d'aliments du coach, valeurs par gramme
 
 ### Coach
 
@@ -69,12 +70,13 @@ Page dédiée dans `#main`. `openPanel(id)` → `state.nav='fiche-client'`. Char
 
 **Voir les assignés** : bouton 👥 sur chaque template (programme et diète) → modal `ouvrirAssignesTemplate` / `ouvrirAssignesDiete` — requête par `nom` sur `client_programmes`/`client_dietes`.
 
-**Schéma Supabase (diètes)** à créer si absent :
+**Schéma Supabase (diètes + base alimentaire)** à créer si absent :
 ```sql
 CREATE TABLE IF NOT EXISTS diete_templates (id SERIAL PRIMARY KEY, nom TEXT NOT NULL, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS repas (id SERIAL PRIMARY KEY, template_id INTEGER REFERENCES diete_templates(id) ON DELETE CASCADE, nom TEXT NOT NULL, ordre INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS repas_aliments (id SERIAL PRIMARY KEY, repas_id INTEGER REFERENCES repas(id) ON DELETE CASCADE, nom TEXT NOT NULL, quantite_g NUMERIC NOT NULL DEFAULT 0, kcal_par_gramme NUMERIC, prot_par_gramme NUMERIC, glu_par_gramme NUMERIC, lip_par_gramme NUMERIC, ordre INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS client_dietes (id SERIAL PRIMARY KEY, client_id TEXT NOT NULL, nom TEXT, actif BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS aliments_coach (id SERIAL PRIMARY KEY, nom TEXT NOT NULL, categorie TEXT, kcal_par_gramme NUMERIC NOT NULL DEFAULT 0, prot_par_gramme NUMERIC NOT NULL DEFAULT 0, glu_par_gramme NUMERIC NOT NULL DEFAULT 0, lip_par_gramme NUMERIC NOT NULL DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW());
 ```
 
 ## Pièges connus
@@ -90,6 +92,9 @@ CREATE TABLE IF NOT EXISTS client_dietes (id SERIAL PRIMARY KEY, client_id TEXT 
 - **`client_profils`** (avec 's') — ne pas confondre avec `client_profiles` (table de la PWA production qui s'écrit avec 'es')
 - **Le client ne peut pas modifier son programme** — `programme-client.js` est lecture seule.
 - **Voir les assignés** utilise `nom=eq.` sur `client_programmes`/`client_dietes` — si deux templates ont le même nom, les résultats seront mélangés.
+- **`alimentsCoachData`** : lazy-loadé (null jusqu'au premier accès). Chargé automatiquement à l'ouverture de la page Base alimentaire ou du modal d'ajout d'aliment (onglet "Base coach"). Toujours vérifier `=== null` avant usage.
+- **Open Food Facts** : requête à la demande via `rechercherOpenFoodFacts(q)`. Les macros retournées sont déjà par gramme (÷100 appliqué). Ne jamais faire d'import en masse.
+- **Modal ajout aliment** : 3 onglets — "Base coach" (recherche `alimentsCoachData`), "Open Food Facts" (fetch ON OFF), "Manuel" (saisie libre). État dans `ajoutAlimTab` et `ajoutAlimRI`. `_ouvrirSaisieQuantite()` est le point d'entrée commun après sélection base/OFF.
 
 ## Workflow
 
