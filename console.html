@@ -1250,6 +1250,7 @@ async function confirmerAssignerTemplate(templateId){
 }
 async function assignerTemplateAuClient(templateId, clientId){
   if (exercicesData === null) exercicesData = await chargerExercices();
+  if (templatesData === null) templatesData = await chargerTemplates();
   const tpl = templatesData.find(t => t.id === templateId);
   const blocsArbo = await chargerTemplateArbo(templateId);
 
@@ -1491,7 +1492,23 @@ async function chargerProgrammeActif(clientId){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&order=created_at.desc&limit=1`, { headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
   const rows = await res.json();
-  return rows[0] || null;
+  if (!rows.length) return null;
+  const cp = rows[0];
+  const resArbo = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${cp.id}&order=ordre.asc` +
+    `&select=*,client_programme_seances(*,client_programme_exercices(*))` +
+    `&client_programme_seances.order=ordre.asc&client_programme_seances.client_programme_exercices.order=ordre.asc`,
+    { headers: supaHeaders() }
+  );
+  const blocs = resArbo.ok ? await resArbo.json() : [];
+  const exIds = [];
+  blocs.forEach(b => (b.client_programme_seances||[]).forEach(s => (s.client_programme_exercices||[]).forEach(ex => exIds.push(ex.id))));
+  let logs = {};
+  if (exIds.length) {
+    const resLogs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() });
+    if (resLogs.ok) (await resLogs.json()).forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+  }
+  return Object.assign({}, cp, { blocs, logs });
 }
 
 // ── Fiche client — page dédiée ──────────────────────────────────────
@@ -1571,12 +1588,7 @@ function renderFicheClientPage(el){
       <div style="display:flex;flex-direction:column;gap:16px;">
         <div class="fiche-card">
           <h3>Programme actif</h3>
-          ${prog ? `
-            <div class="fiche-prog">
-              <div class="nom">${esc(prog.nom||'Programme sans nom')}</div>
-              <div class="meta">Semaine ${esc(prog.semaine_courante||1)} · actif depuis ${prog.created_at ? new Date(prog.created_at).toLocaleDateString('fr-FR') : '—'}</div>
-            </div>
-          ` : `<div class="fiche-prog-empty">Aucun programme assigné.<br><a href="#" onclick="setNav('programmes');return false;" style="color:var(--accent);font-style:normal;">→ Aller aux programmes</a></div>`}
+          ${prog ? renderFicheProgDetail(prog) : `<div class="fiche-prog-empty">Aucun programme assigné.<br><a href="#" onclick="setNav('programmes');return false;" style="color:var(--accent);font-style:normal;">→ Aller aux programmes</a></div>`}
         </div>
 
         <div class="fiche-card">
@@ -1615,6 +1627,59 @@ function renderFicheClientPage(el){
           <div class="meta"><span class="date">${fmtDateNote(n.created_at)}</span><button class="del" onclick="supprimerNoteFiche(${n.id},'${c.id}')">Supprimer</button></div>
         </div>`).join('') : `<div style="color:var(--text-faint);font-size:12.5px;">Aucune note pour ce client.</div>`}
     </div>`;
+}
+
+const BLOC_LABELS_COACH = { metabolique:'Métabolique', mecanique:'Mécanique', force:'Force' };
+let ficheSemaine = 1;
+
+function renderFicheProgDetail(prog){
+  const blocs = prog.blocs || [];
+  const logs = prog.logs || {};
+  const totalSemaines = blocs.reduce((s,b)=>s+(b.nombre_semaines||1),0)||1;
+  const nbSeances = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).length,0);
+  const nbExo = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).reduce((s2,se)=>s2+(se.client_programme_exercices||[]).length,0),0);
+  return `
+    <div class="fiche-prog">
+      <div class="nom">${esc(prog.nom||'Programme sans nom')}</div>
+      <div class="meta">${nbSeances} séance${nbSeances>1?'s':''} · ${nbExo} exercice${nbExo>1?'s':''} · assigné le ${prog.created_at?new Date(prog.created_at).toLocaleDateString('fr-FR'):'—'}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0 10px;">
+      <button class="btn" style="padding:5px 11px;" onclick="ficheSemaineChanger(-1)">‹</button>
+      <span style="font-size:13px;font-weight:700;">Semaine ${ficheSemaine}${totalSemaines>1?' / '+totalSemaines:''}</span>
+      <button class="btn" style="padding:5px 11px;" onclick="ficheSemaineChanger(1)">›</button>
+    </div>
+    ${blocs.map(b=>`
+      ${b.type?`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:10px 0 4px;">${esc(BLOC_LABELS_COACH[b.type]||b.type)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem.':''}</div>`:''}
+      ${(b.client_programme_seances||[]).map(s=>`
+        <div style="background:var(--surface-2);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;">
+          <div style="padding:9px 12px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);">${esc(s.titre)}</div>
+          ${(s.client_programme_exercices||[]).map(ex=>{
+            const nbSeries = ex.series||1;
+            let seriesHtml='';
+            for(let sr=1;sr<=nbSeries;sr++){
+              const l=logs[ex.id+'|'+ficheSemaine+'|'+sr]||{};
+              const hasLog = l.charge!=null||l.reps!=null;
+              seriesHtml+=`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:2px 0;">
+                <span style="color:var(--text-faint);width:16px;">#${sr}</span>
+                <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);'}">
+                  ${hasLog?(l.charge!=null?l.charge+'kg ':'')+''+(l.reps!=null?l.reps+' reps ':'')+''+(l.rir?'RIR '+l.rir:''):'—'}
+                </span>
+              </div>`;
+            }
+            return `<div style="padding:8px 12px;border-top:1px solid var(--hairline);">
+              <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${esc(ex.nom)}</div>
+              <div style="font-size:11px;color:var(--text-faint);margin-bottom:6px;">Cible : ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · repos '+esc(ex.repos):''}${ex.rir?' · RIR '+esc(ex.rir):''}</div>
+              ${seriesHtml}
+              ${(()=>{const cl=logs[ex.id+'|'+ficheSemaine+'|1'];return cl&&cl.commentaire?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">${esc(cl.commentaire)}</div>`:'';})()}
+            </div>`;
+          }).join('')||`<div style="padding:8px 12px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
+        </div>`).join('')}
+    `).join('')||`<div class="fiche-prog-empty">Aucune séance dans ce programme.</div>`}`;
+}
+
+function ficheSemaineChanger(delta){
+  ficheSemaine = Math.max(1, ficheSemaine + delta);
+  if (state.nav==='fiche-client') renderMain();
 }
 
 async function sauvegarderFicheSandbox(clientId){
