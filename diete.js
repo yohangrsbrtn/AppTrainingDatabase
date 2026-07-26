@@ -91,53 +91,68 @@ async function loadDieteSupabase() {
   setPage('diete-loading');
   try {
     const cdRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&select=id,nom`,
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&order=created_at.asc&select=id,nom`,
       { headers: supaHeaders() }
     );
     const clientDietes = cdRes.ok ? await cdRes.json() : [];
-    if (!clientDietes.length) {
-      _dDietes = []; _dSubPage = 'list'; setPage('diete'); return;
-    }
-    const nomDiete = clientDietes[0].nom;
+    _dDietes = clientDietes.map(d => ({ id: d.id, nom: d.nom, _supabase: true }));
+    if (!_dDietes.length) { _dSubPage = 'list'; setPage('diete'); return; }
+    // Une seule diète → ouvrir directement. Plusieurs → afficher la liste.
+    if (_dDietes.length === 1) { await ouvrirDieteSupabase(_dDietes[0].nom); return; }
+    _dSubPage = 'list';
+    setPage('diete');
+  } catch(e) { setPage('home'); }
+}
 
+async function ouvrirDieteSupabase(templateNom) {
+  _dNom = templateNom;
+  setPage('diete-loading');
+  try {
     const tmplRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nomDiete)}&select=id,nom`,
+      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&select=id,nom`,
       { headers: supaHeaders() }
     );
     const templates = tmplRes.ok ? await tmplRes.json() : [];
     if (!templates.length) {
-      _dDetail = { nom: nomDiete, repas: [] };
-      _dNom = nomDiete; _dSubPage = 'detail'; setPage('diete'); return;
+      _dDetail = { nom: templateNom, repas: [] };
+      _dSubPage = 'detail'; setPage('diete'); return;
     }
-
     const tmplId = templates[0].id;
     const repasRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/repas?diete_template_id=eq.${tmplId}&order=ordre.asc` +
-      `&select=id,nom,ordre,repas_aliments(quantite_g,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+      `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
+      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
 
-    // Convertir en format GAS pour réutiliser renderDieteDetail() tel quel
-    _dNom = nomDiete;
+    // Grouper par ordre ; variantes au même ordre = équivalences swipeables
+    const grouped = {};
+    repasRaw.forEach(r => {
+      if (!grouped[r.ordre]) grouped[r.ordre] = [];
+      grouped[r.ordre].push(r);
+    });
+
+    const toAliments = r => (r.repas_aliments || []).map(a => {
+      const al = a.aliments_coach || {};
+      const q  = a.quantite_g || 0;
+      return { nom: al.nom||'?', qte: q,
+        cals: Math.round((al.kcal_par_gramme||0)*q),
+        prot: Math.round((al.prot_par_gramme||0)*q*10)/10,
+        glu:  Math.round((al.glu_par_gramme ||0)*q*10)/10,
+        lip:  Math.round((al.lip_par_gramme ||0)*q*10)/10 };
+    });
+
     _dDetail = {
-      nom: nomDiete,
-      repas: repasRaw.map(r => ({
-        nom: r.nom,
-        equivalences: [],
-        aliments: (r.repas_aliments || []).map(a => {
-          const al = a.aliments_coach || {};
-          const q  = a.quantite_g || 0;
-          return {
-            nom:  al.nom || '?',
-            qte:  q,
-            cals: Math.round((al.kcal_par_gramme || 0) * q),
-            prot: Math.round((al.prot_par_gramme || 0) * q * 10) / 10,
-            glu:  Math.round((al.glu_par_gramme  || 0) * q * 10) / 10,
-            lip:  Math.round((al.lip_par_gramme  || 0) * q * 10) / 10
-          };
-        })
-      }))
+      nom: templateNom,
+      repas: Object.keys(grouped).map(Number).sort((a,b)=>a-b).map(ordre => {
+        const variants = grouped[ordre];
+        const main = variants[0];
+        return {
+          nom: main.nom,
+          aliments: toAliments(main),
+          equivalences: variants.slice(1).map(v => ({ nom: v.nom, aliments: toAliments(v) }))
+        };
+      })
     };
     _dSubPage = 'detail';
     setPage('diete');
@@ -200,12 +215,15 @@ function renderDieteTabs(actif) {
 function renderDieteList() {
   const body = (!_dDietes || _dDietes.length === 0)
     ? `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">Aucune diète trouvée.</div></div>`
-    : _dDietes.map(d => `
-      <div class="diete-item" onclick="ouvrirDiete(${d.ligne}, ${d.col}, '${(d.nom||'').replace(/'/g,"\\'")}')">
+    : _dDietes.map(d => {
+      const nom = (d.nom||'').replace(/'/g,"\\'");
+      const onclick = d._supabase ? `ouvrirDieteSupabase('${nom}')` : `ouvrirDiete(${d.ligne},${d.col},'${nom}')`;
+      return `<div class="diete-item" onclick="${onclick}">
         <div class="diete-bar"></div>
         <span style="padding-left:8px;font-size:15px;font-weight:700;">${esc(d.nom)}</span>
         <div class="diete-arrow">›</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
   return `<div id="app">
     ${renderHeader('Ma Diète', '', false)}
@@ -283,6 +301,23 @@ function renderDieteDetail() {
     return acc;
   }, { cals: 0, prot: 0, glu: 0, lip: 0 });
 
+  const nRepas = (data.repas || []).length;
+  setTimeout(() => {
+    for (let idx = 0; idx < nRepas; idx++) {
+      const slider = document.getElementById(`dSlider_${idx}`);
+      const dots   = document.getElementById(`dDots_${idx}`);
+      if (!slider) continue;
+      const nbOpts = (_dOptionTotals[idx] || []).length;
+      slider.addEventListener('scroll', () => {
+        const optIdx = Math.min(nbOpts - 1, Math.round(slider.scrollLeft / (slider.clientWidth || 1)));
+        if (_dCurrentOpt[idx] === optIdx) return;
+        _dCurrentOpt[idx] = optIdx;
+        if (dots) dots.textContent = `${optIdx + 1} / ${nbOpts}`;
+        _recalcDieteTotal();
+      }, { passive: true });
+    }
+  }, 150);
+
   return `<div id="app">
     ${renderHeader(esc(_dNom), 'Ma Diète', false)}
     <div id="dStickyMacros" style="position:sticky;top:0;z-index:90;background:var(--bg);padding:10px 16px;box-shadow:0 8px 12px -6px rgba(0,0,0,.4);">
@@ -294,7 +329,7 @@ function renderDieteDetail() {
       </div>
     </div>
     <div class="page">
-      <button class="btn-secondary" onclick="${isSupabase() ? "goTo('home')" : 'loadDiete()'}" style="margin-bottom:12px;">← Retour</button>
+      <button class="btn-secondary" onclick="${isSupabase() ? '_dSubPage=\'list\';setPage(\'diete\')' : 'loadDiete()'}" style="margin-bottom:12px;">← Retour</button>
       ${repasHtml}
     </div>
     ${renderNavBar('diete')}
