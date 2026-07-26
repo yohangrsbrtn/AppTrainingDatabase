@@ -4306,15 +4306,23 @@ function _renderDieteGASDetail(detail, supaClientDietes) {
     kcalTotal += a.cals||0; protTotal += a.prot||0; gluTotal += a.glu||0; lipTotal += a.lip||0;
   }));
 
+  const renderAlims = aliments => (aliments||[]).map(a =>
+    `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--hairline);">
+      <span style="color:var(--text);">${esc(a.nom)}</span>
+      <span style="color:var(--text-faint);font-family:var(--font-mono);">${a.qte}g · ${Math.round(a.cals)}kcal · P${Math.round(a.prot)}g</span>
+    </div>`).join('');
+
   const repasHtml = repas.map(r => {
-    const alims = (r.aliments||[]).map(a =>
-      `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--hairline);">
-        <span style="color:var(--text);">${esc(a.nom)}</span>
-        <span style="color:var(--text-faint);font-family:var(--font-mono);">${a.qte}g · ${Math.round(a.cals)}kcal · P${Math.round(a.prot)}g</span>
+    const equivs = r.equivalences || [];
+    const equivsHtml = equivs.map(eq => `
+      <div style="margin-left:12px;margin-top:6px;padding:6px 8px;border-left:2px solid var(--accent);background:var(--accent-soft);border-radius:0 var(--radius-sm) var(--radius-sm) 0;">
+        <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:4px;">≡ ${esc(eq.nom)}</div>
+        ${renderAlims(eq.aliments) || '<div style="font-size:11px;color:var(--text-faint);">Aucun aliment</div>'}
       </div>`).join('');
     return `<div style="margin-bottom:12px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:6px;">${esc(r.nom)}</div>
-      ${alims || '<div style="font-size:12px;color:var(--text-faint);">Aucun aliment</div>'}
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:6px;">${esc(r.nom)}${equivs.length ? ` <span style="font-weight:400;color:var(--text-faint);">(${equivs.length} équiv.)</span>` : ''}</div>
+      ${renderAlims(r.aliments) || '<div style="font-size:12px;color:var(--text-faint);">Aucun aliment</div>'}
+      ${equivsHtml}
     </div>`;
   }).join('');
 
