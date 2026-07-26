@@ -3217,14 +3217,34 @@ async function ouvrirAssignesDiete(templateId, templateNom){
   }
 }
 
-// ── Mensurations ───────────────────────────────────────────────────────
-let mensurationsClientId = null;
-let mensurationsData = null; // { clientId → [{date,phase,poids,mesure}] }
+// ── Migration helpers ───────────────────────────────────────────────────
+// URL du GAS de production (indépendant du sandbox)
+const GAS_PROD_URL = 'https://script.google.com/macros/s/AKfycbwQiM6ixf-CTIWwcuNHoosFbvrDzWmC056yRUGhTaWv0Nwxbm0dLeK3d5QVgqmS7P9G7A/exec';
+
+// Mapping ID Supabase → ID GAS quand ils diffèrent
+// (ex: compte test "yohanp" utilise la feuille réelle "yohan")
+const GAS_ID_MAP = { 'yohanp': 'yohan' };
+function _gasId(clientId) { return GAS_ID_MAP[clientId] || clientId; }
+
+async function apiGasProd(action, clientId, params = {}) {
+  const body = { action, token: getToken(), client: _gasId(clientId), params };
+  const res = await fetch(GAS_PROD_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'erreur_gas');
+  return json.data;
+}
 
 function _parseDateFr(s) {
   const m = (s||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
+
+// ── Mensurations ───────────────────────────────────────────────────────
+let mensurationsClientId = null;
 
 function renderMensurationsPage(el) {
   if (!mensurationsClientId && data.clients.length) mensurationsClientId = data.clients[0].id;
@@ -3239,7 +3259,7 @@ function renderMensurationsPage(el) {
       <div class="table-toolbar">
         <div class="title">Client</div>
         <select style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;"
-          onchange="mensurationsClientId=this.value;mensurationsData=null;renderMensurationsPage(document.getElementById('main'))">
+          onchange="mensurationsClientId=this.value;renderMensurationsPage(document.getElementById('main'))">
           ${clientOpts}
         </select>
         <button class="btn" onclick="migrerMensurations(mensurationsClientId, true)">⬇ Migrer depuis GAS</button>
@@ -3281,9 +3301,9 @@ async function chargerMensurationsSupabase(clientId) {
 
 async function migrerMensurations(clientId, rafraichirPage) {
   const statusEl = document.getElementById('migStatus_' + clientId) || document.getElementById('mensurationsContent');
-  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Chargement GAS…</div>`;
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Lecture GAS prod (${_gasId(clientId)})…</div>`;
   try {
-    const raw = await apiAs('chargerMensurations', clientId);
+    const raw = await apiGasProd('chargerMensurations', clientId);
     const releves = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
     if (!releves.length) {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Aucune mensuration dans GAS.</span>`;
@@ -3319,18 +3339,23 @@ const PROFILS_CONNUS = [
 ];
 
 function renderMigrationPage(el) {
-  const clientRows = data.clients.map(c => `
-    <tr>
-      <td>${esc(c.nom)}</td>
+  // Clients GAS (non supabase_only) + clients avec mapping GAS connus
+  const clientRows = data.clients.map(c => {
+    const gasId = _gasId(c.id);
+    const badge = gasId !== c.id ? ` <span class="chip off" style="font-size:9px;">GAS: ${gasId}</span>` : '';
+    return `<tr>
+      <td>${esc(c.nom)}${badge}</td>
       <td class="mono" style="color:var(--text-faint);">${esc(c.id)}</td>
       <td><div id="migStatus_${esc(c.id)}"></div></td>
       <td><button class="btn" style="padding:4px 10px;font-size:12px;"
         onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Migration GAS → Supabase</h1></div>
+      <div class="meta" style="font-size:12px;color:var(--text-faint);">Lit toujours le GAS de production</div>
     </div>
 
     <div class="table-card" style="margin-bottom:20px;">
@@ -3338,25 +3363,32 @@ function renderMigrationPage(el) {
       <div style="padding:0 20px 16px;">
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
           Crée ou met à jour les entrées dans <code>client_profils</code> pour les comptes connus.
-          Les champs non renseignés (taille, objectif…) restent modifiables via la fiche client.
+          Les autres champs (taille, objectif…) sont à renseigner via la fiche client.
         </p>
         <div id="profilMigStatus" style="margin-bottom:12px;"></div>
         <button class="btn primary" onclick="migrerProfils()">⬆ Upsert profils connus</button>
       </div>
     </div>
 
-    <div class="table-card">
-      <div class="table-toolbar"><div class="title">Mensurations (GAS → Supabase)</div></div>
+    <div class="table-card" style="margin-bottom:20px;">
+      <div class="table-toolbar"><div class="title">Mensurations (GAS prod → Supabase)</div></div>
       <div style="padding:0 20px 4px;">
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
-          Importe l'historique poids/mesure de chaque client depuis Google Sheets.
-          Les doublons (même client + même date) sont ignorés.
+          Importe l'historique poids/mesure depuis Google Sheets. Doublons ignorés (même client + même date).
+          <br>Les comptes avec un badge <strong>GAS: id</strong> lisent la feuille de cet ID dans GAS.
         </p>
       </div>
       <div class="table-scroll"><table class="alim-table">
-        <thead><tr><th>Client</th><th>ID</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th>Client</th><th>ID Supabase</th><th>Statut</th><th></th></tr></thead>
         <tbody>${clientRows}</tbody>
       </table></div>
+    </div>
+
+    <div class="table-card" style="opacity:0.5;">
+      <div class="table-toolbar"><div class="title">Prochainement</div></div>
+      <div style="padding:12px 20px;font-size:13px;color:var(--text-muted);">
+        Bilans · Programmes · Diètes · Export Supabase → GAS
+      </div>
     </div>`;
 }
 
