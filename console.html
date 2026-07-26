@@ -858,6 +858,8 @@ function _rowsTableCoach(){
   let list = alimentsCoachData || [];
   if (alimBaseSearch) { const q = alimBaseSearch.toLowerCase(); list = list.filter(a=>a.nom.toLowerCase().includes(q)); }
   if (alimBaseCat !== 'all') list = list.filter(a=>a.categorie===alimBaseCat);
+  const total = (alimentsCoachData||[]).length;
+  if (!total) return `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Base vide — clique sur <strong>+ Ajouter</strong> ou importe depuis Open Food Facts.</td></tr>`;
   return list.length ? list.map(a=>`
     <tr>
       <td><strong>${esc(a.nom)}</strong></td>
@@ -871,7 +873,7 @@ function _rowsTableCoach(){
         <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
       </td>
     </tr>`).join('')
-  : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat.</td></tr>`;
+  : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat pour "<em>${esc(alimBaseSearch)}</em>".</td></tr>`;
 }
 
 function _majTableCoach(){
@@ -883,12 +885,32 @@ async function rechercherOFFBase(){
   const q = document.getElementById('offBaseSearch').value.trim();
   if (!q) return;
   alimOffQuery = q;
-  document.getElementById('offBaseResults').innerHTML = `<div style="display:flex;justify-content:center;padding:30px;"><div class="spin"></div></div>`;
+  const container = document.getElementById('offBaseResults');
+  container.innerHTML = `<div style="display:flex;justify-content:center;padding:30px;"><div class="spin"></div></div>`;
   try {
     alimOffResults = await rechercherOpenFoodFacts(q);
-    renderBaseSub();
+    container.innerHTML = alimOffResults.length ? `
+      <div class="table-card"><div class="table-scroll">
+        <table class="alim-table">
+          <thead><tr><th>Nom</th><th>Kcal/100g</th><th>Prot</th><th>Gluc</th><th>Lip</th><th></th></tr></thead>
+          <tbody>
+            ${alimOffResults.map((r,i)=>`
+              <tr>
+                <td><strong>${esc(r.nom)}</strong></td>
+                <td class="mono">${r.kcal!=null?Math.round(r.kcal*100):'—'}</td>
+                <td class="mono">${r.prot!=null?Math.round(r.prot*100)+'g':'—'}</td>
+                <td class="mono">${r.glu!=null?Math.round(r.glu*100)+'g':'—'}</td>
+                <td class="mono">${r.lip!=null?Math.round(r.lip*100)+'g':'—'}</td>
+                <td style="text-align:right;">
+                  <button class="btn primary" style="font-size:11px;padding:4px 9px;" onclick="importerOFFDansBase(${i})">+ Importer</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div></div>`
+    : `<div class="empty-panel" style="margin-top:16px;"><strong>Aucun résultat</strong>Essaie un autre terme de recherche.</div>`;
   } catch(e) {
-    document.getElementById('offBaseResults').innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`;
+    container.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}</div>`;
   }
 }
 
@@ -1014,19 +1036,37 @@ async function supprimerAlimentCoach(id){
 }
 
 async function rechercherOpenFoodFacts(query){
-  const url = `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(query)}&page_size=20&fields=product_name,nutriments&json=1`;
-  const res = await fetch(url);
+  const params = new URLSearchParams({
+    search_terms: query,
+    action: 'process',
+    json: '1',
+    page_size: '30',
+    sort_by: 'unique_scans_n',
+    fields: 'product_name,nutriments',
+    lc: 'fr',
+  });
+  const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?${params}`);
   if (!res.ok) throw new Error('OFF ' + res.status);
   const json = await res.json();
+  const seen = new Set();
   return (json.products||[])
-    .map(p => ({
-      nom: (p.product_name||'').trim(),
-      kcal: (p.nutriments?.['energy-kcal_100g'] ?? p.nutriments?.['energy-kcal'] ?? 0) / 100,
-      prot: (p.nutriments?.proteins_100g ?? p.nutriments?.proteins ?? 0) / 100,
-      glu:  (p.nutriments?.carbohydrates_100g ?? p.nutriments?.carbohydrates ?? 0) / 100,
-      lip:  (p.nutriments?.fat_100g ?? p.nutriments?.fat ?? 0) / 100,
-    }))
-    .filter(p => p.nom);
+    .map(p => {
+      const nom = (p.product_name||'').trim();
+      const kcal = (p.nutriments?.['energy-kcal_100g'] ?? p.nutriments?.['energy-kcal_serving'] ?? null);
+      const prot = (p.nutriments?.proteins_100g ?? null);
+      const glu  = (p.nutriments?.carbohydrates_100g ?? null);
+      const lip  = (p.nutriments?.fat_100g ?? null);
+      return { nom, kcal: kcal!=null?kcal/100:null, prot: prot!=null?prot/100:null, glu: glu!=null?glu/100:null, lip: lip!=null?lip/100:null };
+    })
+    .filter(p => {
+      if (!p.nom || p.nom.length < 2) return false;       // pas de nom
+      if (p.kcal == null && p.prot == null) return false;  // pas de macros du tout
+      const key = p.nom.toLowerCase();
+      if (seen.has(key)) return false;                     // dédoublonnage
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 20);
 }
 
 // ── Page Protocole ─────────────────────────────────────────────────────
