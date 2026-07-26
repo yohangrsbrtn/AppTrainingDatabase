@@ -794,13 +794,10 @@ function renderBaseSub(el){
         <button class="btn primary" onclick="alimentsCoachData=null;alimentsCoachErr=null;renderBasePage(document.getElementById('main'))">Réessayer</button></div>`;
     } else {
       const cats = ALIM_CATEGORIES;
-      let list = alimentsCoachData || [];
-      if (alimBaseSearch) { const q = alimBaseSearch.toLowerCase(); list = list.filter(a=>a.nom.toLowerCase().includes(q)); }
-      if (alimBaseCat !== 'all') list = list.filter(a=>a.categorie===alimBaseCat);
       coachContent = `
         <div class="alim-toolbar">
-          <input type="text" placeholder="Rechercher…" value="${esc(alimBaseSearch)}" oninput="alimBaseSearch=this.value;renderBaseSub()" style="font-size:16px;">
-          <select onchange="alimBaseCat=this.value;renderBaseSub()" style="font-size:16px;">
+          <input type="text" placeholder="Rechercher…" value="${esc(alimBaseSearch)}" oninput="alimBaseSearch=this.value;_majTableCoach()" style="font-size:16px;">
+          <select onchange="alimBaseCat=this.value;_majTableCoach()" style="font-size:16px;">
             <option value="all" ${alimBaseCat==='all'?'selected':''}>Toutes catégories</option>
             ${cats.map(c=>`<option value="${esc(c)}" ${alimBaseCat===c?'selected':''}>${esc(c)}</option>`).join('')}
           </select>
@@ -809,21 +806,7 @@ function renderBaseSub(el){
         <div class="table-card"><div class="table-scroll">
           <table class="alim-table">
             <thead><tr><th>Nom</th><th>Catégorie</th><th>Kcal/100g</th><th>Prot</th><th>Gluc</th><th>Lip</th><th></th></tr></thead>
-            <tbody>
-              ${list.length ? list.map(a=>`
-                <tr>
-                  <td><strong>${esc(a.nom)}</strong></td>
-                  <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
-                  <td class="mono">${Math.round((a.kcal_par_gramme||0)*100)}</td>
-                  <td class="mono">${Math.round((a.prot_par_gramme||0)*100)}g</td>
-                  <td class="mono">${Math.round((a.glu_par_gramme||0)*100)}g</td>
-                  <td class="mono">${Math.round((a.lip_par_gramme||0)*100)}g</td>
-                  <td style="white-space:nowrap;text-align:right;">
-                    <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
-                    <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
-                  </td>
-                </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat.</td></tr>`}
-            </tbody>
+            <tbody id="alim-tbody-coach">${_rowsTableCoach()}</tbody>
           </table>
         </div></div>`;
     }
@@ -869,6 +852,31 @@ function renderBaseSub(el){
       <button class="fiche-tab ${!srcCoach?'active':''}" onclick="alimBaseSource='off';renderBaseSub()">🌍 Open Food Facts</button>
     </div>
     ${coachContent}`;
+}
+
+function _rowsTableCoach(){
+  let list = alimentsCoachData || [];
+  if (alimBaseSearch) { const q = alimBaseSearch.toLowerCase(); list = list.filter(a=>a.nom.toLowerCase().includes(q)); }
+  if (alimBaseCat !== 'all') list = list.filter(a=>a.categorie===alimBaseCat);
+  return list.length ? list.map(a=>`
+    <tr>
+      <td><strong>${esc(a.nom)}</strong></td>
+      <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
+      <td class="mono">${Math.round((a.kcal_par_gramme||0)*100)}</td>
+      <td class="mono">${Math.round((a.prot_par_gramme||0)*100)}g</td>
+      <td class="mono">${Math.round((a.glu_par_gramme||0)*100)}g</td>
+      <td class="mono">${Math.round((a.lip_par_gramme||0)*100)}g</td>
+      <td style="white-space:nowrap;text-align:right;">
+        <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
+      </td>
+    </tr>`).join('')
+  : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat.</td></tr>`;
+}
+
+function _majTableCoach(){
+  const tbody = document.getElementById('alim-tbody-coach');
+  if (tbody) tbody.innerHTML = _rowsTableCoach();
 }
 
 async function rechercherOFFBase(){
