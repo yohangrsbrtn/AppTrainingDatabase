@@ -305,6 +305,35 @@
   .panel-row .v.mono { font-family: var(--font-mono); }
   .panel-footer { padding: 14px 20px; border-top: 1px solid var(--hairline); display: flex; gap: 8px; }
   .panel-footer .btn { flex: 1; justify-content: center; text-decoration: none; }
+
+  /* ── Fiche client — onglets ── */
+  .fiche-tabs { display:flex; gap:0; margin-bottom:20px; border-bottom:1px solid var(--hairline); }
+  .fiche-tab { padding:9px 18px; border:none; background:none; color:var(--text-muted); font-size:12.5px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
+  .fiche-tab:hover { color:var(--text); }
+  .fiche-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+  /* ── Programme row (liste dans fiche) ── */
+  .prog-row { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface-2); border-radius:var(--radius-sm); margin-bottom:8px; cursor:pointer; transition:background .1s; }
+  .prog-row:hover { background:var(--surface-3); }
+  .prog-row.inactif { opacity:.65; }
+  .prog-row .p-nom { font-weight:700; font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .prog-row .p-meta { font-size:11.5px; color:var(--text-faint); flex-shrink:0; }
+
+  /* ── Diètes page ── */
+  .diete-tpl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+  .diete-tpl-card { background:var(--surface); border-radius:var(--radius); padding:16px; cursor:pointer; box-shadow:var(--shadow-sm); transition:background .1s; }
+  .diete-tpl-card:hover { background:var(--surface-2); }
+  .diete-tpl-card .nom { font-weight:700; font-size:14px; margin-bottom:6px; }
+  .diete-tpl-card .meta { font-size:11.5px; color:var(--text-faint); }
+  .repas-block { background:var(--surface-2); border-radius:var(--radius-sm); margin-bottom:12px; overflow:hidden; }
+  .repas-head { display:flex; align-items:center; gap:8px; padding:10px 14px; font-weight:700; font-size:13px; border-bottom:1px solid var(--hairline); }
+  .aliment-row { display:flex; align-items:center; gap:8px; padding:7px 14px; border-top:1px solid var(--hairline); font-size:12.5px; }
+  .aliment-row .a-nom { flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .macro-pills { display:flex; gap:6px; font-size:11px; color:var(--text-faint); font-family:var(--font-mono); flex-shrink:0; }
+  .macro-band { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:12px 14px; background:var(--surface-3); border-top:1px solid var(--hairline); text-align:center; }
+  .macro-band .mn { font-family:var(--font-mono); font-size:14px; font-weight:700; }
+  .macro-band .mu { font-size:10px; color:var(--text-faint); text-transform:uppercase; }
+  .macro-band .mk { font-size:10px; color:var(--text-faint); font-weight:700; text-transform:uppercase; margin-bottom:2px; }
 </style>
 </head>
 <body>
@@ -442,9 +471,14 @@ const NAV = [
   ]},
 ];
 
-let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null };
+let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null, progLogsId:null };
 let data = { clients:[], bilansCoach:[], logs:[], aValider:[] };
-let ficheData = { loaded:false, profil:null, programme:null, progression:null, notes:null };
+let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
+let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes'
+let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
+let progLogsSemaine = 1;
+let dieteTemplatesData = null;
+let dieteTplEnEdition = null;
 
 // ── Notes de coaching (Supabase) ──────────────────────────────────────
 const SUPABASE_URL = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
@@ -469,6 +503,41 @@ async function supprimerNoteApi(id){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/notes_coach?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
 }
+
+async function chargerTousProgrammes(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function chargerTousDietes(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function chargerProgrammeById(progId){
+  const res1 = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { headers: supaHeaders() });
+  if (!res1.ok) throw new Error('supabase_' + res1.status);
+  const rows = await res1.json();
+  if (!rows.length) return null;
+  const cp = rows[0];
+  const resArbo = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${cp.id}&order=ordre.asc` +
+    `&select=*,client_programme_seances(*,client_programme_exercices(*))` +
+    `&client_programme_seances.order=ordre.asc&client_programme_seances.client_programme_exercices.order=ordre.asc`,
+    { headers: supaHeaders() }
+  );
+  const blocs = resArbo.ok ? await resArbo.json() : [];
+  const exIds = [];
+  blocs.forEach(b => (b.client_programme_seances||[]).forEach(s => (s.client_programme_exercices||[]).forEach(ex => exIds.push(ex.id))));
+  let logs = {};
+  if (exIds.length) {
+    const resLogs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() });
+    if (resLogs.ok) (await resLogs.json()).forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+  }
+  return Object.assign({}, cp, { blocs, logs });
+}
 function fmtDateNote(iso){
   const d = new Date(iso);
   return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
@@ -483,7 +552,7 @@ function renderSidebar(){
       ${g.items.map(it => {
         let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
         return `
-        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients'))?'active':''}" onclick="setNav('${it.id}')">
+        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients'))?'active':''}" onclick="setNav('${it.id}')">
           ${it.icon}<span>${it.label}</span>
           ${count ? `<span class="nav-count">${count}</span>` : ''}
         </button>`;
@@ -588,7 +657,9 @@ function renderMain(){
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
   if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
+  if (state.nav === 'dietes') { renderDietesPage(el); return; }
   if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
+  if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
@@ -987,7 +1058,8 @@ function renderTemplatesSub(){
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
             <div class="nom">${esc(t.nom)}</div>
             <div style="display:flex;gap:4px;flex-shrink:0;">
-              <button class="icon-btn" style="width:24px;height:24px;" title="Assigner à un client" onclick="event.stopPropagation();ouvrirAssignerTemplate(${t.id})">${iUsers()}</button>
+              <button class="icon-btn" style="width:24px;height:24px;" title="Voir les assignés" onclick="event.stopPropagation();ouvrirAssignesTemplate(${t.id},'${esc(t.nom)}')">${iUsers()}</button>
+              <button class="icon-btn" style="width:24px;height:24px;" title="Assigner à un client" onclick="event.stopPropagation();ouvrirAssignerTemplate(${t.id})">${svgIcon('<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>')}</button>
               <button class="icon-btn" style="width:24px;height:24px;" onclick="event.stopPropagation();supprimerTemplateAction(${t.id})">${iTrash()}</button>
             </div>
           </div>
@@ -1262,7 +1334,7 @@ async function assignerTemplateAuClient(templateId, clientId){
 
   const resCp = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
-    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, source_template_id: templateId, actif: true })
+    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, actif: true })
   });
   if (!resCp.ok) throw new Error('supabase_' + resCp.status);
   const cp = (await resCp.json())[0];
@@ -1462,23 +1534,27 @@ let panelNotes = null; // null = pas encore chargées
 let panelFiche = null;
 async function openPanel(id){
   state.selected = id;
-  ficheData = { loaded:false, profil:null, programme:null, progression:null, notes:null };
+  ficheTab = 'profil';
+  ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
   state.nav = 'fiche-client';
   renderSidebar();
   renderMain();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
   try {
-    const [profil, programme, progression, notes] = await Promise.all([
+    const [profil, tous_programmes, tous_dietes, progression, notes] = await Promise.all([
       chargerFiche(id).catch(()=>({})),
-      chargerProgrammeActif(id).catch(()=>null),
+      chargerTousProgrammes(id).catch(()=>[]),
+      chargerTousDietes(id).catch(()=>[]),
       chargerProgression(id).catch(()=>[]),
       chargerNotes(id).catch(()=>[]),
     ]);
-    ficheData = { loaded:true, profil, programme, progression, notes };
+    const programme = tous_programmes.find(p=>p.actif) || null;
+    const diete = tous_dietes.find(d=>d.actif) || null;
+    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, notes };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   } catch(e) {
-    ficheData = { loaded:true, profil:{}, programme:null, progression:[], notes:[], error:e.message };
+    ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], notes:[], error:e.message };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   }
 }
@@ -1531,13 +1607,8 @@ function renderFicheClientPage(el){
     return;
   }
 
-  const p = ficheData.profil || {};
-  const prog = ficheData.programme;
-  const progression = Array.isArray(ficheData.progression) ? ficheData.progression : [];
-  const notes = Array.isArray(ficheData.notes) ? ficheData.notes : [];
-  const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
-
-  const poidsPts = progression.map(s=>parseFloat(s.poids_moyen)).filter(v=>!isNaN(v));
+  const nbProgs = (ficheData.tous_programmes||[]).length;
+  const activeDiete = ficheData.diete;
 
   el.innerHTML = `
     <button class="fiche-back" onclick="setNav('clients')">
@@ -1552,70 +1623,156 @@ function renderFicheClientPage(el){
         <div class="fiche-hero-meta">
           <span class="level-pill">Niv. ${c.niveau||1}</span>
           <span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span>
+          ${ficheData.programme ? `<span class="chip ok"><span class="dot"></span>Programme actif</span>` : ''}
+          ${activeDiete ? `<span class="chip ok"><span class="dot"></span>Diète active</span>` : ''}
           ${c._supabaseOnly ? '<span class="chip off">Supabase only</span>' : ''}
-          ${c.titreActif ? `<span class="chip off">${esc(c.titreActif)}</span>` : ''}
         </div>
       </div>
-      ${!c._supabaseOnly ? `<a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Ouvrir en vue client</a>` : ''}
+      ${!c._supabaseOnly ? `<a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Vue client</a>` : ''}
     </div>
 
-    <div class="fiche-grid">
-      <!-- Identité -->
-      <div class="fiche-card">
-        <h3>Identité</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
-          <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
+    <div class="fiche-tabs">
+      <button class="fiche-tab ${ficheTab==='profil'?'active':''}" onclick="setFicheTab('profil')">Profil</button>
+      <button class="fiche-tab ${ficheTab==='programmes'?'active':''}" onclick="setFicheTab('programmes')">Programmes ${nbProgs?`<span style="background:var(--surface-3);color:var(--text-faint);padding:1px 6px;border-radius:999px;font-size:10px;margin-left:3px;">${nbProgs}</span>`:''}</button>
+      <button class="fiche-tab ${ficheTab==='diete'?'active':''}" onclick="setFicheTab('diete')">Diète</button>
+      <button class="fiche-tab ${ficheTab==='progression'?'active':''}" onclick="setFicheTab('progression')">Progression</button>
+      <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Notes</button>
+    </div>
+
+    <div id="ficheTabContent">${renderFicheTabContent(c)}</div>`;
+}
+
+function setFicheTab(tab){
+  ficheTab = tab;
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el && c) el.innerHTML = renderFicheTabContent(c);
+}
+
+function renderFicheTabContent(c){
+  if (!c) c = data.clients.find(x=>x.id===state.selected);
+  if (ficheTab === 'profil')      return renderFicheProfilTab(c);
+  if (ficheTab === 'programmes')  return renderFicheProgTab(c);
+  if (ficheTab === 'diete')       return renderFicheDieteTab(c);
+  if (ficheTab === 'progression') return renderFicheProgressionTab();
+  if (ficheTab === 'notes')       return renderFicheNotesTab(c);
+  return '';
+}
+
+function renderFicheProfilTab(c){
+  const p = ficheData.profil || {};
+  const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  return `
+    <div class="fiche-card">
+      <h3>Identité</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
+        <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
+      </div>
+      <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
+      <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
+      <h3 style="margin-top:16px;">Suivi coaching</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
+        <div class="fiche-field"><label>Jour de bilan</label>
+          <select id="fJourBilan">
+            <option value="">—</option>
+            ${jours.map(j=>`<option value="${j}" ${p.jour_bilan===j?'selected':''}>${j}</option>`).join('')}
+          </select>
         </div>
-        <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
-        <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
-        <h3 style="margin-top:16px;">Suivi coaching</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
-          <div class="fiche-field"><label>Jour de bilan</label>
-            <select id="fJourBilan">
-              <option value="">—</option>
-              ${jours.map(j=>`<option value="${j}" ${p.jour_bilan===j?'selected':''}>${j}</option>`).join('')}
-            </select>
+      </div>
+      <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
+      <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
+      <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
+    </div>`;
+}
+
+function renderFicheProgTab(c){
+  const progs = ficheData.tous_programmes || [];
+  const actif = progs.find(p=>p.actif);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
+      <button class="btn primary" onclick="setNav('programmes')">+ Assigner un programme</button>
+    </div>
+    ${progs.length ? progs.map(p=>`
+      <div class="prog-row ${p.actif?'':'inactif'}" onclick="ouvrirLogsProgramme(${p.id})">
+        <div style="flex:1;min-width:0;">
+          <div class="p-nom">${esc(p.nom)}</div>
+          <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+        </div>
+        ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>`).join('')
+    : `<div class="fiche-prog-empty" style="text-align:center;padding:32px;">
+        <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucun programme assigné</div>
+        <button class="btn primary" onclick="setNav('programmes')">→ Aller aux programmes</button>
+      </div>`}`;
+}
+
+function renderFicheDieteTab(c){
+  const dietes = ficheData.tous_dietes || [];
+  const active = dietes.find(d=>d.actif);
+  const history = dietes.filter(d=>!d.actif);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${dietes.length} diète${dietes.length>1?'s':''} assignée${dietes.length>1?'s':''}</div>
+      <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">+ Assigner une diète</button>
+    </div>
+    ${active ? `
+      <div class="prog-row" style="cursor:default;margin-bottom:16px;">
+        <div style="flex:1;min-width:0;">
+          <div class="p-nom">${esc(active.nom||'Diète sans nom')}</div>
+          <div class="p-meta">Assignée le ${active.created_at ? new Date(active.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+        </div>
+        <span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Active</span>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="toggleDieteActif(${active.id},true,'${c.id}')">Désactiver</button>
+      </div>` : `<div class="fiche-prog-empty" style="text-align:center;padding:24px;margin-bottom:16px;">
+        <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucune diète active</div>
+        <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">→ Assigner une diète</button>
+      </div>`}
+    ${history.length ? `
+      <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:8px;">Historique</div>
+      ${history.map(d=>`
+        <div class="prog-row inactif" style="cursor:default;">
+          <div style="flex:1;min-width:0;">
+            <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
+            <div class="p-meta">${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}</div>
           </div>
-        </div>
-        <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
-        <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
-        <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
-      </div>
+          <span class="chip off" style="flex-shrink:0;">Inactif</span>
+          <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="toggleDieteActif(${d.id},false,'${c.id}')">Réactiver</button>
+        </div>`).join('')}` : ''}`;
+}
 
-      <!-- Programme & Progression -->
-      <div style="display:flex;flex-direction:column;gap:16px;">
-        <div class="fiche-card">
-          <h3>Programme actif</h3>
-          ${prog ? renderFicheProgDetail(prog) : `<div class="fiche-prog-empty">Aucun programme assigné.<br><a href="#" onclick="setNav('programmes');return false;" style="color:var(--accent);font-style:normal;">→ Aller aux programmes</a></div>`}
-        </div>
+function renderFicheProgressionTab(){
+  const progression = Array.isArray(ficheData.progression) ? ficheData.progression : [];
+  const poidsPts = progression.map(s=>parseFloat(s.poids_moyen)).filter(v=>!isNaN(v));
+  return `
+    <div class="fiche-card">
+      <h3>Progression (poids)</h3>
+      ${poidsPts.length >= 2 ? `
+        ${progressionChart(poidsPts, 'var(--accent)')}
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);margin-top:6px;">
+          <span>${poidsPts[0].toFixed(1)} kg</span>
+          <span>${(poidsPts[poidsPts.length-1]-poidsPts[0]>=0?'+':'')+(poidsPts[poidsPts.length-1]-poidsPts[0]).toFixed(1)} kg</span>
+          <span>${poidsPts[poidsPts.length-1].toFixed(1)} kg</span>
+        </div>` : `<div class="fiche-prog-empty">Pas encore de données (min. 2 bilans).</div>`}
+      ${progression.length ? `
+        <div style="margin-top:14px;">
+          ${progression.slice().reverse().slice(0,8).map(s=>`
+            <div class="fiche-hist-row">
+              <span style="color:var(--text-muted);">Semaine ${esc(s.semaine||'?')}</span>
+              <span>${s.poids_moyen ? parseFloat(s.poids_moyen).toFixed(1)+' kg' : '—'}${s.jours_diete_ok!=null?' · diète '+s.jours_diete_ok+'/7':''}</span>
+            </div>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
 
-        <div class="fiche-card">
-          <h3>Progression (poids)</h3>
-          ${poidsPts.length >= 2 ? `
-            ${progressionChart(poidsPts, 'var(--accent)')}
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);margin-top:6px;">
-              <span>${poidsPts[0].toFixed(1)} kg</span>
-              <span>${(poidsPts[poidsPts.length-1]-poidsPts[0]>=0?'+':'')+(poidsPts[poidsPts.length-1]-poidsPts[0]).toFixed(1)} kg</span>
-              <span>${poidsPts[poidsPts.length-1].toFixed(1)} kg</span>
-            </div>
-          ` : `<div class="fiche-prog-empty">Pas encore de données (min. 2 bilans).</div>`}
-          ${progression.length ? `
-            <div style="margin-top:14px;">
-              ${progression.slice().reverse().slice(0,5).map(s=>`
-                <div class="fiche-hist-row">
-                  <span style="color:var(--text-muted);">Semaine ${esc(s.semaine||'?')}</span>
-                  <span>${s.poids_moyen ? parseFloat(s.poids_moyen).toFixed(1)+' kg' : '—'}${s.jours_diete_ok!=null?' · diète '+s.jours_diete_ok+'/7':''}</span>
-                </div>`).join('')}
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    </div>
-
-    <!-- Notes coach -->
-    <div class="fiche-card" style="margin-bottom:16px;">
+function renderFicheNotesTab(c){
+  const notes = Array.isArray(ficheData.notes) ? ficheData.notes : [];
+  return `
+    <div class="fiche-card">
       <h3>Notes coach</h3>
       <div class="note-form" style="margin-bottom:14px;">
         <textarea id="ficheNoteInput" placeholder="Écrire une note privée sur ce client…" style="font-size:16px;"></textarea>
@@ -1680,6 +1837,152 @@ function renderFicheProgDetail(prog){
 function ficheSemaineChanger(delta){
   ficheSemaine = Math.max(1, ficheSemaine + delta);
   if (state.nav==='fiche-client') renderMain();
+}
+
+// ── Programmes assignés — actions ────────────────────────────────────
+async function toggleProgrammeActif(progId, isActif, clientId){
+  try {
+    if (!isActif) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true`, {
+        method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif:false })
+      });
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, {
+      method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif:!isActif })
+    });
+    ficheData.tous_programmes = await chargerTousProgrammes(clientId);
+    ficheData.programme = ficheData.tous_programmes.find(p=>p.actif) || null;
+    setFicheTab('programmes');
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+async function toggleDieteActif(dieteId, isActif, clientId){
+  try {
+    if (!isActif) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true`, {
+        method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif:false })
+      });
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${dieteId}`, {
+      method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif:!isActif })
+    });
+    ficheData.tous_dietes = await chargerTousDietes(clientId);
+    ficheData.diete = ficheData.tous_dietes.find(d=>d.actif) || null;
+    setFicheTab('diete');
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+// ── Logs d'un programme assigné ──────────────────────────────────────
+function ouvrirLogsProgramme(progId){
+  state.nav = 'prog-logs';
+  state.progLogsId = progId;
+  progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
+  progLogsSemaine = 1;
+  renderSidebar();
+  renderMain();
+  chargerProgrammeById(progId).then(prog => {
+    progLogsData = { loaded:true, programme:prog, blocs:prog?prog.blocs:[], logs:prog?prog.logs:{} };
+    if (state.nav==='prog-logs' && state.progLogsId===progId) renderMain();
+  }).catch(e => {
+    progLogsData = { loaded:true, programme:null, blocs:[], logs:{}, error:e.message };
+    if (state.nav==='prog-logs') renderMain();
+  });
+}
+
+function progLogsSemaineChanger(delta){
+  progLogsSemaine = Math.max(1, progLogsSemaine + delta);
+  renderMain();
+}
+
+function renderProgLogsPage(el){
+  const backClientId = state.selected;
+  if (!progLogsData.loaded){
+    el.innerHTML = `
+      <button class="fiche-back" onclick="setNav('fiche-client')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour à la fiche client
+      </button>
+      <div style="display:flex;align-items:center;justify-content:center;padding:80px;"><div class="spin"></div></div>`;
+    return;
+  }
+  if (progLogsData.error || !progLogsData.programme){
+    el.innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(progLogsData.error||'Programme introuvable')}</div>`;
+    return;
+  }
+  const prog = progLogsData.programme;
+  const blocs = progLogsData.blocs || [];
+  const logs = progLogsData.logs || {};
+  const totalSemaines = blocs.reduce((s,b)=>s+(b.nombre_semaines||1),0)||1;
+  const nbSeances = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).length,0);
+
+  // Trouver toutes les semaines qui ont au moins un log
+  const semainesAvecLogs = new Set();
+  Object.keys(logs).forEach(k => { const parts=k.split('|'); if(parts[1]) semainesAvecLogs.add(parseInt(parts[1])); });
+
+  el.innerHTML = `
+    <button class="fiche-back" onclick="retourFicheClient()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+      Retour à la fiche client
+    </button>
+
+    <div class="page-head" style="margin-bottom:16px;">
+      <div>
+        <div class="eyebrow">Logs du programme</div>
+        <h1>${esc(prog.nom)}</h1>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${prog.actif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}
+        <span class="meta">Assigné le ${prog.created_at ? new Date(prog.created_at).toLocaleDateString('fr-FR') : '—'}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+      <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(-1)">‹</button>
+      <span style="font-size:14px;font-weight:700;min-width:120px;text-align:center;">Semaine ${progLogsSemaine} / ${totalSemaines}</span>
+      <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(1)">›</button>
+      ${semainesAvecLogs.size ? `<span style="font-size:11.5px;color:var(--text-faint);">${semainesAvecLogs.size} semaine${semainesAvecLogs.size>1?'s':''} avec données</span>` : ''}
+    </div>
+
+    ${blocs.map(b=>`
+      ${b.type ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:16px 0 6px;">${esc(BLOC_LABELS_COACH[b.type]||b.type)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem.':''}</div>` : ''}
+      ${(b.client_programme_seances||[]).map(s=>`
+        <div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow-sm);">
+          <div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;gap:8px;">
+            ${esc(s.titre)}
+          </div>
+          ${(s.client_programme_exercices||[]).map(ex=>{
+            const nbSeries = ex.series||1;
+            let hasAnyLog = false;
+            let setsHtml = '';
+            for(let sr=1;sr<=nbSeries;sr++){
+              const l = logs[ex.id+'|'+progLogsSemaine+'|'+sr]||{};
+              const hasLog = l.charge!=null||l.reps!=null;
+              if(hasLog) hasAnyLog=true;
+              setsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
+                <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
+                <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);font-style:italic;'}">
+                  ${hasLog ? [(l.charge!=null?l.charge+'kg':''), (l.reps!=null?l.reps+' reps':''), (l.rir?'RIR '+l.rir:'')].filter(Boolean).join(' · ') : '—'}
+                </span>
+              </div>`;
+            }
+            const firstLog = logs[ex.id+'|'+progLogsSemaine+'|1']||{};
+            return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+                <div style="font-size:11px;color:var(--text-faint);">Cible: ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · '+esc(ex.repos):''}${ex.rir?' · RIR '+ex.rir:''}</div>
+              </div>
+              ${setsHtml}
+              ${firstLog.commentaire ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-style:italic;">"${esc(firstLog.commentaire)}"</div>` : ''}
+            </div>`;
+          }).join('')||`<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
+        </div>`).join('')}
+    `).join('') || `<div class="empty-panel"><strong>Programme vide</strong>Aucune séance dans ce programme.</div>`}`;
+}
+
+function retourFicheClient(){
+  state.nav = 'fiche-client';
+  renderSidebar();
+  renderMain();
 }
 
 async function sauvegarderFicheSandbox(clientId){
@@ -1974,6 +2277,398 @@ function renderNotifMenu(){
   const count = bilans.length + retards.length;
   const badge = document.getElementById('notifCount');
   if (count) { badge.style.display='flex'; badge.textContent = count; } else { badge.style.display='none'; }
+}
+
+// ── Voir les assignés d'un template programme ─────────────────────────
+async function ouvrirAssignesTemplate(templateId, templateNom){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal-box"><h3>Assignés — ${esc(templateNom)}</h3><div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div></div>`;
+  document.body.appendChild(overlay);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?nom=eq.${encodeURIComponent(templateNom)}&order=created_at.desc`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    const box = overlay.querySelector('.modal-box');
+    if (!rows.length){
+      box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3><div class="fiche-prog-empty" style="text-align:center;padding:20px;">Aucun client n'a ce programme assigné.</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+      return;
+    }
+    const clientsMap = {};
+    data.clients.forEach(c => { clientsMap[c.id] = c.nom; });
+    box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3>
+      ${rows.map(p=>`
+        <div class="prog-row" style="cursor:default;" onclick="this.closest('.modal-overlay').remove();openPanel('${p.client_id}');setFicheTab('programmes');">
+          <div class="mini-avatar">${initials(clientsMap[p.client_id]||p.client_id)}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="p-nom">${esc(clientsMap[p.client_id]||p.client_id)}</div>
+            <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+          </div>
+          ${p.actif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}
+        </div>`).join('')}
+      <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+  } catch(e){
+    overlay.querySelector('.modal-box').innerHTML = `<h3>Erreur</h3><div>${esc(e.message)}</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+  }
+}
+
+// ── Page Diètes (coach) ───────────────────────────────────────────────
+async function chargerDieteTemplates(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?order=nom.asc&select=*,repas(id,nom,ordre,repas_aliments(id,nom,quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+
+function macrosDiete(repasArr){
+  let kcal=0, prot=0, glu=0, lip=0;
+  (repasArr||[]).forEach(r => (r.repas_aliments||[]).forEach(a => {
+    const q = parseFloat(a.quantite_g)||0;
+    kcal += q * (parseFloat(a.kcal_par_gramme)||0);
+    prot += q * (parseFloat(a.prot_par_gramme)||0);
+    glu  += q * (parseFloat(a.glu_par_gramme)||0);
+    lip  += q * (parseFloat(a.lip_par_gramme)||0);
+  }));
+  return { kcal:Math.round(kcal), prot:Math.round(prot), glu:Math.round(glu), lip:Math.round(lip) };
+}
+
+async function renderDietesPage(el){
+  el.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Diètes</h1></div></div>
+    <div id="dieteSub"><div style="text-align:center;padding:30px;color:var(--text-faint);">Chargement…</div></div>`;
+  try {
+    if (dieteTemplatesData === null) dieteTemplatesData = await chargerDieteTemplates();
+    renderDieteTemplatesSub();
+  } catch(e){
+    document.getElementById('dieteSub').innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="dieteTemplatesData=null;setNav('dietes')">Réessayer</button></div>`;
+  }
+}
+
+function renderDieteTemplatesSub(){
+  const sub = document.getElementById('dieteSub');
+  if (!sub) return;
+  const list = dieteTemplatesData || [];
+  sub.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <span style="color:var(--text-muted);font-size:12.5px;">${list.length} template${list.length>1?'s':''}</span>
+      <button class="btn primary" style="margin-left:auto;" onclick="ouvrirEditeurDiete(null)">+ Nouveau template</button>
+    </div>
+    <div class="diete-tpl-grid">
+      ${list.map(t => {
+        const m = macrosDiete(t.repas);
+        const nbRepas = (t.repas||[]).length;
+        return `
+        <div class="diete-tpl-card" onclick="ouvrirEditeurDiete(${t.id})">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+            <div class="nom">${esc(t.nom)}</div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button class="icon-btn" style="width:24px;height:24px;" title="Voir les assignés" onclick="event.stopPropagation();ouvrirAssignesDiete(${t.id},'${esc(t.nom)}')">${iUsers()}</button>
+              <button class="icon-btn" style="width:24px;height:24px;" title="Assigner à un client" onclick="event.stopPropagation();ouvrirAssignerDieteTemplate(${t.id},'${esc(t.nom)}')">${svgIcon('<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>')}</button>
+              <button class="icon-btn" style="width:24px;height:24px;" onclick="event.stopPropagation();supprimerDieteTemplate(${t.id})">${iTrash()}</button>
+            </div>
+          </div>
+          ${t.description ? `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px;">${esc(t.description)}</div>` : ''}
+          <div class="meta" style="margin-bottom:8px;">${nbRepas} repas</div>
+          ${m.kcal ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;margin-top:8px;">
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${m.kcal}</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${m.prot}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${m.glu}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${m.lip}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>
+          </div>` : ''}
+        </div>`;
+      }).join('') || `<div class="empty-panel">Aucun template de diète. Crée le premier avec "+ Nouveau template".</div>`}
+    </div>`;
+}
+
+async function supprimerDieteTemplate(id){
+  if (!confirm('Supprimer ce template de diète ?')) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${id}`, { method:'DELETE', headers:supaHeaders() });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    dieteTemplatesData = dieteTemplatesData.filter(t=>t.id!==id);
+    renderDieteTemplatesSub();
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+// ── Éditeur de template diète ─────────────────────────────────────────
+async function ouvrirEditeurDiete(id){
+  if (id) {
+    const tpl = dieteTemplatesData.find(t=>t.id===id);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${id}&order=ordre.asc&select=*,repas_aliments(*,repas_aliments.order=ordre.asc)`, { headers:supaHeaders() });
+    const repasRaw = res.ok ? await res.json() : tpl.repas||[];
+    dieteTplEnEdition = {
+      id: tpl.id, nom: tpl.nom, description: tpl.description||'',
+      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
+    };
+    if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', aliments:[] }];
+  } else {
+    dieteTplEnEdition = { id:null, nom:'', description:'', repas:[{ nom:'Repas 1', aliments:[] }] };
+  }
+  renderEditeurDiete();
+}
+
+function renderEditeurDiete(){
+  const tpl = dieteTplEnEdition;
+  const totalM = macrosDiete(tpl.repas.map(r=>({ repas_aliments:r.aliments })));
+
+  const repasHtml = tpl.repas.map((r,ri)=>{
+    const repasM = macrosDiete([{ repas_aliments:r.aliments }]);
+    return `
+    <div class="repas-block">
+      <div class="repas-head">
+        <input type="text" value="${esc(r.nom)}" onchange="dieteTplEnEdition.repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:13px;font-weight:700;font-family:inherit;">
+        <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri})">${iTrash()}</button>
+      </div>
+      ${r.aliments.map((a,ai)=>`
+        <div class="aliment-row">
+          <span class="a-nom">${esc(a.nom)}</span>
+          <span class="macro-pills">${a.quantite_g}g · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+          <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
+        </div>`).join('')}
+      <div style="padding:8px 14px;">
+        <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri})">+ Ajouter un aliment</button>
+      </div>
+      ${repasM.kcal ? `<div class="macro-band">
+        <div><div class="mk">Repas</div><div class="mn">${repasM.kcal}</div><div class="mu">kcal</div></div>
+        <div><div class="mk"> </div><div class="mn">${repasM.prot}g</div><div class="mu">prot</div></div>
+        <div><div class="mk"> </div><div class="mn">${repasM.glu}g</div><div class="mu">gluc</div></div>
+        <div><div class="mk"> </div><div class="mn">${repasM.lip}g</div><div class="mu">lip</div></div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  const overlay = document.getElementById('modal-editeur-diete') || document.createElement('div');
+  overlay.id = 'modal-editeur-diete';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if(e.target===overlay && confirm('Fermer sans sauvegarder ?')) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:640px;">
+      <h3>${tpl.id ? 'Modifier' : 'Nouveau'} template de diète</h3>
+      <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
+      <div class="field-row"><label>Description (optionnelle)</label><input id="dDesc" type="text" value="${esc(tpl.description)}" placeholder="Contexte, objectifs…"></div>
+      ${totalM.kcal ? `<div style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;">
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal total</div></div>
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>
+      </div>` : ''}
+      ${repasHtml}
+      <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px;" onclick="ajouterRepas()">+ Ajouter un repas</button>
+      <div id="dErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-editeur-diete').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
+      </div>
+    </div>`;
+  if (!document.getElementById('modal-editeur-diete')) document.body.appendChild(overlay);
+  else { const old=document.getElementById('modal-editeur-diete'); old.replaceWith(overlay); }
+}
+
+function ajouterRepas(){
+  dieteTplEnEdition.repas.push({ nom:`Repas ${dieteTplEnEdition.repas.length+1}`, aliments:[] });
+  renderEditeurDiete();
+}
+
+function supprimerRepas(ri){
+  dieteTplEnEdition.repas.splice(ri,1);
+  renderEditeurDiete();
+}
+
+function supprimerAlimentDiete(ri, ai){
+  dieteTplEnEdition.repas[ri].aliments.splice(ai,1);
+  renderEditeurDiete();
+}
+
+function ouvrirAjoutAliment(ri){
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'modal-ajout-aliment';
+  modal.style.zIndex = '300';
+  modal.onclick = e => { if(e.target===modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:400px;">
+      <h3>Ajouter un aliment</h3>
+      <div class="field-row"><label>Nom</label><input id="aNom" type="text" placeholder="ex: Riz complet cuit" style="font-size:16px;"></div>
+      <div class="field-row"><label>Quantité (g)</label><input id="aQte" type="number" min="1" value="100" style="font-size:16px;"></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+        <div class="field-row" style="margin:0;"><label>Kcal/100g</label><input id="aKcal" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Prot/100g</label><input id="aProt" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Gluc/100g</label><input id="aGlu" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Lip/100g</label><input id="aLip" type="number" min="0" step="0.1" value="" placeholder="0" style="font-size:16px;"></div>
+      </div>
+      <div id="aErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerAjoutAliment(${ri})">Ajouter</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('aNom').focus(), 50);
+}
+
+function confirmerAjoutAliment(ri){
+  const nom = document.getElementById('aNom').value.trim();
+  const errEl = document.getElementById('aErr');
+  if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
+  const qte = parseFloat(document.getElementById('aQte').value)||0;
+  const kcal = (parseFloat(document.getElementById('aKcal').value)||0) / 100;
+  const prot = (parseFloat(document.getElementById('aProt').value)||0) / 100;
+  const glu  = (parseFloat(document.getElementById('aGlu').value)||0) / 100;
+  const lip  = (parseFloat(document.getElementById('aLip').value)||0) / 100;
+  dieteTplEnEdition.repas[ri].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip });
+  document.getElementById('modal-ajout-aliment').remove();
+  renderEditeurDiete();
+}
+
+async function sauvegarderDieteTemplate(){
+  const nom = document.getElementById('dNom').value.trim();
+  const errEl = document.getElementById('dErr');
+  if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
+  dieteTplEnEdition.nom = nom;
+  dieteTplEnEdition.description = document.getElementById('dDesc').value.trim();
+  try {
+    const method = dieteTplEnEdition.id ? 'PATCH' : 'POST';
+    const url = dieteTplEnEdition.id ? `${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${dieteTplEnEdition.id}` : `${SUPABASE_URL}/rest/v1/diete_templates`;
+    const res = await fetch(url, { method, headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom:dieteTplEnEdition.nom, description:dieteTplEnEdition.description||null }) });
+    if (!res.ok) throw new Error('supabase_'+res.status);
+    const saved = (await res.json())[0];
+    const tplId = saved.id;
+    if (dieteTplEnEdition.id) {
+      await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tplId}`, { method:'DELETE', headers:supaHeaders() });
+    }
+    for (let ri=0; ri<dieteTplEnEdition.repas.length; ri++){
+      const r = dieteTplEnEdition.repas[ri];
+      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tplId, nom:r.nom, ordre:ri }) });
+      if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
+      const savedR = (await rRes.json())[0];
+      if (r.aliments.length){
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
+      }
+    }
+    document.getElementById('modal-editeur-diete').remove();
+    dieteTemplatesData = null;
+    dieteTemplatesData = await chargerDieteTemplates();
+    renderDieteTemplatesSub();
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+// ── Assigner une diète à un client ────────────────────────────────────
+function ouvrirAssignerDieteTemplate(templateId, templateNom){
+  if (dieteTemplatesData === null){ alert('Charge la page Diètes d\'abord.'); return; }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-assigner-diete';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  const clientOpts = ['<option value="">— Choisir un client —</option>',
+    ...['yohan',...data.clients.map(c=>c.id)].map(id=>{
+      const nom = id==='yohan' ? 'yohan (test)' : (data.clients.find(c=>c.id===id)||{}).nom||id;
+      return `<option value="${esc(id)}">${esc(nom)}</option>`;
+    })
+  ].join('');
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Assigner « ${esc(templateNom)} »</h3>
+      <div class="field-row"><label>Client</label><select id="fAssignDieteClient" style="font-size:16px;">${clientOpts}</select></div>
+      <div id="assignDieteErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-assigner-diete').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerAssignerDiete(${templateId},'${esc(templateNom)}')">Assigner</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function ouvrirAssignerDiete(clientId){
+  if (dieteTemplatesData === null){
+    try { dieteTemplatesData = await chargerDieteTemplates(); } catch(e){ alert('Erreur chargement diètes : '+e.message); return; }
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-assigner-diete';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  const tplOpts = ['<option value="">— Choisir un template —</option>',
+    ...(dieteTemplatesData||[]).map(t=>`<option value="${t.id}|${esc(t.nom)}">${esc(t.nom)}</option>`)
+  ].join('');
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Assigner une diète</h3>
+      <div class="field-row"><label>Template</label><select id="fAssignDieteTpl" style="font-size:16px;">${tplOpts}</select></div>
+      <div id="assignDieteErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-assigner-diete').remove()">Annuler</button>
+        <button class="btn primary" onclick="confirmerAssignerDieteDepuisFiche('${clientId}')">Assigner</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmerAssignerDiete(templateId, templateNom){
+  const clientId = document.getElementById('fAssignDieteClient').value;
+  const errEl = document.getElementById('assignDieteErr');
+  if (!clientId){ errEl.textContent='Sélectionne un client.'; errEl.style.display='block'; return; }
+  try {
+    await assignerDieteAuClient(templateId, templateNom, clientId);
+    document.getElementById('modal-assigner-diete').remove();
+    alert('Diète assignée.');
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+async function confirmerAssignerDieteDepuisFiche(clientId){
+  const val = document.getElementById('fAssignDieteTpl').value;
+  const errEl = document.getElementById('assignDieteErr');
+  if (!val){ errEl.textContent='Sélectionne un template.'; errEl.style.display='block'; return; }
+  const [tplId, tplNom] = val.split('|');
+  try {
+    await assignerDieteAuClient(parseInt(tplId), tplNom, clientId);
+    document.getElementById('modal-assigner-diete').remove();
+    ficheData.tous_dietes = await chargerTousDietes(clientId);
+    ficheData.diete = ficheData.tous_dietes.find(d=>d.actif) || null;
+    setFicheTab('diete');
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+async function assignerDieteAuClient(templateId, templateNom, clientId){
+  await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true`, {
+    method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif:false })
+  });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`, {
+    method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
+    body:JSON.stringify({ client_id:clientId, nom:templateNom, actif:true })
+  });
+  if (!res.ok) throw new Error('supabase_'+res.status);
+  return (await res.json())[0];
+}
+
+async function ouvrirAssignesDiete(templateId, templateNom){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal-box"><h3>Assignés — ${esc(templateNom)}</h3><div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div></div>`;
+  document.body.appendChild(overlay);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?nom=eq.${encodeURIComponent(templateNom)}&order=created_at.desc`, { headers:supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    const clientsMap = {};
+    data.clients.forEach(c => { clientsMap[c.id]=c.nom; });
+    const box = overlay.querySelector('.modal-box');
+    if (!rows.length){
+      box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3><div class="fiche-prog-empty" style="text-align:center;padding:20px;">Aucun client n'a cette diète assignée.</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+      return;
+    }
+    box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3>
+      ${rows.map(d=>`
+        <div class="prog-row" style="cursor:default;">
+          <div class="mini-avatar">${initials(clientsMap[d.client_id]||d.client_id)}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="p-nom">${esc(clientsMap[d.client_id]||d.client_id)}</div>
+            <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+          </div>
+          ${d.actif ? '<span class="chip ok"><span class="dot"></span>Active</span>' : '<span class="chip off">Inactif</span>'}
+        </div>`).join('')}
+      <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+  } catch(e){
+    overlay.querySelector('.modal-box').innerHTML = `<h3>Erreur</h3><div>${esc(e.message)}</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+  }
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────
