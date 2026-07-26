@@ -17,6 +17,7 @@ function _appliquerBilan(data) {
 }
 
 async function loadBilan() {
+  if (isSupabase()) { _bilanMode = 'supabase-stub'; setPage('bilan'); return; }
   if (_pf.bilan) {
     _appliquerBilan(_pf.bilan);
     _pf.bilan = null;
@@ -70,6 +71,19 @@ async function loadBilanHistorique(ligneTitre) {
 function renderBilanPage() {
   if (S.page === 'bilan-loading') {
     return `<div id="app">${renderHeader('Bilan','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('bilan')}</div>`;
+  }
+  if (_bilanMode === 'supabase-stub') {
+    return `<div id="app">
+      ${renderHeader('Mon Bilan','',false)}
+      <div class="page">
+        <div class="empty" style="margin-top:40px;">
+          <div class="empty-icon">📋</div>
+          <div class="empty-text" style="margin-top:12px;">La page Bilan est en cours de construction pour les comptes Supabase.</div>
+        </div>
+        <button class="btn-secondary" onclick="goTo('home')" style="margin-top:16px;">← Accueil</button>
+      </div>
+      ${renderNavBar('bilan')}
+    </div>`;
   }
   if (_bilanMode === 'history-list') return renderHistoriqueList();
   if (_bilanMode === 'history-detail') return renderBilanDetail(_bilanData, true);

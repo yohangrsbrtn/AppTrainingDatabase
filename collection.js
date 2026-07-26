@@ -99,6 +99,7 @@ const TITRES_DEF = [
 let _colTitreActif = null;
 
 async function loadCollection() {
+  if (isSupabase()) { goTo('home'); return; }
   showLoadingOverlay('Chargement…');
   try {
     if (!S.data.prog) S.data.prog = await api('chargerProgressionClient');
@@ -270,6 +271,7 @@ function verifierDeblocages(p) {
 // si elle est affichée, et corrige le cache de préchargement pour qu'un
 // retour ultérieur à l'accueil n'affiche pas un total XP périmé.
 async function rafraichirProgressionEtDeblocages() {
+  if (isSupabase()) return;
   if (_viewAsClientOverride) return;
   try {
     const p = await api('chargerProgressionClient');

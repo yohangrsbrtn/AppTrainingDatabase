@@ -547,21 +547,33 @@ async function _completerConnexion(json) {
 // Ne déclenche AUCUN appel api()/GAS — tant que diète/bilan/XP ne sont pas
 // reconstruits côté Supabase, cet accueil n'affiche que ce qui existe déjà.
 async function loadHomeSupabase(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom`, { headers: supaHeaders() });
+    const profils = res.ok ? await res.json() : [];
+    S.data.profil = profils[0] || {};
+  } catch(e) { S.data.profil = {}; }
   setPage('home-supabase');
 }
 function renderHomeSupabase(){
+  const prenom = (S.data.profil && S.data.profil.prenom) || S.client;
+  function tile(onclick, color, icon, label, sub) {
+    return `<div onclick="${onclick}" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid ${color};-webkit-tap-highlight-color:transparent;">
+      <div style="font-size:34px;margin-bottom:8px;line-height:1;">${icon}</div>
+      <div style="font-size:13px;font-weight:600;color:#e8eaf0;">${label}</div>
+      <div style="font-size:11px;color:#8892a4;margin-top:3px;">${sub}</div>
+    </div>`;
+  }
   return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <div style="font-size:20px;font-weight:700;color:#f0f2ff;">Bonjour, ${esc(S.client)}</div>
-      <button onclick="deconnexion()" style="background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:8px 12px;color:#8892a4;font-size:12px;cursor:pointer;">Déconnexion</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:20px;font-weight:700;color:#f0f2ff;">${esc(prenom)}</div>
+      <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">${ICONE_PARAMETRES}</button>
     </div>
-    <div class="card" style="margin-bottom:12px;font-size:11.5px;color:#8892a4;">Compte 100% base de données — aucun Google Sheets. Construit brique par brique ; pour l'instant, seul le programme est disponible.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-      <div onclick="goTo('programme-client')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #E8A838;-webkit-tap-highlight-color:transparent;">
-        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🗓️</div>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mon programme</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Séries, charges, historique</div>
-      </div>
+      ${tile("goTo('training')", '#4f8ef7', '🏋️', 'Entraînement', 'Mon programme')}
+      ${tile("goTo('diete')", '#3ecf8e', '🥗', 'Ma Diète', 'Mon alimentation')}
+      ${tile("goTo('mensurations')", '#a78bfa', '📏', 'Mensurations', 'Ma progression')}
+      ${tile("goTo('bilan')", '#f59e0b', '📋', 'Mon Bilan', 'Bilan semaine')}
+      ${tile("goTo('recettes')", '#f97316', '🍽️', 'Recettes', 'Mes recettes coaching')}
     </div>
   </div>`;
 }
@@ -1455,6 +1467,10 @@ function renderNavBar(active) {
 function bindNav() {}
 
 function goTo(page) {
+  if (isSupabase()) {
+    if (page === 'home')     { loadHomeSupabase(); return; }
+    if (page === 'training') { loadProgrammeClient(); return; }
+  }
   if (page === 'home')        loadHome();
   else if (page === 'bilan')    loadBilan();
   else if (page === 'training') loadTraining();

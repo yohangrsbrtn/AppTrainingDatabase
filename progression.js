@@ -13,6 +13,7 @@ function getTierColors(tier) {
 }
 
 async function loadProgression() {
+  if (isSupabase()) { hideLoadingOverlay(); goTo('home'); return; }
   showLoadingOverlay('Chargement…');
   try {
     S.data.prog = await api('chargerProgressionClient');

@@ -6,6 +6,7 @@ let _rDetail  = null;
 let _rNom     = '';
 
 async function loadRecettes() {
+  if (isSupabase()) { _rList = []; _rSubPage = 'list'; setPage('recettes'); return; }
   setPage('recettes-loading');
   try {
     _rList    = await api('listerRecettes');

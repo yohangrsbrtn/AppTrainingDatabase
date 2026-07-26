@@ -69,6 +69,7 @@ async function _guardAction(fn, btn) {
 }
 
 async function loadDiete() {
+  if (isSupabase()) return loadDieteSupabase();
   if (_pf.diete) {
     _dDietes  = _pf.diete;
     _pf.diete = null;
@@ -83,6 +84,66 @@ async function loadDiete() {
     _dSubPage = 'list';
     setPage('diete');
     schedulerPrechargement();
+  } catch(e) { setPage('home'); }
+}
+
+let _dSupabaseDiete = null; // { nom, repas: [{nom, aliments, kcal, prot, glu, lip}] }
+
+async function loadDieteSupabase() {
+  setPage('diete-loading');
+  try {
+    const cdRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&select=id,nom`,
+      { headers: supaHeaders() }
+    );
+    const clientDietes = cdRes.ok ? await cdRes.json() : [];
+    if (!clientDietes.length) { _dSupabaseDiete = null; _dSubPage = 'list'; setPage('diete'); return; }
+    const nomDiete = clientDietes[0].nom;
+
+    const tmplRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nomDiete)}&select=id,nom`,
+      { headers: supaHeaders() }
+    );
+    const templates = tmplRes.ok ? await tmplRes.json() : [];
+    if (!templates.length) { _dSupabaseDiete = { nom: nomDiete, repas: [] }; _dSubPage = 'list'; setPage('diete'); return; }
+
+    const tmplId = templates[0].id;
+    const repasRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/repas?diete_template_id=eq.${tmplId}&order=ordre.asc&select=id,nom,ordre,repas_aliments(quantite_g,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+      { headers: supaHeaders() }
+    );
+    const repasRaw = repasRes.ok ? await repasRes.json() : [];
+
+    _dSupabaseDiete = {
+      nom: nomDiete,
+      repas: repasRaw.map(r => {
+        const als = r.repas_aliments || [];
+        let kcal = 0, prot = 0, glu = 0, lip = 0;
+        als.forEach(a => {
+          const q = a.quantite_g || 0, al = a.aliments_coach;
+          if (!al) return;
+          kcal += (al.kcal_par_gramme || 0) * q;
+          prot += (al.prot_par_gramme || 0) * q;
+          glu  += (al.glu_par_gramme  || 0) * q;
+          lip  += (al.lip_par_gramme  || 0) * q;
+        });
+        return {
+          nom: r.nom,
+          aliments: als.map(a => ({
+            nom:      a.aliments_coach ? a.aliments_coach.nom : '?',
+            quantite: a.quantite_g,
+            kcal:     Math.round((a.aliments_coach?.kcal_par_gramme || 0) * a.quantite_g),
+            prot:     Math.round((a.aliments_coach?.prot_par_gramme || 0) * a.quantite_g * 10) / 10,
+            glu:      Math.round((a.aliments_coach?.glu_par_gramme  || 0) * a.quantite_g * 10) / 10,
+            lip:      Math.round((a.aliments_coach?.lip_par_gramme  || 0) * a.quantite_g * 10) / 10
+          })),
+          kcal: Math.round(kcal), prot: Math.round(prot*10)/10,
+          glu:  Math.round(glu*10)/10, lip: Math.round(lip*10)/10
+        };
+      })
+    };
+    _dSubPage = 'list';
+    setPage('diete');
   } catch(e) { setPage('home'); }
 }
 
@@ -123,10 +184,66 @@ function renderDietePage() {
   if (S.page === 'diete-loading') {
     return `<div id="app">${renderHeader('Ma Diète','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('diete')}</div>`;
   }
+  if (isSupabase()) return renderDietePageSupabase();
   if (_dSubPage === 'detail' && _dDetail) return renderDieteDetail();
   if (_dSubPage === 'menus') return renderDieteMenus();
   if (_dSubPage === 'journal') return renderDieteJournal();
   return renderDieteList();
+}
+
+function renderDietePageSupabase() {
+  if (!_dSupabaseDiete) {
+    return `<div id="app">
+      ${renderHeader('Ma Diète','',false)}
+      <div class="page">
+        <div class="empty" style="margin-top:40px;">
+          <div class="empty-icon">🥗</div>
+          <div class="empty-text">Aucune diète assignée pour l'instant.</div>
+        </div>
+        <button class="btn-secondary" onclick="goTo('home')" style="margin-top:16px;">← Accueil</button>
+      </div>
+      ${renderNavBar('diete')}
+    </div>`;
+  }
+  const d = _dSupabaseDiete;
+  const totalKcal = d.repas.reduce((s, r) => s + r.kcal, 0);
+  const totalProt = Math.round(d.repas.reduce((s, r) => s + r.prot, 0) * 10) / 10;
+  const totalGlu  = Math.round(d.repas.reduce((s, r) => s + r.glu,  0) * 10) / 10;
+  const totalLip  = Math.round(d.repas.reduce((s, r) => s + r.lip,  0) * 10) / 10;
+
+  const macroBar = `<div style="background:#1a1d29;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+    <div style="font-size:11px;color:#8892a4;text-transform:uppercase;margin-bottom:8px;">${esc(d.nom)} — totaux journaliers</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;">
+      <div><div style="font-size:18px;font-weight:700;color:#f59e0b;">${totalKcal}</div><div style="font-size:10px;color:#8892a4;">kcal</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:#4f8ef7;">${totalProt}g</div><div style="font-size:10px;color:#8892a4;">prot</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:#3ecf8e;">${totalGlu}g</div><div style="font-size:10px;color:#8892a4;">glu</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:#f97316;">${totalLip}g</div><div style="font-size:10px;color:#8892a4;">lip</div></div>
+    </div>
+  </div>`;
+
+  const repasHtml = d.repas.map(r => {
+    const alHtml = r.aliments.map(a => `
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2235;">
+        <div style="font-size:12px;color:#c8d0e0;">${esc(a.nom)} <span style="color:#555e7a;">${a.quantite}g</span></div>
+        <div style="font-size:12px;color:#8892a4;">${a.kcal} kcal · P${a.prot} G${a.glu} L${a.lip}</div>
+      </div>`).join('');
+    return `<div style="background:#1a1d29;border-radius:12px;margin-bottom:10px;overflow:hidden;">
+      <div style="padding:12px 14px;border-bottom:1px solid #242838;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;">${esc(r.nom)}</div>
+        <div style="font-size:11px;color:#f59e0b;">${r.kcal} kcal</div>
+      </div>
+      ${r.aliments.length ? `<div style="padding:8px 14px;">${alHtml}</div>` : '<div style="padding:10px 14px;font-size:12px;color:#555e7a;">Aucun aliment</div>'}
+    </div>`;
+  }).join('');
+
+  return `<div id="app">
+    ${renderHeader('Ma Diète', esc(d.nom), false)}
+    <div class="page">
+      ${macroBar}
+      ${repasHtml || '<div style="font-size:13px;color:#8892a4;text-align:center;padding:20px;">Aucun repas dans cette diète.</div>'}
+    </div>
+    ${renderNavBar('diete')}
+  </div>`;
 }
 
 function renderDieteTabs(actif) {

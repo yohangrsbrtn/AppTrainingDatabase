@@ -7,7 +7,10 @@ let _mFormData = null;
 let _mDateDebut = '';
 let _mDateFin   = '';
 
+// ── Load ──────────────────────────────────────────────────────────────
+
 async function loadMensurations() {
+  if (isSupabase()) return loadMensurationsSupabase();
   if (_pf.mens) {
     _mReleves = _pf.mens;
     _pf.mens  = null;
@@ -35,7 +38,31 @@ async function loadMensurations() {
   } catch(e) { setPage('home'); }
 }
 
+async function loadMensurationsSupabase() {
+  setPage('mens-loading');
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,poids,mesure,phase`,
+      { headers: supaHeaders() }
+    );
+    const data = res.ok ? await res.json() : [];
+    _mReleves = data.map(r => ({
+      date:   r.date,         // ISO YYYY-MM-DD
+      poids:  r.poids,
+      taille: r.mesure,       // mesure = tour de taille
+      phase:  r.phase || ''
+    }));
+    _mSubPage = 'historique';
+    try {
+      _mDateDebut = localStorage.getItem('mensDateDebut') || '';
+      _mDateFin   = localStorage.getItem('mensDateFin')   || isoDate(new Date());
+    } catch(e) {}
+    setPage('mensurations');
+  } catch(e) { setPage('home'); }
+}
+
 async function loadSaisieMensurations() {
+  if (isSupabase()) return loadSaisieMensurationsSupabase();
   setPage('mens-loading');
   try {
     _mEntrees = await api('listerSaisiesMensurations');
@@ -44,7 +71,14 @@ async function loadSaisieMensurations() {
   } catch(e) { setPage('mensurations'); }
 }
 
+function loadSaisieMensurationsSupabase() {
+  // Pour Supabase : on utilise directement _mReleves comme liste de saisies
+  _mSubPage = 'saisie-list';
+  setPage('mensurations');
+}
+
 async function creerSaisieMensuration() {
+  if (isSupabase()) return creerSaisieMensurationSupabase();
   const dateVal = document.getElementById('nouvelleDateMens').value;
   if (!dateVal) return;
   const dateFR = dateVal.split('-').reverse().join('/');
@@ -57,6 +91,13 @@ async function creerSaisieMensuration() {
   } catch(e) { setPage('mensurations'); }
 }
 
+function creerSaisieMensurationSupabase() {
+  const dateVal = document.getElementById('nouvelleDateMens').value;
+  if (!dateVal) return;
+  const existant = _mReleves.find(r => r.date === dateVal);
+  ouvrirSaisieMensurationSupabase(existant ? existant.date : dateVal, existant);
+}
+
 async function ouvrirSaisieMensuration(ligne) {
   setPage('mens-loading');
   try {
@@ -64,6 +105,17 @@ async function ouvrirSaisieMensuration(ligne) {
     _mSubPage  = 'saisie-form';
     setPage('mensurations');
   } catch(e) { setPage('mensurations'); }
+}
+
+function ouvrirSaisieMensurationSupabase(dateISO, existant) {
+  _mFormData = {
+    date:   dateISO,
+    poids:  existant ? existant.poids  : null,
+    taille: existant ? existant.taille : null,
+    phase:  existant ? existant.phase  : ''
+  };
+  _mSubPage = 'saisie-form';
+  setPage('mensurations');
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -77,17 +129,25 @@ function renderMensurationsPage() {
   return renderHistorique();
 }
 
+function _mAfficherDate(dateStr) {
+  // Convertit ISO (YYYY-MM-DD) → DD/MM/YYYY pour affichage
+  if (!dateStr) return '—';
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return dateStr; // déjà DD/MM/YYYY (mode GAS)
+}
+
 function renderHistorique() {
   const releves = filtrerReleves(_mReleves, _mDateDebut, _mDateFin);
 
-  const poidsVals = releves.map(r => r.poids);
+  const poidsVals  = releves.map(r => r.poids);
   const tailleVals = releves.map(r => r.taille);
-  const poidsPts  = poidsVals.filter(v => v !== null && v !== '' && !isNaN(v)).map(Number);
-  const taillePts = tailleVals.filter(v => v !== null && v !== '' && !isNaN(v)).map(Number);
+  const poidsPts   = poidsVals.filter(v => v !== null && v !== '' && !isNaN(v)).map(Number);
+  const taillePts  = tailleVals.filter(v => v !== null && v !== '' && !isNaN(v)).map(Number);
 
-  const poidsActuel = poidsPts.length ? poidsPts[poidsPts.length - 1] : null;
-  const poidsDebut  = poidsPts.length ? poidsPts[0] : null;
-  const varPoids    = poidsActuel !== null ? (poidsActuel - poidsDebut).toFixed(1) : null;
+  const poidsActuel  = poidsPts.length ? poidsPts[poidsPts.length - 1] : null;
+  const poidsDebut   = poidsPts.length ? poidsPts[0] : null;
+  const varPoids     = poidsActuel !== null ? (poidsActuel - poidsDebut).toFixed(1) : null;
 
   const tailleActuel = taillePts.length ? taillePts[taillePts.length - 1] : null;
   const tailleDebut  = taillePts.length ? taillePts[0] : null;
@@ -112,16 +172,18 @@ function renderHistorique() {
 
   const histRows = releves.length ? releves.slice().reverse().map(r => `
     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
-      <div style="font-size:13px;color:var(--muted);">${r.date}${r.phase ? ' · ' + r.phase : ''}</div>
+      <div style="font-size:13px;color:var(--muted);">${_mAfficherDate(r.date)}${r.phase ? ' · ' + r.phase : ''}</div>
       <div style="font-size:13px;">${r.poids ? r.poids + ' kg' : '—'}${r.taille ? ' · ' + r.taille + ' cm' : ''}</div>
     </div>`).join('')
     : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Aucune donnée sur cette période</div>';
+
+  const backFn = isSupabase() ? "goTo('home')" : 'loadHome()';
 
   return `<div id="app">
     ${renderHeader('Mes Mensurations', 'Ma progression', false)}
     <div class="page">
       <div style="display:flex;gap:8px;margin-bottom:12px;">
-        <button onclick="loadHome()" style="flex:1;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">← Accueil</button>
+        <button onclick="${backFn}" style="flex:1;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">← Accueil</button>
         <button onclick="loadSaisieMensurations()" style="flex:1;background:linear-gradient(135deg,#378ADD,#2260a8);color:#fff;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">Saisir mensurations</button>
       </div>
 
@@ -152,6 +214,7 @@ function renderHistorique() {
 }
 
 function renderSaisieList() {
+  if (isSupabase()) return renderSaisieListSupabase();
   const today = isoDate(new Date());
   const rows = _mEntrees.map(e => `
     <div class="list-item" onclick="ouvrirSaisieMensuration(${e.ligne})">
@@ -178,7 +241,35 @@ function renderSaisieList() {
   </div>`;
 }
 
+function renderSaisieListSupabase() {
+  const today = isoDate(new Date());
+  const rows = _mReleves.slice().reverse().map(r => `
+    <div class="list-item" onclick="ouvrirSaisieMensurationSupabase('${r.date}', _mReleves.find(x=>x.date==='${r.date}'))">
+      <div class="list-text">
+        <div class="list-title">${_mAfficherDate(r.date)}</div>
+        <div class="list-sub">${r.poids ? r.poids + ' kg' : 'Poids non renseigné'}${r.taille ? ' · ' + r.taille + ' cm' : ''}</div>
+      </div>
+      <div class="list-arrow">›</div>
+    </div>`).join('');
+
+  return `<div id="app">
+    ${renderHeader('Mensurations', 'Saisir', false)}
+    <div class="page">
+      <div class="card">
+        <div style="font-size:14px;font-weight:600;margin-bottom:10px;">Nouvelle saisie</div>
+        <input type="date" id="nouvelleDateMens" value="${today}"
+          class="bilan-input" style="margin-bottom:10px;font-size:16px;">
+        <button class="btn-blue" onclick="creerSaisieMensurationSupabase()" style="width:100%;">+ Créer cette saisie</button>
+      </div>
+      ${_mReleves.length ? `<div class="section-title" style="color:var(--muted);">Saisies existantes</div><div class="card">${rows}</div>` : ''}
+      <button class="btn-secondary" onclick="loadMensurations()">← Retour</button>
+    </div>
+    ${renderNavBar('mensurations')}
+  </div>`;
+}
+
 function renderSaisieForm() {
+  if (isSupabase()) return renderSaisieFormSupabase();
   const d = _mFormData;
   if (!d) return renderSaisieList();
 
@@ -215,6 +306,33 @@ function renderSaisieForm() {
   </div>`;
 }
 
+function renderSaisieFormSupabase() {
+  const d = _mFormData;
+  if (!d) return renderSaisieListSupabase();
+  const poidsVal  = d.poids  !== null && d.poids  !== undefined ? d.poids  : '';
+  const tailleVal = d.taille !== null && d.taille !== undefined ? d.taille : '';
+
+  return `<div id="app">
+    ${renderHeader('Mensurations', _mAfficherDate(d.date), false)}
+    <div class="page">
+      <div class="card">
+        <div class="field-label">POIDS (kg)</div>
+        <input type="number" inputmode="decimal" step="0.1" value="${poidsVal}" placeholder="—"
+          class="bilan-input" style="font-size:16px;"
+          onchange="sauverMensurationSupa('poids', parseFloat(this.value)||null)">
+      </div>
+      <div class="card">
+        <div class="field-label">TOUR DE TAILLE (cm)</div>
+        <input type="number" inputmode="decimal" step="0.1" value="${tailleVal}" placeholder="—"
+          class="bilan-input" style="font-size:16px;"
+          onchange="sauverMensurationSupa('taille', parseFloat(this.value)||null)">
+      </div>
+      <button class="btn-secondary" onclick="loadSaisieMensurationsSupabase()">← Toutes les saisies</button>
+    </div>
+    ${renderNavBar('mensurations')}
+  </div>`;
+}
+
 // ── Interactions ──────────────────────────────────────────────────────
 
 function onMensFiltre() {
@@ -240,13 +358,54 @@ function sauverDateMensuration(ligne, dateStr) {
   api('enregistrerValeur', { nomFeuille: 'Mensurations', ligne, colonne: 4, valeur: parts[2]+'/'+parts[1]+'/'+parts[0] }).catch(() => {});
 }
 
+async function sauverMensurationSupa(field, value) {
+  if (!_mFormData || !_mFormData.date) return;
+  _mFormData[field] = value;
+  const body = {
+    client_id: S.client,
+    date:  _mFormData.date,
+    poids: _mFormData.poids !== null && _mFormData.poids !== undefined ? _mFormData.poids : null,
+    mesure: _mFormData.taille !== null && _mFormData.taille !== undefined ? _mFormData.taille : null
+  };
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/mensurations`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify(body)
+    });
+    const updated = { date: _mFormData.date, poids: _mFormData.poids, taille: _mFormData.taille, phase: _mFormData.phase || '' };
+    const idx = _mReleves.findIndex(r => r.date === _mFormData.date);
+    if (idx >= 0) _mReleves[idx] = updated;
+    else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
+  } catch(e) {}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function filtrerReleves(releves, debut, fin) {
   let r = releves || [];
-  if (debut) { const d0 = new Date(debut); r = r.filter(x => { const d = parseDateFR(x.date); return !d || d >= d0; }); }
-  if (fin)   { const d1 = new Date(fin);   r = r.filter(x => { const d = parseDateFR(x.date); return !d || d <= d1; }); }
+  if (debut) {
+    const d0 = new Date(debut);
+    r = r.filter(x => {
+      const iso = _mToISO(x.date);
+      return !iso || new Date(iso) >= d0;
+    });
+  }
+  if (fin) {
+    const d1 = new Date(fin);
+    r = r.filter(x => {
+      const iso = _mToISO(x.date);
+      return !iso || new Date(iso) <= d1;
+    });
+  }
   return r;
+}
+
+function _mToISO(dateStr) {
+  if (!dateStr) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr; // déjà ISO
+  const m = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
 
 function parseDateFR(str) {

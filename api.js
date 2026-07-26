@@ -44,3 +44,11 @@ function apiEtendreBilan(action, params = {}) {
   _etendreBilanQueue = result.then(() => {}, () => {});
   return result;
 }
+
+function isSupabase() { return localStorage.getItem('at_auth_mode') === 'supabase'; }
+
+const SUPABASE_URL      = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmYWNqYndpY3p3a2NqcHduZXlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjgzNTAsImV4cCI6MjEwMDIwNDM1MH0.mrjPbOuQROMihzxZWrUNbncQIos0jK2VexpQDoRZXzY';
+function supaHeaders(extra) {
+  return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
+}
