@@ -311,6 +311,10 @@
   .fiche-tab { padding:9px 18px; border:none; background:none; color:var(--text-muted); font-size:12.5px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
   .fiche-tab:hover { color:var(--text); }
   .fiche-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .mig-tab { padding:9px 18px; border:none; background:none; color:var(--text-muted); font-size:12.5px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
+  .mig-tab:hover:not(.mig-tab-disabled) { color:var(--text); }
+  .mig-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .mig-tab-disabled { opacity:0.35; cursor:not-allowed; }
 
   /* ── Programme row (liste dans fiche) ── */
   .prog-row { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface-2); border-radius:var(--radius-sm); margin-bottom:8px; cursor:pointer; transition:background .1s; }
@@ -585,7 +589,7 @@ function renderSidebar(){
       ${g.items.map(it => {
         let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
         return `
-        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients'))?'active':''}" onclick="setNav('${it.id}')">
+        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients')||(state.nav==='migration-preview'&&it.id==='migration'))?'active':''}" onclick="setNav('${it.id}')">
           ${it.icon}<span>${it.label}</span>
           ${count ? `<span class="nav-count">${count}</span>` : ''}
         </button>`;
@@ -695,6 +699,7 @@ function renderMain(){
   if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
   if (state.nav === 'mensurations') { renderMensurationsPage(el); return; }
   if (state.nav === 'migration') { renderMigrationPage(el); return; }
+  if (state.nav === 'migration-preview') { renderMigrationPreviewPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
@@ -3347,8 +3352,10 @@ function renderMigrationPage(el) {
       <td>${esc(c.nom)}${badge}</td>
       <td class="mono" style="color:var(--text-faint);">${esc(c.id)}</td>
       <td><div id="migStatus_${esc(c.id)}"></div></td>
-      <td><button class="btn" style="padding:4px 10px;font-size:12px;"
-        onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button></td>
+      <td style="display:flex;gap:6px;">
+        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="openMigrationPreview('${esc(c.id)}')">Prévisualiser</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -3414,6 +3421,311 @@ async function migrerProfils() {
   } else {
     statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${PROFILS_CONNUS.length} profils mis à jour.</span>`;
     await rafraichir();
+  }
+}
+
+// ── Migration Preview ──────────────────────────────────────────────────
+let migPreviewClientId = null;
+let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'bilans'
+let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null };
+let migPreviewSel = new Set(); // dates ISO sélectionnées pour migration mensu
+
+function openMigrationPreview(clientId) {
+  migPreviewClientId = clientId;
+  migPreviewTab = 'infos';
+  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null };
+  migPreviewSel = new Set();
+  state.nav = 'migration-preview';
+  renderSidebar();
+  renderMain();
+  _chargerMigPreviewData(clientId);
+}
+
+async function _chargerMigPreviewData(clientId) {
+  try {
+    const [profRes, supaMenuRes, gasMenuRaw] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`, { headers: supaHeaders() }),
+      apiGasProd('chargerMensurations', clientId).catch(() => []),
+    ]);
+    const profRows = profRes.ok ? await profRes.json() : [];
+    const supaMensurations = supaMenuRes.ok ? await supaMenuRes.json() : [];
+    const gasMensurations = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
+    const supaProfile = profRows[0] || null;
+
+    // Dates déjà dans Supabase
+    const supaDateSet = new Set(supaMensurations.map(r => r.date));
+    // Sélectionner par défaut uniquement les nouvelles lignes
+    migPreviewSel = new Set(
+      gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d))
+    );
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations };
+    if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
+  } catch(e) {
+    migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [] };
+    if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
+  }
+}
+
+function setMigPreviewTab(tab) {
+  migPreviewTab = tab;
+  const content = document.getElementById('migPreviewContent');
+  if (!content) return;
+  document.querySelectorAll('.mig-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  content.innerHTML = _renderMigPreviewTabContent();
+}
+
+function renderMigrationPreviewPage(el) {
+  const c = data.clients.find(x => x.id === migPreviewClientId);
+  const nom = c ? c.nom : migPreviewClientId;
+
+  if (!migPreviewData.loaded) {
+    el.innerHTML = `
+      <button class="fiche-back" onclick="setNav('migration')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour à la migration
+      </button>
+      <div class="fiche-hero">
+        <div class="fiche-avatar">${initials(nom)}</div>
+        <div><div class="fiche-hero-name">${esc(nom)}</div><div style="font-size:12px;color:var(--text-faint);">Chargement des données GAS + Supabase…</div></div>
+      </div>
+      <div style="display:flex;justify-content:center;padding:60px;"><div class="spin"></div></div>`;
+    return;
+  }
+
+  if (migPreviewData.error) {
+    el.innerHTML = `
+      <button class="fiche-back" onclick="setNav('migration')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour
+      </button>
+      <div style="color:var(--critical);padding:24px;">Erreur : ${esc(migPreviewData.error)}</div>`;
+    return;
+  }
+
+  const gasCount = (migPreviewData.gasMensurations || []).length;
+  const supaCount = (migPreviewData.supaMensurations || []).length;
+  const newCount = migPreviewSel.size;
+
+  el.innerHTML = `
+    <button class="fiche-back" onclick="setNav('migration')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+      Retour à la migration
+    </button>
+    <div class="fiche-hero">
+      <div class="fiche-avatar">${initials(nom)}</div>
+      <div style="flex:1;">
+        <div class="fiche-hero-name">${esc(nom)}</div>
+        <div style="font-size:12px;color:var(--text-faint);">Prévisualisation migration · ID: ${esc(migPreviewClientId)} → GAS: ${esc(_gasId(migPreviewClientId))}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+      <div class="table-card" style="flex:1;min-width:140px;padding:14px 18px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">GAS (source)</div>
+        <div style="font-size:22px;font-weight:700;color:var(--accent);">${gasCount}</div>
+        <div style="font-size:11px;color:var(--text-faint);">mensurations</div>
+      </div>
+      <div class="table-card" style="flex:1;min-width:140px;padding:14px 18px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Supabase (actuel)</div>
+        <div style="font-size:22px;font-weight:700;color:var(--success);">${supaCount}</div>
+        <div style="font-size:11px;color:var(--text-faint);">mensurations</div>
+      </div>
+      <div class="table-card" style="flex:1;min-width:140px;padding:14px 18px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Nouvelles</div>
+        <div style="font-size:22px;font-weight:700;color:${newCount>0?'var(--accent)':'var(--text-faint)'};">${newCount}</div>
+        <div style="font-size:11px;color:var(--text-faint);">à migrer</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--hairline);margin-bottom:20px;">
+      <button class="mig-tab${migPreviewTab==='infos'?' active':''}" data-tab="infos" onclick="setMigPreviewTab('infos')">Dashboard</button>
+      <button class="mig-tab${migPreviewTab==='mensurations'?' active':''}" data-tab="mensurations" onclick="setMigPreviewTab('mensurations')">Mensurations (${gasCount})</button>
+      <button class="mig-tab mig-tab-disabled" data-tab="bilans" title="Prochainement">Bilans</button>
+    </div>
+
+    <div id="migPreviewContent">${_renderMigPreviewTabContent()}</div>`;
+}
+
+function _renderMigPreviewTabContent() {
+  if (migPreviewTab === 'infos') return _renderMigPreviewInfos();
+  if (migPreviewTab === 'mensurations') return _renderMigPreviewMensurations();
+  return `<div style="color:var(--text-faint);padding:24px;">Prochainement.</div>`;
+}
+
+function _renderMigPreviewInfos() {
+  const c = data.clients.find(x => x.id === migPreviewClientId) || {};
+  const p = migPreviewData.supaProfile || {};
+  const row = (label, gasVal, supaVal) => `
+    <tr>
+      <td style="font-size:12px;color:var(--text-faint);padding:7px 12px;width:140px;">${label}</td>
+      <td style="font-size:12px;padding:7px 12px;color:var(--text);">${gasVal || '<span style="color:var(--text-faint);">—</span>'}</td>
+      <td style="font-size:12px;padding:7px 12px;color:${supaVal?'var(--text)':'var(--text-faint)'};">${supaVal || '—'}</td>
+    </tr>`;
+  return `
+    <div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">Comparaison profil</div></div>
+      <div class="table-scroll">
+        <table class="alim-table" style="width:100%;">
+          <thead><tr>
+            <th style="width:140px;">Champ</th>
+            <th>GAS (données live)</th>
+            <th>Supabase (client_profils)</th>
+          </tr></thead>
+          <tbody>
+            ${row('Nom affiché', esc(c.nom||''), esc([p.prenom,p.nom].filter(Boolean).join(' ')))}
+            ${row('Prénom', '—', esc(p.prenom||''))}
+            ${row('Nom', esc(c.nom||''), esc(p.nom||''))}
+            ${row('Email', '—', esc(p.email||''))}
+            ${row('Date naissance', '—', esc(p.date_naissance||''))}
+            ${row('Niveau', c.niveau!=null?String(c.niveau):'', '')}
+            ${row('Dernière connexion', esc(c.dernConnexion||''), '')}
+            ${row('Début coaching', '', esc(p.date_debut||''))}
+            ${row('Jour de bilan', '', esc(p.jour_bilan||''))}
+            ${row('Taille (cm)', '', p.taille_cm!=null?String(p.taille_cm):'')}
+            ${row('Objectif', '', esc(p.objectif||''))}
+            ${row('Supabase only', '', p.supabase_only!=null?(p.supabase_only?'oui':'non'):'')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">Résumé</div></div>
+      <div style="padding:12px 20px;font-size:13px;color:var(--text-muted);">
+        ${!migPreviewData.supaProfile
+          ? `<span style="color:var(--critical);">⚠ Aucun profil Supabase — le client n'a pas encore de fiche dans <code>client_profils</code>.</span>`
+          : `<span style="color:var(--success);">✓ Profil Supabase présent.</span>`}
+        &nbsp;&nbsp;
+        <a href="#" onclick="event.preventDefault();setMigPreviewTab('mensurations')" style="font-size:13px;color:var(--accent);text-decoration:underline;">Voir les mensurations →</a>
+      </div>
+    </div>`;
+}
+
+function _renderMigPreviewMensurations() {
+  const gasRows = migPreviewData.gasMensurations || [];
+  const supaDateSet = new Set((migPreviewData.supaMensurations || []).map(r => r.date));
+  const allSelectable = gasRows.map(r => _parseDateFr(r.date)).filter(Boolean);
+  const allSelected = allSelectable.length > 0 && allSelectable.every(d => migPreviewSel.has(d));
+
+  if (!gasRows.length) return `<div style="color:var(--text-faint);padding:24px;">Aucune mensuration dans GAS pour ce client.</div>`;
+
+  const rows = gasRows.map(r => {
+    const isoDate = _parseDateFr(r.date);
+    const exists = isoDate && supaDateSet.has(isoDate);
+    const checked = isoDate && migPreviewSel.has(isoDate);
+    const statusColor = exists ? 'var(--text-faint)' : 'var(--success)';
+    const statusLabel = exists ? 'Déjà migré' : 'Nouveau';
+    return `<tr style="opacity:${exists&&!checked?'0.5':'1'};">
+      <td style="padding:6px 12px;width:36px;">
+        ${isoDate ? `<input type="checkbox" ${checked?'checked':''} onchange="toggleMigPreviewSel('${isoDate}',this.checked)" style="accent-color:var(--accent);">` : ''}
+      </td>
+      <td class="mono" style="font-size:12px;padding:6px 12px;">${esc(r.date||'')}</td>
+      <td style="font-size:12px;padding:6px 12px;color:var(--text-faint);">${esc(r.phase||'—')}</td>
+      <td style="font-size:12px;padding:6px 12px;">${r.poids!=null?r.poids+' kg':'—'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${r.taille!=null?r.taille+' cm':'—'}</td>
+      <td style="font-size:11px;padding:6px 12px;color:${statusColor};">${statusLabel}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="table-card">
+      <div class="table-toolbar" style="flex-wrap:wrap;gap:10px;">
+        <div class="title">Mensurations GAS → Supabase</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+          <label style="font-size:12px;color:var(--text-faint);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" ${allSelected?'checked':''} onchange="toggleMigPreviewSelAll(this.checked)" style="accent-color:var(--accent);">
+            Tout sélectionner
+          </label>
+          <span style="font-size:12px;color:var(--text-faint);">${migPreviewSel.size} sélectionné${migPreviewSel.size>1?'s':''}</span>
+          <button class="btn primary" style="padding:6px 14px;font-size:12px;" onclick="migrerSelectionMensu()" ${migPreviewSel.size===0?'disabled':''}>
+            ⬇ Migrer ${migPreviewSel.size > 0 ? migPreviewSel.size + ' ligne' + (migPreviewSel.size>1?'s':'') : ''}
+          </button>
+        </div>
+      </div>
+      <div id="migMenuStatus" style="padding:0 20px;"></div>
+      <div class="table-scroll">
+        <table class="alim-table" style="width:100%;">
+          <thead><tr>
+            <th style="width:36px;"></th>
+            <th>Date (GAS)</th>
+            <th>Phase</th>
+            <th>Poids</th>
+            <th>Mesure</th>
+            <th>Statut</th>
+          </tr></thead>
+          <tbody id="migMenuBody">${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function toggleMigPreviewSel(isoDate, checked) {
+  if (checked) migPreviewSel.add(isoDate);
+  else migPreviewSel.delete(isoDate);
+  // Met à jour le compteur et le bouton sans re-render toute la page
+  const countEl = document.querySelector('#migPreviewContent span[style*="text-faint"]');
+  document.querySelectorAll('#migPreviewContent .btn.primary').forEach(b => {
+    b.disabled = migPreviewSel.size === 0;
+    b.textContent = `⬇ Migrer ${migPreviewSel.size > 0 ? migPreviewSel.size + ' ligne' + (migPreviewSel.size > 1 ? 's' : '') : ''}`;
+  });
+  // Met à jour "tout sélectionner"
+  const gasRows = migPreviewData.gasMensurations || [];
+  const allSelectable = gasRows.map(r => _parseDateFr(r.date)).filter(Boolean);
+  const allSelected = allSelectable.length > 0 && allSelectable.every(d => migPreviewSel.has(d));
+  document.querySelectorAll('#migPreviewContent input[type=checkbox][onchange*="SelAll"]').forEach(cb => cb.checked = allSelected);
+}
+
+function toggleMigPreviewSelAll(checked) {
+  const gasRows = migPreviewData.gasMensurations || [];
+  gasRows.forEach(r => {
+    const d = _parseDateFr(r.date);
+    if (!d) return;
+    if (checked) migPreviewSel.add(d);
+    else migPreviewSel.delete(d);
+  });
+  // Re-render l'onglet pour mettre à jour toutes les checkboxes
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = _renderMigPreviewTabContent();
+}
+
+async function migrerSelectionMensu() {
+  const statusEl = document.getElementById('migMenuStatus');
+  if (!migPreviewSel.size) return;
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Migration en cours…</div>`;
+  document.querySelectorAll('#migPreviewContent .btn.primary').forEach(b => b.disabled = true);
+  try {
+    const gasRows = migPreviewData.gasMensurations || [];
+    const rows = gasRows
+      .map(r => ({ isoDate: _parseDateFr(r.date), raw: r }))
+      .filter(({ isoDate }) => isoDate && migPreviewSel.has(isoDate))
+      .map(({ isoDate, raw }) => ({
+        client_id: migPreviewClientId,
+        date: isoDate,
+        phase: raw.phase || null,
+        poids: raw.poids != null ? raw.poids : null,
+        mesure: raw.taille != null ? raw.taille : null,
+      }));
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok && res.status !== 409) throw new Error('supabase_' + res.status);
+    // Recharger les données Supabase et re-render
+    const supaRes = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=date.desc`, { headers: supaHeaders() });
+    migPreviewData.supaMensurations = supaRes.ok ? await supaRes.json() : migPreviewData.supaMensurations;
+    // Vider la sélection des dates maintenant migrées
+    rows.forEach(r => migPreviewSel.delete(r.date));
+    const content = document.getElementById('migPreviewContent');
+    if (content) content.innerHTML = _renderMigPreviewTabContent();
+    // Mettre à jour les compteurs dans le hero
+    const supaCount = migPreviewData.supaMensurations.length;
+    document.querySelectorAll('.table-card .fiche-hero-name').forEach(() => {});
+    // Re-render complet pour mettre à jour les chips stats
+    renderMain();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--critical);padding:8px 0;display:block;">Erreur : ${esc(e.message)}</span>`;
+    document.querySelectorAll('#migPreviewContent .btn.primary').forEach(b => b.disabled = false);
   }
 }
 
