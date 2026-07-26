@@ -490,6 +490,7 @@ const NAV = [
   ]},
   { group:"Système", items:[
     { id:"protocole", label:"Protocole", icon:iFlask() },
+    { id:"migration", label:"Migration", icon:iDatabase() },
     { id:"parametres", label:"Paramètres", icon:iCog() },
   ]},
 ];
@@ -692,6 +693,8 @@ function renderMain(){
   if (state.nav === 'dietes') { renderDietesPage(el); return; }
   if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
   if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
+  if (state.nav === 'mensurations') { renderMensurationsPage(el); return; }
+  if (state.nav === 'migration') { renderMigrationPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
@@ -3211,6 +3214,174 @@ async function ouvrirAssignesDiete(templateId, templateNom){
       <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
   } catch(e){
     overlay.querySelector('.modal-box').innerHTML = `<h3>Erreur</h3><div>${esc(e.message)}</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
+  }
+}
+
+// ── Mensurations ───────────────────────────────────────────────────────
+let mensurationsClientId = null;
+let mensurationsData = null; // { clientId → [{date,phase,poids,mesure}] }
+
+function _parseDateFr(s) {
+  const m = (s||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+
+function renderMensurationsPage(el) {
+  if (!mensurationsClientId && data.clients.length) mensurationsClientId = data.clients[0].id;
+  const clientOpts = data.clients.map(c =>
+    `<option value="${esc(c.id)}" ${c.id===mensurationsClientId?'selected':''}>${esc(c.nom)}</option>`
+  ).join('');
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Mensurations</h1></div>
+    </div>
+    <div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar">
+        <div class="title">Client</div>
+        <select style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;"
+          onchange="mensurationsClientId=this.value;mensurationsData=null;renderMensurationsPage(document.getElementById('main'))">
+          ${clientOpts}
+        </select>
+        <button class="btn" onclick="migrerMensurations(mensurationsClientId, true)">⬇ Migrer depuis GAS</button>
+      </div>
+      <div id="mensurationsContent" style="padding:0 20px 16px;">
+        <div style="display:flex;justify-content:center;padding:30px;"><div class="spin"></div></div>
+      </div>
+    </div>`;
+  chargerMensurationsSupabase(mensurationsClientId);
+}
+
+async function chargerMensurationsSupabase(clientId) {
+  const el = document.getElementById('mensurationsContent');
+  if (!el) return;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`,
+      { headers: supaHeaders() }
+    );
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const rows = await res.json();
+    if (!rows.length) {
+      el.innerHTML = `<div class="card-empty" style="padding:24px 0;">Aucune mensuration — clique sur <strong>⬇ Migrer depuis GAS</strong> pour importer.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="table-scroll"><table class="alim-table">
+      <thead><tr><th>Date</th><th>Phase</th><th>Poids (kg)</th><th>Mesure (cm)</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td class="mono">${esc(r.date||'')}</td>
+        <td>${esc(r.phase||'—')}</td>
+        <td>${r.poids!=null?r.poids:'—'}</td>
+        <td>${r.mesure!=null?r.mesure:'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--critical);padding:16px 0;">Erreur : ${esc(e.message)}</div>`;
+  }
+}
+
+async function migrerMensurations(clientId, rafraichirPage) {
+  const statusEl = document.getElementById('migStatus_' + clientId) || document.getElementById('mensurationsContent');
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Chargement GAS…</div>`;
+  try {
+    const raw = await apiAs('chargerMensurations', clientId);
+    const releves = (typeof raw === 'string' ? JSON.parse(raw) : raw) || [];
+    if (!releves.length) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Aucune mensuration dans GAS.</span>`;
+      return;
+    }
+    const rows = releves
+      .map(r => ({
+        client_id: clientId,
+        date: _parseDateFr(r.date),
+        phase: r.phase || null,
+        poids: r.poids != null ? r.poids : null,
+        mesure: r.taille != null ? r.taille : null,
+      }))
+      .filter(r => r.date);
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok && res.status !== 409) throw new Error('supabase_' + res.status);
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${rows.length} relevés importés.</span>`;
+    if (rafraichirPage) setTimeout(() => chargerMensurationsSupabase(clientId), 600);
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--critical);">Erreur : ${esc(e.message)}</span>`;
+  }
+}
+
+// ── Page Migration ──────────────────────────────────────────────────────
+const PROFILS_CONNUS = [
+  { client_id:'yohanp',      prenom:'Yohan',   nom:'Grosbertin', email:'yohangrsbrtn@gmail.com', supabase_only:true  },
+  { client_id:'perrineayot', prenom:'Perrine',  nom:'Ayot',       email:null,                     supabase_only:false },
+];
+
+function renderMigrationPage(el) {
+  const clientRows = data.clients.map(c => `
+    <tr>
+      <td>${esc(c.nom)}</td>
+      <td class="mono" style="color:var(--text-faint);">${esc(c.id)}</td>
+      <td><div id="migStatus_${esc(c.id)}"></div></td>
+      <td><button class="btn" style="padding:4px 10px;font-size:12px;"
+        onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button></td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Migration GAS → Supabase</h1></div>
+    </div>
+
+    <div class="table-card" style="margin-bottom:20px;">
+      <div class="table-toolbar"><div class="title">Profils clients</div></div>
+      <div style="padding:0 20px 16px;">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+          Crée ou met à jour les entrées dans <code>client_profils</code> pour les comptes connus.
+          Les champs non renseignés (taille, objectif…) restent modifiables via la fiche client.
+        </p>
+        <div id="profilMigStatus" style="margin-bottom:12px;"></div>
+        <button class="btn primary" onclick="migrerProfils()">⬆ Upsert profils connus</button>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-toolbar"><div class="title">Mensurations (GAS → Supabase)</div></div>
+      <div style="padding:0 20px 4px;">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
+          Importe l'historique poids/mesure de chaque client depuis Google Sheets.
+          Les doublons (même client + même date) sont ignorés.
+        </p>
+      </div>
+      <div class="table-scroll"><table class="alim-table">
+        <thead><tr><th>Client</th><th>ID</th><th>Statut</th><th></th></tr></thead>
+        <tbody>${clientRows}</tbody>
+      </table></div>
+    </div>`;
+}
+
+async function migrerProfils() {
+  const statusEl = document.getElementById('profilMigStatus');
+  statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Upsert en cours…</div>`;
+  const errors = [];
+  for (const p of PROFILS_CONNUS) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`,
+        {
+          method: 'POST',
+          headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+          body: JSON.stringify(p),
+        }
+      );
+      if (!res.ok) errors.push(`${p.client_id} : ${res.status}`);
+    } catch(e) { errors.push(`${p.client_id} : ${e.message}`); }
+  }
+  if (errors.length) {
+    statusEl.innerHTML = `<span style="color:var(--critical);">Erreurs : ${errors.join(', ')}</span>`;
+  } else {
+    statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${PROFILS_CONNUS.length} profils mis à jour.</span>`;
+    await rafraichir();
   }
 }
 
