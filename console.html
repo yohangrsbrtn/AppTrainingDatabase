@@ -277,6 +277,29 @@
   .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
   .panel-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: 12.5px; }
   .panel-row:last-child { border-bottom: none; }
+
+  /* ── Fiche client — page dédiée ── */
+  .fiche-back { display:inline-flex; align-items:center; gap:7px; color:var(--text-muted); font-size:12.5px; font-weight:600; background:none; border:none; cursor:pointer; padding:0; margin-bottom:18px; }
+  .fiche-back:hover { color:var(--text); }
+  .fiche-hero { display:flex; align-items:center; gap:16px; padding:0 0 20px; border-bottom:1px solid var(--hairline); margin-bottom:22px; }
+  .fiche-avatar { width:54px; height:54px; border-radius:14px; background:var(--surface-3); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:17px; flex-shrink:0; }
+  .fiche-hero-name { font-family:var(--font-display); font-size:20px; font-weight:700; }
+  .fiche-hero-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .fiche-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  @media(max-width:960px){ .fiche-grid { grid-template-columns:1fr; } }
+  .fiche-card { background:var(--surface); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow-sm); }
+  .fiche-card h3 { font-family:var(--font-display); font-size:14px; font-weight:700; margin:0 0 14px; }
+  .fiche-field { margin-bottom:12px; }
+  .fiche-field label { display:block; font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-faint); font-weight:700; margin-bottom:5px; }
+  .fiche-field input, .fiche-field select, .fiche-field textarea { width:100%; padding:8px 10px; background:var(--surface-2); border:1px solid transparent; border-radius:var(--radius-sm); color:var(--text); font-size:16px; font-family:inherit; box-sizing:border-box; }
+  .fiche-field input:focus, .fiche-field select:focus, .fiche-field textarea:focus { border-color:var(--hairline); outline:none; }
+  .fiche-field textarea { resize:vertical; min-height:72px; }
+  .fiche-prog { background:var(--surface-2); border-radius:var(--radius-sm); padding:12px 14px; margin-bottom:10px; }
+  .fiche-prog .nom { font-weight:700; font-size:13px; margin-bottom:4px; }
+  .fiche-prog .meta { font-size:11.5px; color:var(--text-faint); }
+  .fiche-prog-empty { color:var(--text-faint); font-size:12.5px; font-style:italic; padding:6px 0; }
+  .fiche-hist-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--hairline); font-size:12.5px; }
+  .fiche-hist-row:last-child { border-bottom:none; }
   .panel-row .l { color: var(--text-muted); }
   .panel-row .v { font-weight: 600; }
   .panel-row .v.mono { font-family: var(--font-mono); }
@@ -421,6 +444,7 @@ const NAV = [
 
 let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null };
 let data = { clients:[], bilansCoach:[], logs:[], aValider:[] };
+let ficheData = { loaded:false, profil:null, programme:null, progression:null, notes:null };
 
 // ── Notes de coaching (Supabase) ──────────────────────────────────────
 const SUPABASE_URL = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
@@ -459,7 +483,7 @@ function renderSidebar(){
       ${g.items.map(it => {
         let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
         return `
-        <button class="nav-item ${state.nav===it.id?'active':''}" onclick="setNav('${it.id}')">
+        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients'))?'active':''}" onclick="setNav('${it.id}')">
           ${it.icon}<span>${it.label}</span>
           ${count ? `<span class="nav-count">${count}</span>` : ''}
         </button>`;
@@ -564,6 +588,7 @@ function renderMain(){
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
   if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
+  if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
@@ -1436,22 +1461,204 @@ let panelNotes = null; // null = pas encore chargées
 let panelFiche = null;
 async function openPanel(id){
   state.selected = id;
-  panelTab = 'apercu';
-  panelNotes = null;
-  panelProgression = null;
-  panelFiche = null;
-  if (state.nav==='clients') renderTable();
+  ficheData = { loaded:false, profil:null, programme:null, progression:null, notes:null };
+  state.nav = 'fiche-client';
+  renderSidebar();
+  renderMain();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
-  document.getElementById('panel').innerHTML = panelHTML(c);
-  document.getElementById('panel').classList.add('open');
-  document.getElementById('overlay').classList.add('open');
+  try {
+    const [profil, programme, progression, notes] = await Promise.all([
+      chargerFiche(id).catch(()=>({})),
+      chargerProgrammeActif(id).catch(()=>null),
+      chargerProgression(id).catch(()=>[]),
+      chargerNotes(id).catch(()=>[]),
+    ]);
+    ficheData = { loaded:true, profil, programme, progression, notes };
+    if (state.nav==='fiche-client' && state.selected===id) renderMain();
+  } catch(e) {
+    ficheData = { loaded:true, profil:{}, programme:null, progression:[], notes:[], error:e.message };
+    if (state.nav==='fiche-client' && state.selected===id) renderMain();
+  }
 }
 function closePanel(){
   state.selected = null;
-  if (state.nav==='clients') renderTable();
   document.getElementById('panel').classList.remove('open');
   document.getElementById('overlay').classList.remove('open');
+}
+
+async function chargerProgrammeActif(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&order=created_at.desc&limit=1`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  const rows = await res.json();
+  return rows[0] || null;
+}
+
+// ── Fiche client — page dédiée ──────────────────────────────────────
+function renderFicheClientPage(el){
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (!c){ el.innerHTML = `<div class="empty-panel"><strong>Client introuvable</strong></div>`; return; }
+
+  if (!ficheData.loaded){
+    el.innerHTML = `
+      <button class="fiche-back" onclick="setNav('clients')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+        Retour aux clients
+      </button>
+      <div class="fiche-hero">
+        <div class="fiche-avatar">${initials(c.nom)}</div>
+        <div><div class="fiche-hero-name">${esc(c.nom)}</div>
+          <div class="fiche-hero-meta"><span class="chip off">Chargement…</span></div></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;padding:80px;"><div class="spin"></div></div>`;
+    return;
+  }
+
+  const p = ficheData.profil || {};
+  const prog = ficheData.programme;
+  const progression = Array.isArray(ficheData.progression) ? ficheData.progression : [];
+  const notes = Array.isArray(ficheData.notes) ? ficheData.notes : [];
+  const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+
+  const poidsPts = progression.map(s=>parseFloat(s.poids_moyen)).filter(v=>!isNaN(v));
+
+  el.innerHTML = `
+    <button class="fiche-back" onclick="setNav('clients')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+      Retour aux clients
+    </button>
+
+    <div class="fiche-hero">
+      <div class="fiche-avatar">${initials(c.nom)}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="fiche-hero-name">${esc(c.nom)}</div>
+        <div class="fiche-hero-meta">
+          <span class="level-pill">Niv. ${c.niveau||1}</span>
+          <span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span>
+          ${c._supabaseOnly ? '<span class="chip off">Supabase only</span>' : ''}
+          ${c.titreActif ? `<span class="chip off">${esc(c.titreActif)}</span>` : ''}
+        </div>
+      </div>
+      ${!c._supabaseOnly ? `<a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Ouvrir en vue client</a>` : ''}
+    </div>
+
+    <div class="fiche-grid">
+      <!-- Identité -->
+      <div class="fiche-card">
+        <h3>Identité</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
+          <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
+        </div>
+        <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
+        <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
+        <h3 style="margin-top:16px;">Suivi coaching</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
+          <div class="fiche-field"><label>Jour de bilan</label>
+            <select id="fJourBilan">
+              <option value="">—</option>
+              ${jours.map(j=>`<option value="${j}" ${p.jour_bilan===j?'selected':''}>${j}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
+        <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
+        <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
+      </div>
+
+      <!-- Programme & Progression -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="fiche-card">
+          <h3>Programme actif</h3>
+          ${prog ? `
+            <div class="fiche-prog">
+              <div class="nom">${esc(prog.nom||'Programme sans nom')}</div>
+              <div class="meta">Semaine ${esc(prog.semaine_courante||1)} · actif depuis ${prog.created_at ? new Date(prog.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+            </div>
+          ` : `<div class="fiche-prog-empty">Aucun programme assigné.<br><a href="#" onclick="setNav('programmes');return false;" style="color:var(--accent);font-style:normal;">→ Aller aux programmes</a></div>`}
+        </div>
+
+        <div class="fiche-card">
+          <h3>Progression (poids)</h3>
+          ${poidsPts.length >= 2 ? `
+            ${progressionChart(poidsPts, 'var(--accent)')}
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);margin-top:6px;">
+              <span>${poidsPts[0].toFixed(1)} kg</span>
+              <span>${(poidsPts[poidsPts.length-1]-poidsPts[0]>=0?'+':'')+(poidsPts[poidsPts.length-1]-poidsPts[0]).toFixed(1)} kg</span>
+              <span>${poidsPts[poidsPts.length-1].toFixed(1)} kg</span>
+            </div>
+          ` : `<div class="fiche-prog-empty">Pas encore de données (min. 2 bilans).</div>`}
+          ${progression.length ? `
+            <div style="margin-top:14px;">
+              ${progression.slice().reverse().slice(0,5).map(s=>`
+                <div class="fiche-hist-row">
+                  <span style="color:var(--text-muted);">Semaine ${esc(s.semaine||'?')}</span>
+                  <span>${s.poids_moyen ? parseFloat(s.poids_moyen).toFixed(1)+' kg' : '—'}${s.jours_diete_ok!=null?' · diète '+s.jours_diete_ok+'/7':''}</span>
+                </div>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes coach -->
+    <div class="fiche-card" style="margin-bottom:16px;">
+      <h3>Notes coach</h3>
+      <div class="note-form" style="margin-bottom:14px;">
+        <textarea id="ficheNoteInput" placeholder="Écrire une note privée sur ce client…" style="font-size:16px;"></textarea>
+        <button class="btn primary" style="margin-top:8px;" onclick="soumettreNoteFiche('${c.id}')">Ajouter la note</button>
+      </div>
+      ${notes.length ? notes.map(n=>`
+        <div class="note-item">
+          <div class="txt">${esc(n.contenu)}</div>
+          <div class="meta"><span class="date">${fmtDateNote(n.created_at)}</span><button class="del" onclick="supprimerNoteFiche(${n.id},'${c.id}')">Supprimer</button></div>
+        </div>`).join('') : `<div style="color:var(--text-faint);font-size:12.5px;">Aucune note pour ce client.</div>`}
+    </div>`;
+}
+
+async function sauvegarderFicheSandbox(clientId){
+  const btn = document.getElementById('ficheSaveBtn');
+  if (btn){ btn.disabled=true; btn.textContent='Enregistrement…'; }
+  const body = {
+    client_id: clientId,
+    prenom: document.getElementById('fPrenom').value.trim(),
+    nom: document.getElementById('fNom').value.trim(),
+    date_naissance: document.getElementById('fNaissance').value || null,
+    email: document.getElementById('fEmail').value.trim(),
+    date_debut: document.getElementById('fDebut').value || null,
+    jour_bilan: document.getElementById('fJourBilan').value || null,
+    taille_cm: parseInt(document.getElementById('fTaille').value)||null,
+    objectif: document.getElementById('fObjectif').value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method:'POST', headers:supaHeaders({ Prefer:'return=representation,resolution=merge-duplicates' }), body:JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('supabase_'+res.status);
+    ficheData.profil = (await res.json())[0];
+    if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
+  } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
+}
+
+async function soumettreNoteFiche(clientId){
+  const el = document.getElementById('ficheNoteInput');
+  const contenu = (el?.value||'').trim();
+  if (!contenu) return;
+  try {
+    await ajouterNote(clientId, contenu);
+    ficheData.notes = await chargerNotes(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e){ alert('Erreur : '+e.message); }
+}
+
+async function supprimerNoteFiche(noteId, clientId){
+  try {
+    await supprimerNoteApi(noteId);
+    ficheData.notes = await chargerNotes(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e){ alert('Erreur : '+e.message); }
 }
 
 async function setPanelTab(t){
