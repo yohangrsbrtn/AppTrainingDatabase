@@ -3031,7 +3031,7 @@ async function ouvrirAssignesTemplate(templateId, templateNom){
 
 // ── Page Diètes (coach) ───────────────────────────────────────────────
 async function chargerDieteTemplates(){
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?order=nom.asc&select=*,repas(id,nom,ordre,repas_aliments(id,nom,quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`, { headers: supaHeaders() });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?client_only=eq.false&order=nom.asc&select=*,repas(id,nom,ordre,repas_aliments(id,nom,quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`, { headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
@@ -4367,8 +4367,9 @@ async function migrerDieteGAS() {
     const repasGAS = migPreviewDieteDetail.repas || [];
 
     // 1. Créer le template diète
+    const commeTemplate = document.getElementById('cbMigAsTemplate')?.checked;
     const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom }) });
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom, client_only: !commeTemplate }) });
     if (!tplRes.ok) throw new Error('template ' + tplRes.status);
     const tpl = (await tplRes.json())[0];
 
@@ -4608,7 +4609,7 @@ async function sauvegarderDietePourClient() {
   try {
     // Créer le template
     const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom:dieteTplEnEdition.nom, description:dieteTplEnEdition.description||null }) });
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom:dieteTplEnEdition.nom, description:dieteTplEnEdition.description||null, client_only: !commeTemplate }) });
     if (!tplRes.ok) throw new Error('template ' + tplRes.status);
     const tpl = (await tplRes.json())[0];
     // Sauver repas + aliments
@@ -4628,12 +4629,7 @@ async function sauvegarderDietePourClient() {
       { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
     await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
       { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: _ficheCreateClientId, nom: tpl.nom, actif: true }) });
-    // Si pas template → supprimer le template créé (diète directe)
-    if (!commeTemplate) {
-      await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${tpl.id}`, { method:'DELETE', headers:supaHeaders() });
-    } else {
-      dieteTemplatesData = null;
-    }
+    dieteTemplatesData = null;
     document.getElementById('modal-editeur-diete').remove();
     _ficheCreateClientId = null;
     // Recharger la fiche (openPanel recharge tout et reste sur fiche-client)
