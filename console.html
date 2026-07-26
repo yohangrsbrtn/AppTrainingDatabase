@@ -507,6 +507,9 @@ let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
 let dieteTemplatesData = null;
 let dieteTplEnEdition = null;
+let dietesPageTab = 'templates'; // 'templates' | 'recettes'
+let recettesCoachData = null;
+let recetteEnEdition = null;
 let alimentsCoachData = null;   // null=pas chargé, []+=chargé
 let alimentsCoachErr = null;    // message d'erreur si chargement échoué
 let alimBaseSearch = '';
@@ -3046,14 +3049,28 @@ function macrosDiete(repasArr){
 
 async function renderDietesPage(el){
   el.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Diètes</h1></div></div>
+    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Diètes &amp; Recettes</h1></div></div>
+    <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">
+      <button id="dtab-templates" class="tab-btn ${dietesPageTab==='templates'?'active':''}" onclick="setDietesTab('templates')" style="padding:8px 18px;background:none;border:none;color:${dietesPageTab==='templates'?'var(--accent)':'var(--text-muted)'};font-weight:600;font-size:13px;cursor:pointer;border-bottom:2px solid ${dietesPageTab==='templates'?'var(--accent)':'transparent'};margin-bottom:-2px;">Templates diète</button>
+      <button id="dtab-recettes" class="tab-btn ${dietesPageTab==='recettes'?'active':''}" onclick="setDietesTab('recettes')" style="padding:8px 18px;background:none;border:none;color:${dietesPageTab==='recettes'?'var(--accent)':'var(--text-muted)'};font-weight:600;font-size:13px;cursor:pointer;border-bottom:2px solid ${dietesPageTab==='recettes'?'var(--accent)':'transparent'};margin-bottom:-2px;">Recettes</button>
+    </div>
     <div id="dieteSub"><div style="text-align:center;padding:30px;color:var(--text-faint);">Chargement…</div></div>`;
   try {
-    if (dieteTemplatesData === null) dieteTemplatesData = await chargerDieteTemplates();
-    renderDieteTemplatesSub();
+    if (dietesPageTab === 'templates') {
+      if (dieteTemplatesData === null) dieteTemplatesData = await chargerDieteTemplates();
+      renderDieteTemplatesSub();
+    } else {
+      if (recettesCoachData === null) await chargerRecettesCoach();
+      renderRecettesCoachSub();
+    }
   } catch(e){
-    document.getElementById('dieteSub').innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="dieteTemplatesData=null;setNav('dietes')">Réessayer</button></div>`;
+    document.getElementById('dieteSub').innerHTML = `<div class="empty-panel"><strong>Erreur</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="setNav('dietes')">Réessayer</button></div>`;
   }
+}
+
+async function setDietesTab(tab) {
+  dietesPageTab = tab;
+  setNav('dietes');
 }
 
 function renderDieteTemplatesSub(){
@@ -3508,6 +3525,175 @@ async function ouvrirAssignesDiete(templateId, templateNom){
   } catch(e){
     overlay.querySelector('.modal-box').innerHTML = `<h3>Erreur</h3><div>${esc(e.message)}</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
   }
+}
+
+// ── Recettes coach ──────────────────────────────────────────────────────
+
+async function chargerRecettesCoach() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/recettes?order=nom.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('Erreur Supabase ' + res.status);
+  recettesCoachData = await res.json();
+}
+
+function renderRecettesCoachSub() {
+  const sub = document.getElementById('dieteSub');
+  if (!sub) return;
+  const list = recettesCoachData || [];
+  sub.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <span style="color:var(--text-muted);font-size:12.5px;">${list.length} recette${list.length>1?'s':''}</span>
+      <button class="btn primary" style="margin-left:auto;" onclick="ouvrirEditeurRecette(null)">+ Nouvelle recette</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
+      ${list.map(r => `
+        <div class="diete-tpl-card" onclick="ouvrirEditeurRecette(${r.id})">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+            <div style="font-size:22px;flex-shrink:0;">${r.emoji||'🍽️'}</div>
+            <button class="icon-btn" style="width:24px;height:24px;margin-left:auto;" onclick="event.stopPropagation();supprimerRecette(${r.id})">${iTrash()}</button>
+          </div>
+          <div style="font-weight:700;font-size:14px;margin:6px 0 4px;">${esc(r.nom)}</div>
+          ${r.categorie ? `<div style="font-size:11.5px;color:var(--text-faint);">${esc(r.categorie)}</div>` : ''}
+          ${r.temps_prep_min ? `<div style="font-size:11.5px;color:var(--text-faint);">${r.temps_prep_min} min · ${r.portions||1} portion${(r.portions||1)>1?'s':''}</div>` : ''}
+          ${r.kcal_par_portion ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;margin-top:8px;">
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${Math.round(r.kcal_par_portion)}</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${Math.round(r.prot_par_portion||0)}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${Math.round(r.glu_par_portion||0)}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
+            <div><div style="font-family:var(--font-mono);font-size:13px;font-weight:700;">${Math.round(r.lip_par_portion||0)}g</div><div style="font-size:9px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>
+          </div>` : ''}
+        </div>`).join('') || `<div class="empty-panel" style="grid-column:1/-1;">Aucune recette. Crée la première avec "+ Nouvelle recette".</div>`}
+    </div>`;
+}
+
+async function supprimerRecette(id) {
+  if (!confirm('Supprimer cette recette ?')) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/recettes?id=eq.${id}`, { method:'DELETE', headers:supaHeaders() });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    recettesCoachData = recettesCoachData.filter(r=>r.id!==id);
+    renderRecettesCoachSub();
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+function ouvrirEditeurRecette(id) {
+  if (id) {
+    const r = recettesCoachData.find(x=>x.id===id);
+    recetteEnEdition = {
+      id: r.id,
+      nom: r.nom||'',
+      description: r.description||'',
+      categorie: r.categorie||'',
+      emoji: r.emoji||'🍽️',
+      temps_prep_min: r.temps_prep_min||'',
+      portions: r.portions||1,
+      kcal_par_portion: r.kcal_par_portion||'',
+      prot_par_portion: r.prot_par_portion||'',
+      glu_par_portion: r.glu_par_portion||'',
+      lip_par_portion: r.lip_par_portion||'',
+      ingredients: Array.isArray(r.ingredients) ? r.ingredients : (r.ingredients ? JSON.parse(r.ingredients) : []),
+      etapes: Array.isArray(r.etapes) ? r.etapes : (r.etapes ? JSON.parse(r.etapes) : [])
+    };
+  } else {
+    recetteEnEdition = { id:null, nom:'', description:'', categorie:'', emoji:'🍽️', temps_prep_min:'', portions:1, kcal_par_portion:'', prot_par_portion:'', glu_par_portion:'', lip_par_portion:'', ingredients:[], etapes:[] };
+  }
+  renderEditeurRecette();
+}
+
+function renderEditeurRecette() {
+  const r = recetteEnEdition;
+  const overlay = document.getElementById('modal-editeur-recette') || document.createElement('div');
+  overlay.id = 'modal-editeur-recette';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if(e.target===overlay && confirm('Fermer sans sauvegarder ?')) overlay.remove(); };
+
+  const ingredLines = (r.ingredients||[]).map((ing,i) => {
+    const nom = typeof ing==='string' ? ing : (ing.nom||'');
+    const qte = typeof ing==='object' ? (ing.quantite||'') : '';
+    return `<div style="display:flex;gap:6px;margin-bottom:6px;">
+      <input type="text" value="${esc(nom)}" placeholder="Ingrédient" onchange="recetteEnEdition.ingredients[${i}]={nom:this.value,quantite:recetteEnEdition.ingredients[${i}].quantite||''}" style="flex:2;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:5px 8px;color:var(--text);font-size:13px;font-family:inherit;">
+      <input type="text" value="${esc(qte)}" placeholder="Quantité" onchange="recetteEnEdition.ingredients[${i}].quantite=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:5px 8px;color:var(--text);font-size:13px;font-family:inherit;">
+      <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="recetteEnEdition.ingredients.splice(${i},1);renderEditeurRecette()">${iTrash()}</button>
+    </div>`;
+  }).join('');
+
+  const etapeLines = (r.etapes||[]).map((e,i) => {
+    const texte = typeof e==='string' ? e : (e.texte||'');
+    return `<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;">
+      <div style="width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:4px;">${i+1}</div>
+      <textarea onchange="recetteEnEdition.etapes[${i}]={texte:this.value}" rows="2" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:5px 8px;color:var(--text);font-size:13px;font-family:inherit;resize:vertical;">${esc(texte)}</textarea>
+      <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;margin-top:2px;" onclick="recetteEnEdition.etapes.splice(${i},1);renderEditeurRecette()">${iTrash()}</button>
+    </div>`;
+  }).join('');
+
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:640px;">
+      <h3>${r.id ? 'Modifier' : 'Nouvelle'} recette</h3>
+      <div style="display:grid;grid-template-columns:60px 1fr;gap:10px;margin-bottom:10px;align-items:end;">
+        <div class="field-row" style="margin:0;"><label>Emoji</label><input id="rEmoji" type="text" value="${esc(r.emoji)}" style="text-align:center;font-size:20px;"></div>
+        <div class="field-row" style="margin:0;"><label>Nom</label><input id="rNom" type="text" value="${esc(r.nom)}" placeholder="Nom de la recette"></div>
+      </div>
+      <div class="field-row"><label>Description</label><input id="rDesc" type="text" value="${esc(r.description)}" placeholder="Description courte (optionnel)"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div class="field-row" style="margin:0;"><label>Catégorie</label><input id="rCat" type="text" value="${esc(r.categorie)}" placeholder="ex: Déjeuner"></div>
+        <div class="field-row" style="margin:0;"><label>Temps (min)</label><input id="rTemps" type="number" value="${r.temps_prep_min||''}" placeholder="30"></div>
+        <div class="field-row" style="margin:0;"><label>Portions</label><input id="rPortions" type="number" value="${r.portions||1}" min="1"></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Macros (par portion)</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+        <div class="field-row" style="margin:0;"><label>Kcal</label><input id="rKcal" type="number" value="${r.kcal_par_portion||''}" placeholder="0"></div>
+        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="rProt" type="number" value="${r.prot_par_portion||''}" placeholder="0"></div>
+        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="rGlu" type="number" value="${r.glu_par_portion||''}" placeholder="0"></div>
+        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="rLip" type="number" value="${r.lip_par_portion||''}" placeholder="0"></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Ingrédients</div>
+      <div id="rIngredLines">${ingredLines}</div>
+      <button class="btn" style="font-size:11.5px;padding:5px 10px;margin-bottom:14px;" onclick="recetteEnEdition.ingredients.push({nom:'',quantite:''});renderEditeurRecette()">+ Ajouter un ingrédient</button>
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Étapes de préparation</div>
+      <div id="rEtapeLines">${etapeLines}</div>
+      <button class="btn" style="font-size:11.5px;padding:5px 10px;margin-bottom:14px;" onclick="recetteEnEdition.etapes.push({texte:''});renderEditeurRecette()">+ Ajouter une étape</button>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-editeur-recette').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauverRecette()">Sauvegarder</button>
+      </div>
+    </div>`;
+  if (!document.getElementById('modal-editeur-recette')) document.body.appendChild(overlay);
+}
+
+async function sauverRecette() {
+  const r = recetteEnEdition;
+  const payload = {
+    nom: document.getElementById('rNom').value.trim(),
+    description: document.getElementById('rDesc').value.trim()||null,
+    categorie: document.getElementById('rCat').value.trim()||null,
+    emoji: document.getElementById('rEmoji').value.trim()||'🍽️',
+    temps_prep_min: parseInt(document.getElementById('rTemps').value)||null,
+    portions: parseInt(document.getElementById('rPortions').value)||1,
+    kcal_par_portion: parseFloat(document.getElementById('rKcal').value)||null,
+    prot_par_portion: parseFloat(document.getElementById('rProt').value)||null,
+    glu_par_portion: parseFloat(document.getElementById('rGlu').value)||null,
+    lip_par_portion: parseFloat(document.getElementById('rLip').value)||null,
+    ingredients: r.ingredients.filter(x=>(typeof x==='string'?x:(x.nom||'')).trim()),
+    etapes: r.etapes.filter(x=>(typeof x==='string'?x:(x.texte||'')).trim())
+  };
+  if (!payload.nom) { alert('Le nom est obligatoire.'); return; }
+  try {
+    let res;
+    if (r.id) {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/recettes?id=eq.${r.id}`,
+        { method:'PATCH', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(payload) });
+    } else {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/recettes`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(payload) });
+    }
+    if (!res.ok) throw new Error('Supabase ' + res.status + ' : ' + await res.text());
+    const saved = (await res.json())[0];
+    if (r.id) {
+      recettesCoachData = recettesCoachData.map(x=>x.id===r.id?saved:x);
+    } else {
+      recettesCoachData = [...(recettesCoachData||[]), saved];
+    }
+    document.getElementById('modal-editeur-recette').remove();
+    renderRecettesCoachSub();
+  } catch(e){ alert('Erreur : ' + e.message); }
 }
 
 // ── Migration helpers ───────────────────────────────────────────────────
