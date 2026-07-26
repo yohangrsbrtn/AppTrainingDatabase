@@ -43,10 +43,30 @@ Bac à sable de développement pour la migration de l'app de coaching vers Supab
 - **`client_dietes`** : programme de diète assigné à un client
 - **`aliments_coach`** : `{ id, nom, categorie, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme, created_at }` — bibliothèque d'aliments du coach, valeurs par gramme
 
+### Mensurations
+
+- **`mensurations`** : `{ id, client_id, date DATE, phase, poids NUMERIC, mesure NUMERIC, created_at }` — historique poids/mesure par client. Contrainte `UNIQUE(client_id, date)`. Upsert via `?on_conflict=client_id,date`.
+
 ### Coach
 
 - **`notes_coach`** : notes libres par client, CRUD simple
 - **`bilan_snapshots`** : données de progression/poids client
+
+## Pages console (`console.html`)
+
+### Mensurations (`state.nav='mensurations'`)
+
+`renderMensurationsPage(el)` — dropdown client → charge depuis Supabase `mensurations` via `chargerMensurationsSupabase(clientId)`. Bouton "⬇ Migrer depuis GAS" → appelle `migrerMensurations(clientId, true)`.
+
+### Migration (`state.nav='migration'`)
+
+`renderMigrationPage(el)` — outil de migration GAS production → Supabase. **Toujours lit le GAS prod**, jamais le sandbox.
+
+- **Profils connus** (`PROFILS_CONNUS`) : upsert `yohanp` et `perrineayot` dans `client_profils`.
+- **Mensurations** : bouton par client → `migrerMensurations(clientId)` → `apiGasProd('chargerMensurations', clientId)` → insert dans `mensurations`.
+- **`GAS_PROD_URL`** : URL du GAS de production, codée en dur dans `console.html`, distincte du `GAS_URL` du sandbox.
+- **`GAS_ID_MAP`** : mapping ID Supabase → ID GAS quand ils diffèrent. Ex : `{ 'yohanp': 'yohan' }` — le compte test supabase-only lit la feuille `yohan` dans GAS.
+- **`apiGasProd(action, clientId, params)`** : variante de `apiAs` qui appelle `GAS_PROD_URL` et applique `_gasId()`.
 
 ## Fiche client (`console.html`)
 
@@ -59,6 +79,17 @@ Page dédiée dans `#main`. `openPanel(id)` → `state.nav='fiche-client'`. Char
 **Page logs programme** (`state.nav='prog-logs'`) : `chargerProgrammeById(progId)` charge l'arbo + logs complets. Navigation par semaine (`progLogsSemaine`). Back → `retourFicheClient()`. Sidebar garde "Clients" actif aussi pour `'prog-logs'`.
 
 **Onglet Diète** (`renderFicheDieteTab`) : diète active + historique, toggle (`toggleDieteActif`), bouton "Assigner" → `ouvrirAssignerDiete(clientId)` (charge `dieteTemplatesData` si null, modal de sélection template).
+
+## Base alimentaire (`console.html`, `state.nav='base'`)
+
+`renderBasePage(el)` → async, charge `alimentsCoachData` (lazy) puis appelle `renderBaseSub(el)`. Deux onglets source :
+
+- **Ma base coach** : liste `aliments_coach` (Supabase), recherche sans rechargement DOM via `_majTableCoach()` (met à jour uniquement `<tbody id="alim-tbody-coach">`). CRUD : `ouvrirFormulaireAliment`, `sauvegarderAlimentCoach`, `supprimerAlimentCoach`.
+- **Open Food Facts** : recherche via `rechercherOpenFoodFacts(q)` (CGI endpoint `sort_by=unique_scans_n&lc=fr`), résultats dans `#offBaseResults` uniquement (pas de re-render page). Import unitaire via `importerOFFDansBase`.
+
+**Import depuis Sheets** : bouton "⬇ Importer depuis Sheets" → `lancerImportSheets()` appelle `api('chargerBaseAliments')` (GAS sandbox), affiche modal de confirmation, puis `executerImportSheets()` insert par lots de 50 avec `resolution=ignore-duplicates`. **Piège** : ne jamais passer les données en `onclick` inline — utiliser `window._importCoach` / `window._importCommunaute` (guillemets JSON cassent l'attribut HTML).
+
+**Variables d'état** : `alimentsCoachData` (null=pas chargé), `alimentsCoachErr`, `alimBaseSearch`, `alimBaseCat`, `alimBaseSource` ('coach'|'off'), `alimOffResults`, `ajoutAlimTab`, `ajoutAlimRI`.
 
 ## Page Diètes coach (`console.html`)
 
@@ -95,6 +126,9 @@ CREATE TABLE IF NOT EXISTS aliments_coach (id SERIAL PRIMARY KEY, nom TEXT NOT N
 - **`alimentsCoachData`** : lazy-loadé (null jusqu'au premier accès). Chargé automatiquement à l'ouverture de la page Base alimentaire ou du modal d'ajout d'aliment (onglet "Base coach"). Toujours vérifier `=== null` avant usage.
 - **Open Food Facts** : requête à la demande via `rechercherOpenFoodFacts(q)`. Les macros retournées sont déjà par gramme (÷100 appliqué). Ne jamais faire d'import en masse.
 - **Modal ajout aliment** : 3 onglets — "Base coach" (recherche `alimentsCoachData`), "Open Food Facts" (fetch ON OFF), "Manuel" (saisie libre). État dans `ajoutAlimTab` et `ajoutAlimRI`. `_ouvrirSaisieQuantite()` est le point d'entrée commun après sélection base/OFF.
+- **Import Sheets (onclick inline)** : ne jamais injecter `JSON.stringify(data)` dans un attribut `onclick` — les guillemets cassent l'HTML. Stocker dans `window._var` et référencer dans l'onclick.
+- **Deux GAS distincts** : `api.js` pointe vers le GAS sandbox (`AKfycbxU...`). Les migrations lisent toujours `GAS_PROD_URL` (`AKfycbwQ...`) via `apiGasProd()`. Ne pas mélanger.
+- **`GAS_ID_MAP`** : `yohanp` est un compte supabase-only sans feuille GAS — il mappe vers `yohan` pour toute lecture GAS. Ajouter ici tout nouveau client test sans feuille propre.
 
 ## Workflow
 
