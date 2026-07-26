@@ -2407,9 +2407,12 @@ function renderFicheProgTab(c){
   const progs = ficheData.tous_programmes || [];
   const actif = progs.find(p=>p.actif);
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
-      <button class="btn primary" onclick="setNav('programmes')">+ Assigner un programme</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="ouvrirCreerProgrammePourClient('${c.id}')">+ Créer</button>
+        <button class="btn primary" onclick="setNav('programmes')">+ Assigner un template</button>
+      </div>
     </div>
     ${progs.length ? progs.map(p=>`
       <div class="prog-row ${p.actif?'':'inactif'}" onclick="ouvrirLogsProgramme(${p.id})">
@@ -2432,9 +2435,12 @@ function renderFicheDieteTab(c){
   const active = dietes.find(d=>d.actif);
   const history = dietes.filter(d=>!d.actif);
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${dietes.length} diète${dietes.length>1?'s':''} assignée${dietes.length>1?'s':''}</div>
-      <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">+ Assigner une diète</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="ouvrirCreerDietePourClient('${c.id}')">+ Créer</button>
+        <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">+ Assigner un template</button>
+      </div>
     </div>
     ${active ? `
       <div class="prog-row" style="cursor:default;margin-bottom:16px;">
@@ -3376,6 +3382,7 @@ function confirmerAjoutAliment(){
 }
 
 async function sauvegarderDieteTemplate(){
+  if (_ficheCreateClientId) { await sauvegarderDietePourClient(); return; }
   const nom = document.getElementById('dNom').value.trim();
   const errEl = document.getElementById('dErr');
   if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
@@ -3900,15 +3907,23 @@ async function migrerProfils() {
 
 // ── Migration Preview ──────────────────────────────────────────────────
 let migPreviewClientId = null;
-let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'bilans'
-let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null };
+let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'diete' | 'programme'
+let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
 let migPreviewSel = new Set(); // dates ISO sélectionnées pour migration mensu
+let migPreviewDieteSel = null;      // {nom, ligne, col} sélectionnée
+let migPreviewDieteDetail = null;   // données chargées depuis GAS pour cette diète
+let migPreviewDieteLoading = false;
+let migPreviewFeuilleSelected = null; // nom de la feuille programme sélectionnée
+let migPreviewFeuilleData = null;     // { seances, semaines }
+let migPreviewFeuilleLoading = false;
 
 function openMigrationPreview(clientId) {
   migPreviewClientId = clientId;
   migPreviewTab = 'infos';
-  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null };
+  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
   migPreviewSel = new Set();
+  migPreviewDieteSel = null; migPreviewDieteDetail = null; migPreviewDieteLoading = false;
+  migPreviewFeuilleSelected = null; migPreviewFeuilleData = null; migPreviewFeuilleLoading = false;
   state.nav = 'migration-preview';
   renderSidebar();
   renderMain();
@@ -3917,26 +3932,29 @@ function openMigrationPreview(clientId) {
 
 async function _chargerMigPreviewData(clientId) {
   try {
-    const [profRes, supaMenuRes, gasMenuRaw] = await Promise.all([
+    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasDietesRaw, gasFeuilles] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
       apiGasProd('chargerMensurations', clientId).catch(() => []),
+      apiGasProd('listerDietes', clientId).catch(() => []),
+      apiGasProd('listerFeuilles', clientId).catch(() => []),
     ]);
-    const profRows = profRes.ok ? await profRes.json() : [];
-    const supaMensurations = supaMenuRes.ok ? await supaMenuRes.json() : [];
-    const gasMensurations = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
+    const profRows        = profRes.ok        ? await profRes.json()        : [];
+    const supaMensurations = supaMenuRes.ok   ? await supaMenuRes.json()    : [];
+    const supaClientDietes = supaCliDietesRes.ok ? await supaCliDietesRes.json() : [];
+    const supaClientProgs  = supaCliProgsRes.ok  ? await supaCliProgsRes.json()  : [];
+    const gasMensurations  = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
+    const gasDietes        = (typeof gasDietesRaw === 'string' ? JSON.parse(gasDietesRaw) : gasDietesRaw) || [];
     const supaProfile = profRows[0] || null;
 
-    // Dates déjà dans Supabase
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
-    // Sélectionner par défaut uniquement les nouvelles lignes
-    migPreviewSel = new Set(
-      gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d))
-    );
-    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations };
+    migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
   } catch(e) {
-    migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [] };
+    migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [], gasDietes: [], gasFeuilles: [], supaClientDietes: [], supaClientProgs: [] };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
   }
 }
@@ -4012,19 +4030,22 @@ function renderMigrationPreviewPage(el) {
       </div>
     </div>
 
-    <div style="display:flex;gap:0;border-bottom:1px solid var(--hairline);margin-bottom:20px;">
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--hairline);margin-bottom:20px;flex-wrap:wrap;">
       <button class="mig-tab${migPreviewTab==='infos'?' active':''}" data-tab="infos" onclick="setMigPreviewTab('infos')">Dashboard</button>
       <button class="mig-tab${migPreviewTab==='mensurations'?' active':''}" data-tab="mensurations" onclick="setMigPreviewTab('mensurations')">Mensurations (${gasCount})</button>
-      <button class="mig-tab mig-tab-disabled" data-tab="bilans" title="Prochainement">Bilans</button>
+      <button class="mig-tab${migPreviewTab==='diete'?' active':''}" data-tab="diete" onclick="setMigPreviewTab('diete')">Diète (${(migPreviewData.gasDietes||[]).length})</button>
+      <button class="mig-tab${migPreviewTab==='programme'?' active':''}" data-tab="programme" onclick="setMigPreviewTab('programme')">Programme (${(migPreviewData.gasFeuilles||[]).length})</button>
     </div>
 
     <div id="migPreviewContent">${_renderMigPreviewTabContent()}</div>`;
 }
 
 function _renderMigPreviewTabContent() {
-  if (migPreviewTab === 'infos') return _renderMigPreviewInfos();
+  if (migPreviewTab === 'infos')       return _renderMigPreviewInfos();
   if (migPreviewTab === 'mensurations') return _renderMigPreviewMensurations();
-  return `<div style="color:var(--text-faint);padding:24px;">Prochainement.</div>`;
+  if (migPreviewTab === 'diete')       return _renderMigPreviewDiete();
+  if (migPreviewTab === 'programme')   return _renderMigPreviewProgramme();
+  return '';
 }
 
 function _renderMigPreviewInfos() {
@@ -4201,6 +4222,421 @@ async function migrerSelectionMensu() {
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--critical);padding:8px 0;display:block;">Erreur : ${esc(e.message)}</span>`;
     document.querySelectorAll('#migPreviewContent .btn.primary').forEach(b => b.disabled = false);
   }
+}
+
+// ── Migration Preview : Diète ──────────────────────────────────────────
+
+function _renderMigPreviewDiete() {
+  const dietes = migPreviewData.gasDietes || [];
+  const supaDietes = migPreviewData.supaClientDietes || [];
+
+  if (!dietes.length) return `<div style="color:var(--text-faint);padding:24px;">Aucune diète trouvée dans GAS pour ce client.</div>`;
+
+  const listHtml = dietes.map(d => {
+    const selected = migPreviewDieteSel && migPreviewDieteSel.ligne === d.ligne && migPreviewDieteSel.col === d.col;
+    return `<div onclick="migSelectDiete(${d.ligne},${d.col},'${esc(d.nom)}')"
+      style="padding:12px 16px;background:${selected?'var(--accent-soft)':'var(--surface)'};border-radius:var(--radius);margin-bottom:8px;cursor:pointer;border:1.5px solid ${selected?'var(--accent)':'var(--hairline)'};display:flex;align-items:center;gap:12px;">
+      <div style="flex:1;font-size:13px;font-weight:600;">${esc(d.nom)}</div>
+      ${selected ? `<span style="font-size:11px;color:var(--accent);font-weight:700;">Sélectionnée</span>` : ''}
+    </div>`;
+  }).join('');
+
+  const detailHtml = migPreviewDieteLoading
+    ? `<div style="display:flex;align-items:center;gap:10px;padding:20px;"><div class="spin"></div> Chargement depuis GAS…</div>`
+    : migPreviewDieteDetail ? _renderDieteGASDetail(migPreviewDieteDetail, supaDietes)
+    : `<div style="color:var(--text-faint);font-size:13px;padding:20px;">Sélectionne une diète pour voir son contenu avant import.</div>`;
+
+  return `
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start;">
+      <div class="table-card" style="padding:16px;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:12px;">Diètes GAS (${dietes.length})</div>
+        ${listHtml}
+      </div>
+      <div id="migDieteDetail">${detailHtml}</div>
+    </div>`;
+}
+
+function _renderDieteGASDetail(detail, supaClientDietes) {
+  const nom = migPreviewDieteSel ? migPreviewDieteSel.nom : (detail.nom||'');
+  const repas = detail.repas || [];
+
+  const dejaMigree = supaClientDietes.some(d => d.nom === nom);
+
+  let kcalTotal = 0, protTotal = 0, gluTotal = 0, lipTotal = 0;
+  repas.forEach(r => (r.aliments||[]).forEach(a => {
+    kcalTotal += a.cals||0; protTotal += a.prot||0; gluTotal += a.glu||0; lipTotal += a.lip||0;
+  }));
+
+  const repasHtml = repas.map(r => {
+    const alims = (r.aliments||[]).map(a =>
+      `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--hairline);">
+        <span style="color:var(--text);">${esc(a.nom)}</span>
+        <span style="color:var(--text-faint);font-family:var(--font-mono);">${a.qte}g · ${Math.round(a.cals)}kcal · P${Math.round(a.prot)}g</span>
+      </div>`).join('');
+    return `<div style="margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:6px;">${esc(r.nom)}</div>
+      ${alims || '<div style="font-size:12px;color:var(--text-faint);">Aucun aliment</div>'}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="table-card" style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${repas.length} repas · ${Math.round(kcalTotal)} kcal · P ${Math.round(protTotal)}g · G ${Math.round(gluTotal)}g · L ${Math.round(lipTotal)}g</div>
+        </div>
+        ${dejaMigree
+          ? `<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;">Déjà une diète "${esc(nom)}" dans Supabase</span>`
+          : ''}
+        <button class="btn primary" style="flex-shrink:0;" onclick="migrerDieteGAS()">⬇ Importer cette diète</button>
+      </div>
+      <div id="migDieteStatus" style="margin-bottom:8px;"></div>
+      ${repasHtml}
+    </div>`;
+}
+
+async function migSelectDiete(ligne, col, nom) {
+  migPreviewDieteSel = { ligne, col, nom };
+  migPreviewDieteDetail = null;
+  migPreviewDieteLoading = true;
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = _renderMigPreviewTabContent();
+  try {
+    const raw = await apiGasProd('chargerDieteParPosition', migPreviewClientId, { ligneTitre: ligne, colTitre: col });
+    migPreviewDieteDetail = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch(e) {
+    migPreviewDieteDetail = { repas: [], erreur: e.message };
+  }
+  migPreviewDieteLoading = false;
+  const c2 = document.getElementById('migPreviewContent');
+  if (c2) c2.innerHTML = _renderMigPreviewTabContent();
+}
+
+async function migrerDieteGAS() {
+  const statusEl = document.getElementById('migDieteStatus');
+  if (!migPreviewDieteDetail || !migPreviewDieteSel) return;
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><div class="spin"></div> Import en cours…</div>`;
+  document.querySelectorAll('#migDieteDetail .btn.primary').forEach(b => b.disabled = true);
+  try {
+    const nom = migPreviewDieteSel.nom;
+    const repasGAS = migPreviewDieteDetail.repas || [];
+
+    // 1. Créer le template diète
+    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom }) });
+    if (!tplRes.ok) throw new Error('template ' + tplRes.status);
+    const tpl = (await tplRes.json())[0];
+
+    // 2. Créer les repas + aliments
+    for (let ri = 0; ri < repasGAS.length; ri++) {
+      const r = repasGAS[ri];
+      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: r.nom, ordre: ri }) });
+      if (!rRes.ok) throw new Error('repas ' + rRes.status);
+      const savedR = (await rRes.json())[0];
+      const aliments = r.aliments || [];
+      if (aliments.length) {
+        const payload = aliments.map((a, ai) => {
+          const q = a.qte || 1;
+          return {
+            repas_id: savedR.id, nom: a.nom, quantite_g: q, ordre: ai,
+            kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
+            prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
+            glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
+            lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
+          };
+        });
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
+          { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(payload) });
+      }
+    }
+
+    // 3. Désactiver diètes existantes + assigner
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}`,
+      { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
+    const assignRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
+    if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
+
+    // 4. Mettre à jour dieteTemplatesData si chargé
+    if (dieteTemplatesData !== null) dieteTemplatesData = null;
+
+    // 5. Recharger supaClientDietes
+    const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
+    migPreviewData.supaClientDietes = r2.ok ? await r2.json() : migPreviewData.supaClientDietes;
+
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Diète importée et assignée au client.</div>`;
+    document.querySelectorAll('#migDieteDetail .btn.primary').forEach(b => b.disabled = false);
+    const c = document.getElementById('migDieteDetail');
+    if (c && migPreviewDieteDetail) c.innerHTML = _renderDieteGASDetail(migPreviewDieteDetail, migPreviewData.supaClientDietes);
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur : ${esc(e.message)}</div>`;
+    document.querySelectorAll('#migDieteDetail .btn.primary').forEach(b => b.disabled = false);
+  }
+}
+
+// ── Migration Preview : Programme ──────────────────────────────────────
+
+function _renderMigPreviewProgramme() {
+  const feuilles = migPreviewData.gasFeuilles || [];
+  const supaProgs = migPreviewData.supaClientProgs || [];
+
+  if (!feuilles.length) return `<div style="color:var(--text-faint);padding:24px;">Aucun programme trouvé dans GAS pour ce client.</div>`;
+
+  const listHtml = feuilles.map(f => {
+    const selected = migPreviewFeuilleSelected === f;
+    const dejaMigre = supaProgs.some(p => p.nom === f);
+    return `<div onclick="migSelectFeuille('${esc(f)}')"
+      style="padding:12px 16px;background:${selected?'var(--accent-soft)':'var(--surface)'};border-radius:var(--radius);margin-bottom:8px;cursor:pointer;border:1.5px solid ${selected?'var(--accent)':'var(--hairline)'};display:flex;align-items:center;gap:12px;">
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:600;">${esc(f)}</div>
+        ${dejaMigre ? `<div style="font-size:11px;color:var(--text-faint);">Déjà dans Supabase</div>` : ''}
+      </div>
+      ${selected ? `<span style="font-size:11px;color:var(--accent);font-weight:700;">Sélectionné</span>` : ''}
+    </div>`;
+  }).join('');
+
+  const detailHtml = migPreviewFeuilleLoading
+    ? `<div style="display:flex;align-items:center;gap:10px;padding:20px;"><div class="spin"></div> Chargement depuis GAS…</div>`
+    : migPreviewFeuilleData ? _renderProgGASDetail(migPreviewFeuilleData, supaProgs)
+    : `<div style="color:var(--text-faint);font-size:13px;padding:20px;">Sélectionne un programme pour voir son contenu avant import.</div>`;
+
+  return `
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start;">
+      <div class="table-card" style="padding:16px;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:12px;">Programmes GAS (${feuilles.length})</div>
+        ${listHtml}
+      </div>
+      <div id="migProgDetail">${detailHtml}</div>
+    </div>`;
+}
+
+function _renderProgGASDetail(feuilleData, supaProgs) {
+  const nom = migPreviewFeuilleSelected || '';
+  const seances = feuilleData.seances || [];
+  const semaines = feuilleData.semaines || [];
+  const dejaMigre = supaProgs.some(p => p.nom === nom);
+
+  const seancesHtml = seances.map(s =>
+    `<div style="padding:8px 0;border-bottom:1px solid var(--hairline);">
+      <div style="font-size:13px;font-weight:600;">${esc(s.nom)}</div>
+      ${s.type ? `<div style="font-size:11px;color:var(--text-faint);">${esc(s.type)}</div>` : ''}
+    </div>`).join('');
+
+  return `
+    <div class="table-card" style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${seances.length} séances · ${semaines.length} semaines</div>
+          ${dejaMigre ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
+        </div>
+        <button class="btn primary" style="flex-shrink:0;" onclick="migrerProgrammeGAS()">⬇ Importer ce programme</button>
+      </div>
+      <div id="migProgStatus" style="margin-bottom:8px;"></div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;">Séances</div>
+      ${seancesHtml || '<div style="color:var(--text-faint);font-size:13px;">Aucune séance détectée.</div>'}
+      <div style="font-size:11px;color:var(--text-faint);margin-top:12px;">Les exercices seront chargés depuis la semaine 1 au moment de l'import.</div>
+    </div>`;
+}
+
+async function migSelectFeuille(nom) {
+  migPreviewFeuilleSelected = nom;
+  migPreviewFeuilleData = null;
+  migPreviewFeuilleLoading = true;
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = _renderMigPreviewTabContent();
+  try {
+    const [seancesRaw, semainesRaw] = await Promise.all([
+      apiGasProd('listerSeances', migPreviewClientId, { nomFeuille: nom }),
+      apiGasProd('listerSemaines', migPreviewClientId, { nomFeuille: nom }),
+    ]);
+    const seances  = typeof seancesRaw  === 'string' ? JSON.parse(seancesRaw)  : (seancesRaw  || []);
+    const semaines = typeof semainesRaw === 'string' ? JSON.parse(semainesRaw) : (semainesRaw || []);
+    migPreviewFeuilleData = { seances, semaines };
+  } catch(e) {
+    migPreviewFeuilleData = { seances: [], semaines: [], erreur: e.message };
+  }
+  migPreviewFeuilleLoading = false;
+  const c2 = document.getElementById('migPreviewContent');
+  if (c2) c2.innerHTML = _renderMigPreviewTabContent();
+}
+
+async function migrerProgrammeGAS() {
+  const statusEl = document.getElementById('migProgStatus');
+  if (!migPreviewFeuilleData || !migPreviewFeuilleSelected) return;
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><div class="spin"></div> Chargement des exercices et import…</div>`;
+  document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = true);
+  try {
+    const nom = migPreviewFeuilleSelected;
+    const seances = migPreviewFeuilleData.seances || [];
+    const semaines = migPreviewFeuilleData.semaines || [];
+    const totalSemaines = semaines.length || 8;
+    const semaine1 = semaines[0] || 1;
+
+    // 1. Créer le client_programme
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(migPreviewClientId)}`,
+      { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
+    const cpRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
+    if (!cpRes.ok) throw new Error('programme ' + cpRes.status);
+    const cp = (await cpRes.json())[0];
+
+    // 2. Créer un bloc unique
+    const bRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_programme_id: cp.id, ordre: 0, nombre_semaines: totalSemaines }) });
+    if (!bRes.ok) throw new Error('bloc ' + bRes.status);
+    const bloc = (await bRes.json())[0];
+
+    // 3. Pour chaque séance, créer la séance + charger les exercices depuis sem1
+    for (let si = 0; si < seances.length; si++) {
+      const seance = seances[si];
+      const sRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ bloc_id: bloc.id, titre: seance.nom + (seance.type ? ' — ' + seance.type : ''), ordre: si }) });
+      if (!sRes.ok) throw new Error('seance ' + sRes.status);
+      const savedSeance = (await sRes.json())[0];
+
+      // Charger les exercices de cette séance en semaine 1
+      try {
+        const seanceData = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: semaine1 });
+        const sd = typeof seanceData === 'string' ? JSON.parse(seanceData) : seanceData;
+        const exercices = (sd && sd.exercices) || [];
+        if (exercices.length) {
+          const exPayload = exercices.map((ex, ei) => ({
+            seance_id: savedSeance.id, nom: ex.nom||'Exercice', ordre: ei,
+            series: ex.series || null, reps: ex.repsCible || ex.reps || null,
+            repos: null, tempo: null, rir: null,
+          }));
+          await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,
+            { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(exPayload) });
+        }
+      } catch(e2) { /* exercices non critiques */ }
+    }
+
+    // 4. Recharger supaClientProgs
+    const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
+    migPreviewData.supaClientProgs = r2.ok ? await r2.json() : migPreviewData.supaClientProgs;
+
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Programme importé et assigné. ${seances.length} séances créées.</div>`;
+    document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = false);
+    const c = document.getElementById('migProgDetail');
+    if (c) c.innerHTML = _renderProgGASDetail(migPreviewFeuilleData, migPreviewData.supaClientProgs);
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur : ${esc(e.message)}</div>`;
+    document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = false);
+  }
+}
+
+// ── Créer diète / programme depuis fiche client ────────────────────────
+
+let _ficheCreateClientId = null; // clientId en cours de création
+
+function ouvrirCreerDietePourClient(clientId) {
+  _ficheCreateClientId = clientId;
+  ouvrirEditeurDiete(null);
+  // Modifier le titre et le bouton save du modal
+  setTimeout(() => {
+    const modal = document.getElementById('modal-editeur-diete');
+    if (!modal) return;
+    const h3 = modal.querySelector('h3');
+    if (h3) h3.textContent = 'Nouvelle diète pour ce client';
+    // Ajouter checkbox "aussi comme template"
+    const actions = modal.querySelector('.modal-actions');
+    if (actions && !modal.querySelector('#cbDieteCommeTemplate')) {
+      const cb = document.createElement('label');
+      cb.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-right:auto;cursor:pointer;';
+      cb.innerHTML = `<input type="checkbox" id="cbDieteCommeTemplate" checked> Enregistrer comme template réutilisable`;
+      actions.insertBefore(cb, actions.firstChild);
+    }
+  }, 50);
+}
+
+async function sauvegarderDietePourClient() {
+  // Override de sauvegarderDieteTemplate pour le mode fiche client
+  const nom = document.getElementById('dNom').value.trim();
+  const errEl = document.getElementById('dErr');
+  if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
+  dieteTplEnEdition.nom = nom;
+  dieteTplEnEdition.description = document.getElementById('dDesc').value.trim();
+  const commeTemplate = document.getElementById('cbDieteCommeTemplate')?.checked !== false;
+  try {
+    // Créer le template
+    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom:dieteTplEnEdition.nom, description:dieteTplEnEdition.description||null }) });
+    if (!tplRes.ok) throw new Error('template ' + tplRes.status);
+    const tpl = (await tplRes.json())[0];
+    // Sauver repas + aliments
+    for (let ri=0; ri<dieteTplEnEdition.repas.length; ri++){
+      const r = dieteTplEnEdition.repas[ri];
+      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tpl.id, nom:r.nom, ordre:ri }) });
+      if (!rRes.ok) throw new Error('repas ' + rRes.status);
+      const savedR = (await rRes.json())[0];
+      if (r.aliments.length){
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
+      }
+    }
+    // Assigner au client
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(_ficheCreateClientId)}`,
+      { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: _ficheCreateClientId, nom: tpl.nom, actif: true }) });
+    // Si pas template → supprimer le template créé (diète directe)
+    if (!commeTemplate) {
+      await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${tpl.id}`, { method:'DELETE', headers:supaHeaders() });
+    } else {
+      dieteTemplatesData = null;
+    }
+    document.getElementById('modal-editeur-diete').remove();
+    _ficheCreateClientId = null;
+    // Recharger la fiche (openPanel recharge tout et reste sur fiche-client)
+    await openPanel(state.selected);
+    setFicheTab('diete');
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+function ouvrirCreerProgrammePourClient(clientId) {
+  _ficheCreateClientId = clientId;
+  ouvrirEditeurTemplate(null);
+  setTimeout(() => {
+    const modal = document.getElementById('modal-editeur-template');
+    if (!modal) return;
+    const h3 = modal.querySelector('h3');
+    if (h3) h3.textContent = 'Nouveau programme pour ce client';
+    const saveBtn = modal.querySelector('[onclick="confirmerSauvegardeTemplate()"]');
+    if (saveBtn) saveBtn.setAttribute('onclick', 'confirmerSauvegardeTemplatePourClient()');
+    const actions = modal.querySelector('.modal-actions');
+    if (actions && !modal.querySelector('#cbProgCommeTemplate')) {
+      const cb = document.createElement('label');
+      cb.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-right:auto;cursor:pointer;';
+      cb.innerHTML = `<input type="checkbox" id="cbProgCommeTemplate"> Enregistrer aussi comme template`;
+      actions.insertBefore(cb, actions.firstChild);
+    }
+  }, 50);
+}
+
+async function confirmerSauvegardeTemplatePourClient() {
+  const errEl = document.getElementById('tplErr');
+  if (!tplEnEdition.nom.trim()) { errEl.textContent = 'Le nom est obligatoire.'; errEl.style.display = 'block'; return; }
+  const commeTemplate = document.getElementById('cbProgCommeTemplate')?.checked === true;
+  try {
+    const saved = await sauvegarderTemplateComplet(tplEnEdition);
+    // Assigner au client
+    await assignerTemplateAuClient(saved.id, state.selected);
+    // Si pas template → supprimer
+    if (!commeTemplate) {
+      await fetch(`${SUPABASE_URL}/rest/v1/programme_templates?id=eq.${saved.id}`, { method:'DELETE', headers:supaHeaders() });
+      templatesData = null;
+    } else {
+      if (templatesData) templatesData.push(saved);
+    }
+    document.getElementById('modal-editeur-template')?.remove();
+    _ficheCreateClientId = null;
+    await openPanel(state.selected);
+    setFicheTab('programmes');
+  } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────

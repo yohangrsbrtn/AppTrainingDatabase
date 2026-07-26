@@ -140,7 +140,7 @@ function renderPcSeancePage() {
   const optsSeances = allSeances.map(s => `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`).join('');
 
   const exosHtml = (seance.client_programme_exercices || []).map((ex, idx) => {
-    const nbSeries = ex.series || 1;
+    const nbSeries = parseInt(ex.series) || 3;
     let setsHtml = '';
     for (let s = 1; s <= nbSeries; s++) {
       const log = _pcLogs[ex.id + '|' + _pcSemaine + '|' + s] || {};
