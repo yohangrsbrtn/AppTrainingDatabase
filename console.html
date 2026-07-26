@@ -4374,12 +4374,32 @@ async function migrerDieteGAS() {
     const nom = migPreviewDieteSel.nom;
     const repasGAS = migPreviewDieteDetail.repas || [];
 
-    // 1. Créer le template diète
+    // 1. Réutiliser ou créer le template diète
     const commeTemplate = document.getElementById('cbMigAsTemplate')?.checked;
-    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom, client_only: !commeTemplate }) });
-    if (!tplRes.ok) throw new Error('template ' + tplRes.status);
-    const tpl = (await tplRes.json())[0];
+    const existTplRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nom)}&order=id.desc&limit=1&select=id`,
+      { headers: supaHeaders() });
+    const existTpls = existTplRes.ok ? await existTplRes.json() : [];
+    let tpl;
+    if (existTpls.length) {
+      tpl = existTpls[0];
+      // Supprimer les repas existants (aliments d'abord si pas de cascade)
+      const oldRepasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&select=id`, { headers: supaHeaders() });
+      const oldRepas = oldRepasRes.ok ? await oldRepasRes.json() : [];
+      if (oldRepas.length) {
+        const ids = oldRepas.map(r => r.id).join(',');
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments?repas_id=in.(${ids})`, { method:'DELETE', headers: supaHeaders() });
+        await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}`, { method:'DELETE', headers: supaHeaders() });
+      }
+      // Mettre à jour client_only si besoin
+      await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${tpl.id}`,
+        { method:'PATCH', headers: supaHeaders(), body: JSON.stringify({ client_only: !commeTemplate }) });
+    } else {
+      const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom, client_only: !commeTemplate }) });
+      if (!tplRes.ok) throw new Error('template ' + tplRes.status);
+      tpl = (await tplRes.json())[0];
+    }
 
     // 2. Créer les repas + aliments (+ équivalences comme variantes)
     const saveAliments = async (repasId, aliments) => {
@@ -4416,10 +4436,16 @@ async function migrerDieteGAS() {
       }
     }
 
-    // 3. Assigner (plusieurs diètes actives autorisées — ne pas désactiver les autres)
-    const assignRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
-    if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
+    // 3. Assigner seulement si pas déjà assignée (évite les doublons à la re-migration)
+    const existCdRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&nom=eq.${encodeURIComponent(nom)}&select=id`,
+      { headers: supaHeaders() });
+    const existCd = existCdRes.ok ? await existCdRes.json() : [];
+    if (!existCd.length) {
+      const assignRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
+      if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
+    }
 
     // 4. Invalider le cache templates
     dieteTemplatesData = null;
