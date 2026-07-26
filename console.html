@@ -4403,9 +4403,8 @@ async function migrerDieteGAS() {
       { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
     if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
 
-    // 4. Si pas template → invalider le cache pour que la liste ne se recharge pas avec cette entrée
-    const commeTemplate = document.getElementById('cbMigAsTemplate')?.checked;
-    if (commeTemplate && dieteTemplatesData !== null) dieteTemplatesData = null;
+    // 4. Invalider le cache templates
+    dieteTemplatesData = null;
 
     // 5. Recharger supaClientDietes
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
