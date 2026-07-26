@@ -2356,6 +2356,10 @@ function renderFicheClientPage(el){
 
 function setFicheTab(tab){
   ficheTab = tab;
+  document.querySelectorAll('.fiche-tabs .fiche-tab').forEach(b => {
+    const m = (b.getAttribute('onclick')||'').match(/setFicheTab\('(\w+)'\)/);
+    if (m) b.classList.toggle('active', m[1] === tab);
+  });
   const el = document.getElementById('ficheTabContent');
   const c = data.clients.find(x=>x.id===state.selected);
   if (el && c) el.innerHTML = renderFicheTabContent(c);
@@ -2444,6 +2448,7 @@ function renderFicheDieteTab(c){
           <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
           <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}</div>
         </div>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}')">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
       </div>`).join('') : `
       <div class="fiche-prog-empty" style="text-align:center;padding:24px;margin-bottom:16px;">
@@ -3430,7 +3435,14 @@ async function sauvegarderDieteTemplate(){
     document.getElementById('modal-editeur-diete').remove();
     dieteTemplatesData = null;
     dieteTemplatesData = await chargerDieteTemplates();
-    renderDieteTemplatesSub();
+    if (_ficheEditClientId) {
+      const cid = _ficheEditClientId;
+      _ficheEditClientId = null;
+      await openPanel(cid);
+      setFicheTab('diete');
+    } else {
+      renderDieteTemplatesSub();
+    }
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
 }
 
@@ -4316,7 +4328,12 @@ function _renderDieteGASDetail(detail, supaClientDietes) {
         ${dejaMigree
           ? `<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;">Déjà une diète "${esc(nom)}" dans Supabase</span>`
           : ''}
-        <button class="btn primary" style="flex-shrink:0;" onclick="migrerDieteGAS()">⬇ Importer cette diète</button>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;white-space:nowrap;">
+            <input type="checkbox" id="cbMigAsTemplate"> Créer un template réutilisable
+          </label>
+          <button class="btn primary" style="width:100%;" onclick="migrerDieteGAS()">⬇ Importer cette diète</button>
+        </div>
       </div>
       <div id="migDieteStatus" style="margin-bottom:8px;"></div>
       ${repasHtml}
@@ -4386,8 +4403,9 @@ async function migrerDieteGAS() {
       { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
     if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
 
-    // 4. Mettre à jour dieteTemplatesData si chargé
-    if (dieteTemplatesData !== null) dieteTemplatesData = null;
+    // 4. Si pas template → invalider le cache pour que la liste ne se recharge pas avec cette entrée
+    const commeTemplate = document.getElementById('cbMigAsTemplate')?.checked;
+    if (commeTemplate && dieteTemplatesData !== null) dieteTemplatesData = null;
 
     // 5. Recharger supaClientDietes
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
@@ -4558,6 +4576,7 @@ async function migrerProgrammeGAS() {
 // ── Créer diète / programme depuis fiche client ────────────────────────
 
 let _ficheCreateClientId = null; // clientId en cours de création
+let _ficheEditClientId = null;   // clientId en cours d'édition diète
 
 function ouvrirCreerDietePourClient(clientId) {
   _ficheCreateClientId = clientId;
@@ -4622,6 +4641,23 @@ async function sauvegarderDietePourClient() {
     await openPanel(state.selected);
     setFicheTab('diete');
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+async function editerDieteClient(nomDiete, clientId) {
+  _ficheEditClientId = clientId;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nomDiete)}&select=*`, { headers: supaHeaders() });
+  if (!res.ok) { alert('Erreur chargement template'); _ficheEditClientId = null; return; }
+  const tpls = await res.json();
+  if (!tpls.length) { alert(`Aucun template trouvé pour la diète "${nomDiete}"`); _ficheEditClientId = null; return; }
+  const tpl = tpls[0];
+  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers: supaHeaders() });
+  const repasRaw = repasRes.ok ? await repasRes.json() : [];
+  dieteTplEnEdition = {
+    id: tpl.id, nom: tpl.nom, description: tpl.description||'',
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
+  };
+  if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
+  renderEditeurDiete();
 }
 
 function ouvrirCreerProgrammePourClient(clientId) {
