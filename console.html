@@ -802,6 +802,7 @@ function renderBaseSub(el){
             ${cats.map(c=>`<option value="${esc(c)}" ${alimBaseCat===c?'selected':''}>${esc(c)}</option>`).join('')}
           </select>
           <button class="btn primary" onclick="ouvrirFormulaireAliment(null)">+ Ajouter</button>
+          <button class="btn" onclick="lancerImportSheets()" style="margin-left:auto;">⬇ Importer depuis Sheets</button>
         </div>
         <div class="table-card"><div class="table-scroll">
           <table class="alim-table">
@@ -879,6 +880,120 @@ function _rowsTableCoach(){
 function _majTableCoach(){
   const tbody = document.getElementById('alim-tbody-coach');
   if (tbody) tbody.innerHTML = _rowsTableCoach();
+}
+
+async function lancerImportSheets(){
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'modal-import-sheets';
+  modal.innerHTML = `<div class="modal-box" style="max-width:480px;text-align:center;">
+    <div class="spin" style="margin:0 auto 16px;"></div>
+    <p style="color:var(--text-muted);">Chargement de la base Google Sheets…</p>
+  </div>`;
+  document.body.appendChild(modal);
+
+  let baseData;
+  try {
+    const raw = await api('chargerBaseAliments');
+    baseData = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch(e) {
+    modal.innerHTML = `<div class="modal-box" style="max-width:480px;">
+      <h3>Erreur</h3><p style="color:var(--critical);">${esc(e.message)}</p>
+      <div class="modal-actions"><button class="btn" onclick="document.getElementById('modal-import-sheets').remove()">Fermer</button></div>
+    </div>`;
+    return;
+  }
+
+  const coach = baseData.coach || [];
+  const communaute = (baseData.communaute || []).filter(a => a.valide);
+  const total = coach.length + communaute.length;
+
+  modal.innerHTML = `<div class="modal-box" style="max-width:480px;">
+    <h3>Importer depuis Google Sheets</h3>
+    <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
+      <div><div class="mk">Base coach</div><div class="mn">${coach.length}</div><div class="mu">aliments</div></div>
+      <div><div class="mk">Communauté validée</div><div class="mn">${communaute.length}</div><div class="mu">aliments</div></div>
+      <div><div class="mk">Total</div><div class="mn">${total}</div><div class="mu">à importer</div></div>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+      Les aliments déjà présents dans ta base Supabase ne seront pas écrasés (insertion ignorée si le nom existe déjà).
+    </p>
+    <div id="importSheetsProgress" style="display:none;margin-bottom:12px;">
+      <div style="background:var(--surface-2);border-radius:999px;height:6px;overflow:hidden;">
+        <div id="importSheetsBar" style="background:var(--accent);height:100%;width:0%;transition:width .2s;"></div>
+      </div>
+      <p id="importSheetsMsg" style="font-size:12px;color:var(--text-muted);margin-top:6px;text-align:center;"></p>
+    </div>
+    <div id="importSheetsErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('modal-import-sheets').remove()">Annuler</button>
+      <button class="btn primary" id="btnLancerImport" onclick="executerImportSheets(${JSON.stringify(coach)},${JSON.stringify(communaute)})">Importer ${total} aliments</button>
+    </div>
+  </div>`;
+}
+
+async function executerImportSheets(coach, communaute){
+  document.getElementById('btnLancerImport').disabled = true;
+  const prog = document.getElementById('importSheetsProgress');
+  const bar  = document.getElementById('importSheetsBar');
+  const msg  = document.getElementById('importSheetsMsg');
+  const errEl= document.getElementById('importSheetsErr');
+  prog.style.display = 'block';
+
+  const tous = [
+    ...coach.map(a => ({
+      nom: a.nom,
+      categorie: null,
+      kcal_par_gramme: (a.kcal||0) / 100,
+      prot_par_gramme: (a.prot||0) / 100,
+      glu_par_gramme:  (a.glu||0)  / 100,
+      lip_par_gramme:  (a.lip||0)  / 100,
+    })),
+    ...communaute.map(a => ({
+      nom: a.nom,
+      categorie: null,
+      kcal_par_gramme: (a.kcal||0) / 100,
+      prot_par_gramme: (a.prot||0) / 100,
+      glu_par_gramme:  (a.glu||0)  / 100,
+      lip_par_gramme:  (a.lip||0)  / 100,
+    })),
+  ];
+
+  const BATCH = 50;
+  let importes = 0;
+  let erreurs = 0;
+
+  for (let i = 0; i < tous.length; i += BATCH) {
+    const chunk = tous.slice(i, i + BATCH);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach`, {
+        method: 'POST',
+        headers: supaHeaders({ Prefer: 'return=minimal,resolution=ignore-duplicates' }),
+        body: JSON.stringify(chunk),
+      });
+      if (!res.ok && res.status !== 409) throw new Error('supabase_' + res.status);
+      importes += chunk.length;
+    } catch(e) {
+      erreurs += chunk.length;
+    }
+    const pct = Math.round(((i + chunk.length) / tous.length) * 100);
+    bar.style.width = pct + '%';
+    msg.textContent = `${Math.min(i + BATCH, tous.length)} / ${tous.length} traités…`;
+  }
+
+  bar.style.width = '100%';
+  msg.textContent = `Import terminé : ${importes} ajoutés${erreurs ? `, ${erreurs} erreurs` : ''}.`;
+
+  if (erreurs) { errEl.textContent = `${erreurs} aliments n'ont pas pu être insérés.`; errEl.style.display='block'; }
+
+  // Recharger la base locale
+  alimentsCoachData = null;
+  alimentsCoachErr = null;
+  try { alimentsCoachData = await chargerAlimentsCoach(); } catch(e) { alimentsCoachErr = e.message; }
+
+  document.getElementById('btnLancerImport').textContent = 'Fermer';
+  document.getElementById('btnLancerImport').onclick = () => { document.getElementById('modal-import-sheets').remove(); renderBaseSub(); };
+  document.getElementById('btnLancerImport').disabled = false;
 }
 
 async function rechercherOFFBase(){
