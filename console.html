@@ -589,7 +589,7 @@ function renderSidebar(){
       ${g.items.map(it => {
         let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
         return `
-        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients')||(state.nav==='migration-preview'&&it.id==='migration'))?'active':''}" onclick="setNav('${it.id}')">
+        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients')||(state.nav==='migration-preview'&&it.id==='migration')||(state.nav==='bilan-detail'&&it.id==='bilans'))?'active':''}" onclick="setNav('${it.id}')">
           ${it.icon}<span>${it.label}</span>
           ${count ? `<span class="nav-count">${count}</span>` : ''}
         </button>`;
@@ -690,6 +690,7 @@ function renderMain(){
   if (state.nav === 'dashboard') { renderDashboard(el); return; }
   if (state.nav === 'clients') { renderClientsPage(el); return; }
   if (state.nav === 'bilans') { renderBilansPage(el); return; }
+  if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
@@ -708,41 +709,328 @@ function renderMain(){
 }
 
 // ── Page Bilans ───────────────────────────────────────────────────────
-let bilansFilter = 'attente'; // 'attente' | 'traites' | 'tous'
-function setBilansFilter(f){ bilansFilter = f; renderMain(); }
-function renderBilansPage(el){
-  let list = data.bilansCoach.slice();
-  if (bilansFilter === 'attente') list = list.filter(b=>!b.coachTraite);
-  if (bilansFilter === 'traites') list = list.filter(b=>b.coachTraite);
-  list.sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
+// ── Page Bilans ───────────────────────────────────────────────────────
+let bilansTab = 'recents';
+let bilansHistoClientId = null;
+let bilansHistoData = { loaded: false, error: null, bilans: [] };
+let bilanDetailState = { loaded: false, client: null, ligneTitre: null, ts: null, coachTraite: false, data: null, error: null };
+
+function _parseTsMs(ts) {
+  const m = (ts||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? new Date(+m[3], +m[2]-1, +m[1]).getTime() : null;
+}
+function _semaineFromDate(dateStr) {
+  const m = (dateStr||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return dateStr;
+  const sunMs = new Date(+m[3], +m[2]-1, +m[1]).getTime();
+  const monMs = sunMs - 6*86400000;
+  const mon = new Date(monMs), sun = new Date(sunMs);
+  const p = n => ('0'+n).slice(-2);
+  return `${p(mon.getDate())}/${p(mon.getMonth()+1)} → ${p(sun.getDate())}/${p(sun.getMonth()+1)}/${sun.getFullYear()}`;
+}
+
+function setBilansTab(tab) {
+  bilansTab = tab;
+  bilansHistoClientId = null;
+  bilansHistoData = { loaded: false, error: null, bilans: [] };
+  renderMain();
+}
+
+function openBilanHistoClient(clientId) {
+  bilansHistoClientId = clientId;
+  bilansHistoData = { loaded: false, error: null, bilans: [] };
+  renderMain();
+  apiAs('chargerHistoriqueBilans', clientId).then(raw => {
+    if (bilansHistoClientId !== clientId) return;
+    bilansHistoData = { loaded: true, error: null, bilans: raw || [] };
+    if (state.nav === 'bilans') renderMain();
+  }).catch(e => {
+    if (bilansHistoClientId !== clientId) return;
+    bilansHistoData = { loaded: true, error: e.message, bilans: [] };
+    if (state.nav === 'bilans') renderMain();
+  });
+}
+
+async function openBilanDetail(client, ligneTitre, ts, coachTraite) {
+  bilanDetailState = { loaded: false, client, ligneTitre, ts: ts||null, coachTraite: !!coachTraite, data: null, error: null };
+  state.nav = 'bilan-detail';
+  renderSidebar();
+  renderMain();
+  try {
+    const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre });
+    bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
+  } catch(e) {
+    bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
+  }
+  if (state.nav === 'bilan-detail') renderMain();
+}
+
+async function openBilanDetailFromLog(client, ts, coachTraite) {
+  bilanDetailState = { loaded: false, client, ligneTitre: null, ts, coachTraite: !!coachTraite, data: null, error: null };
+  state.nav = 'bilan-detail';
+  renderSidebar();
+  renderMain();
+  try {
+    const historique = await apiAs('chargerHistoriqueBilans', client);
+    const tsMs = _parseTsMs(ts);
+    const match = historique.find(h => {
+      const hMs = _parseTsMs(h.date);
+      return hMs && tsMs && Math.abs(hMs - tsMs) <= 3*86400000;
+    });
+    if (!match) throw new Error('Bilan introuvable dans la feuille Sheets — semaine non retrouvée.');
+    bilanDetailState.ligneTitre = match.ligneTitre;
+    const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre: match.ligneTitre });
+    bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
+  } catch(e) {
+    bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
+  }
+  if (state.nav === 'bilan-detail') renderMain();
+}
+
+function renderBilansPage(el) {
+  const pendingCount = data.bilansCoach.filter(b => !b.coachTraite).length;
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Bilans</h1></div>
-      <div class="meta">${list.length} bilan${list.length>1?'s':''}</div>
+      <div class="meta">${pendingCount > 0 ? `<span style="color:var(--critical);">${pendingCount} à traiter</span>` : 'À jour'}</div>
     </div>
-    <div class="table-card">
-      <div class="table-toolbar">
-        <div class="title">Bilans envoyés au coach</div>
-        <div class="chip-filter">
-          <button class="${bilansFilter==='attente'?'active':''}" onclick="setBilansFilter('attente')">À traiter</button>
-          <button class="${bilansFilter==='traites'?'active':''}" onclick="setBilansFilter('traites')">Traités</button>
-          <button class="${bilansFilter==='tous'?'active':''}" onclick="setBilansFilter('tous')">Tous</button>
-        </div>
-      </div>
+    <div class="fiche-tabs">
+      <button class="fiche-tab${bilansTab==='recents'?' active':''}" onclick="setBilansTab('recents')">
+        Récents${pendingCount > 0 ? ` <span class="nav-count" style="margin-left:6px;">${pendingCount}</span>` : ''}
+      </button>
+      <button class="fiche-tab${bilansTab==='historique'?' active':''}" onclick="setBilansTab('historique')">Historique</button>
+    </div>
+    <div id="bilansContent">${_renderBilansTabContent()}</div>`;
+}
+
+function _renderBilansTabContent() {
+  return bilansTab === 'recents' ? _renderBilansRecents() : _renderBilansHistorique();
+}
+
+function _renderBilansRecents() {
+  const now = Date.now();
+  const pending = data.bilansCoach.filter(b => !b.coachTraite).sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+  const recentTraited = data.bilansCoach.filter(b => {
+    if (!b.coachTraite) return false;
+    const ms = _parseTsMs(b.ts);
+    return ms && (now - ms) <= 15*24*60*60*1000;
+  }).sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+
+  const rowHtml = (b, showBtn) => `
+    <tr style="cursor:pointer;" onclick="openBilanDetailFromLog('${b.client}','${esc(b.ts)}',${!!b.coachTraite})">
+      <td><div class="cell-name"><div class="mini-avatar">${initials(b.nom)}</div>${esc(b.nom)}</div></td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine||'')}</td>
+      <td class="mono" style="color:var(--text-faint);font-size:12px;">${esc(b.ts||'')}</td>
+      <td>${b.coachTraite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
+      <td class="row-actions" onclick="event.stopPropagation();">${showBtn ? `<button class="btn" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">Marquer traité</button>` : ''}</td>
+    </tr>`;
+
+  return `
+    ${pending.length ? `
+    <div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">À traiter <span style="color:var(--critical);font-size:11px;margin-left:6px;">${pending.length}</span></div></div>
       <div class="table-scroll"><table class="clients">
         <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th>Statut</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(b => `
-            <tr>
-              <td><div class="cell-name"><div class="mini-avatar">${initials(b.nom)}</div>${esc(b.nom)}</div></td>
-              <td>${esc(b.semaine||'')}</td>
-              <td class="mono" style="color:var(--text-faint);">${esc(b.ts||'')}</td>
-              <td>${b.coachTraite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
-              <td class="row-actions">${b.coachTraite ? '' : `<button class="btn" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">Marquer traité</button>`}</td>
-            </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun bilan ici.</td></tr>`}
-        </tbody>
+        <tbody>${pending.map(b => rowHtml(b, true)).join('')}</tbody>
+      </table></div>
+    </div>` : `<div class="table-card" style="margin-bottom:16px;padding:20px 24px;"><span style="color:var(--success);">✓ Tous les bilans sont traités.</span></div>`}
+    ${recentTraited.length ? `
+    <div class="table-card">
+      <div class="table-toolbar"><div class="title">Traités · 15 derniers jours</div></div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th>Statut</th><th></th></tr></thead>
+        <tbody>${recentTraited.map(b => rowHtml(b, false)).join('')}</tbody>
+      </table></div>
+    </div>` : ''}`;
+}
+
+function _renderBilansHistorique() {
+  if (!bilansHistoClientId) {
+    const clientBilanCount = {}, clientLastTs = {};
+    data.bilansCoach.forEach(b => {
+      clientBilanCount[b.client] = (clientBilanCount[b.client]||0) + 1;
+      if (!clientLastTs[b.client] || b.ts > clientLastTs[b.client]) clientLastTs[b.client] = b.ts;
+    });
+    const rows = data.clients.map(c => {
+      const nb = clientBilanCount[c.id]||0;
+      return `<tr style="cursor:pointer;" onclick="openBilanHistoClient('${c.id}')">
+        <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+        <td style="font-size:12px;">${nb} bilan${nb>1?'s':''}</td>
+        <td class="mono" style="color:var(--text-faint);font-size:12px;">${esc(clientLastTs[c.id]||'')}</td>
+        <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
+      </tr>`;
+    }).join('');
+    return `<div class="table-card">
+      <div class="table-toolbar"><div class="title">Tous les clients</div></div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Bilans envoyés</th><th>Dernier envoi</th><th></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun bilan.</td></tr>`}</tbody>
       </table></div>
     </div>`;
+  }
+
+  const c = data.clients.find(x => x.id === bilansHistoClientId);
+  const nom = c ? c.nom : bilansHistoClientId;
+  const backBtn = `<button class="fiche-back" style="margin-bottom:16px;" onclick="bilansHistoClientId=null;bilansHistoData={loaded:false,error:null,bilans:[]};renderMain()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+    Retour à la liste
+  </button>`;
+  if (!bilansHistoData.loaded) return `${backBtn}<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>`;
+  if (bilansHistoData.error) return `${backBtn}<div style="color:var(--critical);padding:16px;">Erreur : ${esc(bilansHistoData.error)}</div>`;
+  if (!bilansHistoData.bilans.length) return `${backBtn}<div class="table-card" style="padding:20px 24px;color:var(--text-faint);">Aucun bilan validé pour ${esc(nom)}.</div>`;
+
+  const rows = bilansHistoData.bilans.map(h => {
+    const dateMs = _parseTsMs(h.date);
+    const logEntry = dateMs ? data.bilansCoach.find(b => b.client===bilansHistoClientId && Math.abs((_parseTsMs(b.ts)||0)-dateMs)<=3*86400000) : null;
+    const coachTraite = logEntry ? logEntry.coachTraite : false;
+    const ts = logEntry ? logEntry.ts : null;
+    return `<tr style="cursor:pointer;" onclick="openBilanDetail('${bilansHistoClientId}',${h.ligneTitre},'${esc(ts||'')}',${coachTraite})">
+      <td class="mono" style="font-size:12px;">${esc(_semaineFromDate(h.date))}</td>
+      <td class="mono" style="font-size:12px;color:var(--text-faint);">${esc(h.date||'')}</td>
+      <td>${coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(ts?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)}</td>
+      <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
+    </tr>`;
+  }).join('');
+
+  return `${backBtn}
+    <div class="fiche-hero" style="margin-bottom:16px;">
+      <div class="fiche-avatar">${initials(nom)}</div>
+      <div><div class="fiche-hero-name">${esc(nom)}</div>
+        <div style="font-size:12px;color:var(--text-faint);">${bilansHistoData.bilans.length} bilan${bilansHistoData.bilans.length>1?'s':''} validés</div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Semaine</th><th>Validé le</th><th>Statut</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+}
+
+// ── Détail bilan ──────────────────────────────────────────────────────
+function renderBilanDetailPage(el) {
+  const c = data.clients.find(x => x.id === bilanDetailState.client);
+  const nom = c ? c.nom : bilanDetailState.client;
+  const backHtml = `<button class="fiche-back" onclick="state.nav='bilans';renderSidebar();renderMain()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+    Retour aux bilans
+  </button>`;
+
+  if (!bilanDetailState.loaded) {
+    el.innerHTML = `${backHtml}
+      <div class="fiche-hero"><div class="fiche-avatar">${initials(nom)}</div>
+        <div><div class="fiche-hero-name">${esc(nom)}</div><div style="font-size:12px;color:var(--text-faint);">Chargement…</div></div>
+      </div>
+      <div style="display:flex;justify-content:center;padding:60px;"><div class="spin"></div></div>`;
+    return;
+  }
+  if (bilanDetailState.error) {
+    el.innerHTML = `${backHtml}<div style="color:var(--critical);padding:24px;">Erreur : ${esc(bilanDetailState.error)}</div>`;
+    return;
+  }
+
+  const d = bilanDetailState.data || {};
+  const jours = d.jours || [];
+  const repas = d.repas || [];
+  const dateValidation = d.dateValidation || '';
+
+  const poidsVals = jours.map(j=>parseFloat(j.poids)).filter(v=>!isNaN(v)&&v>0);
+  const avgPoids = poidsVals.length ? (poidsVals.reduce((a,b)=>a+b,0)/poidsVals.length).toFixed(1) : null;
+  const eauVals = jours.map(j=>parseFloat(j.eau)).filter(v=>!isNaN(v)&&v>0);
+  const avgEau = eauVals.length ? (eauVals.reduce((a,b)=>a+b,0)/eauVals.length).toFixed(1) : null;
+  const totalSteps = jours.reduce((s,j)=>s+(parseInt(j.steps)||0),0);
+  const joursOkDiete = jours.filter(j=>j.diete).length;
+  const joursOkTraining = jours.filter(j=>j.training).length;
+  const joursOkCardio = jours.filter(j=>j.cardio).length;
+  const repasAvgAdh = repas.length ? Math.round(repas.reduce((s,r)=>s+(r.adhesion||0),0)/repas.length) : null;
+  const repasAvgDig = repas.length ? Math.round(repas.reduce((s,r)=>s+(r.digestion||0),0)/repas.length) : null;
+  const repasAvgApp = repas.length ? Math.round(repas.reduce((s,r)=>s+(r.appetit||0),0)/repas.length) : null;
+
+  const statCard = (label, val, unit='') => `
+    <div class="table-card" style="flex:1;min-width:110px;padding:12px 16px;">
+      <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">${label}</div>
+      <div style="font-size:20px;font-weight:700;color:var(--accent);">${val!==null?val+unit:'<span style="color:var(--text-faint);">—</span>'}</div>
+    </div>`;
+  const tick = v => v ? `<span style="color:var(--success);">✓</span>` : `<span style="color:var(--text-faint);">—</span>`;
+  const score = v => { const n=parseInt(v)||0; const col=n>=4?'var(--success)':n>=2?'var(--accent)':'var(--critical)'; return `<span style="font-weight:600;color:${col};">${n}/5</span>`; };
+
+  el.innerHTML = `
+    ${backHtml}
+    <div class="fiche-hero">
+      <div class="fiche-avatar">${initials(nom)}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="fiche-hero-name">${esc(nom)}</div>
+        <div class="fiche-hero-meta">
+          <span class="chip off">${_semaineFromDate(dateValidation)}</span>
+          ${bilanDetailState.coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:`<span class="chip late"><span class="dot"></span>À traiter</span>`}
+        </div>
+        ${dateValidation?`<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Validé le ${esc(dateValidation)}</div>`:''}
+        ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
+      </div>
+      ${!bilanDetailState.coachTraite&&bilanDetailState.ts?`<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite('${bilanDetailState.client}','${esc(bilanDetailState.ts)}')">Marquer traité</button>`:''}
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+      ${statCard('Poids moy.', avgPoids, ' kg')}
+      ${statCard('Eau moy.', avgEau, ' L')}
+      ${statCard('Diète OK', joursOkDiete, '/7j')}
+      ${statCard('Training', joursOkTraining, '/7j')}
+      ${statCard('Cardio', joursOkCardio, '/7j')}
+      ${totalSteps>0?statCard('Pas total',(totalSteps/1000).toFixed(1),'k'):''}
+    </div>
+
+    <div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">Suivi journalier</div></div>
+      <div class="table-scroll"><table class="alim-table" style="width:100%;">
+        <thead><tr><th>Jour</th><th>Poids</th><th>Eau</th><th>Diète</th><th>Steps</th><th>Training</th><th>Cardio</th></tr></thead>
+        <tbody>
+          ${jours.map(j=>`<tr>
+            <td style="font-weight:600;font-size:12px;">${esc(j.nom||'')}</td>
+            <td style="font-size:12px;">${j.poids!==''&&j.poids!=null?j.poids+' kg':'—'}</td>
+            <td style="font-size:12px;">${j.eau!==''&&j.eau!=null?j.eau+' L':'—'}</td>
+            <td>${tick(j.diete)}</td>
+            <td style="font-size:12px;">${j.steps!==''&&j.steps!=null?(parseInt(j.steps)||0).toLocaleString('fr-FR'):'—'}</td>
+            <td>${tick(j.training)}</td>
+            <td>${tick(j.cardio)}</td>
+          </tr>`).join('')||`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:16px;">Aucune donnée.</td></tr>`}
+          ${poidsVals.length>1?`<tr style="background:var(--surface-2);font-style:italic;">
+            <td style="font-size:11px;color:var(--text-faint);">Moyenne</td>
+            <td style="font-size:12px;">${avgPoids} kg</td>
+            <td style="font-size:12px;">${avgEau?avgEau+' L':'—'}</td>
+            <td style="font-size:12px;">${joursOkDiete}/7</td>
+            <td style="font-size:12px;">${totalSteps>0?totalSteps.toLocaleString('fr-FR')+' total':'—'}</td>
+            <td style="font-size:12px;">${joursOkTraining}/7</td>
+            <td style="font-size:12px;">${joursOkCardio}/7</td>
+          </tr>`:''}
+        </tbody>
+      </table></div>
+    </div>
+
+    ${repas.length?`<div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">Nutrition · Évaluations repas</div></div>
+      <div class="table-scroll"><table class="alim-table" style="width:100%;">
+        <thead><tr><th>Repas</th><th>Adhésion</th><th>Digestion</th><th>Appétit</th></tr></thead>
+        <tbody>
+          ${repas.map(r=>`<tr>
+            <td style="font-weight:600;font-size:12px;">Repas ${r.num}</td>
+            <td>${score(r.adhesion)}</td><td>${score(r.digestion)}</td><td>${score(r.appetit)}</td>
+          </tr>`).join('')}
+          ${repasAvgAdh!==null?`<tr style="background:var(--surface-2);font-style:italic;">
+            <td style="font-size:11px;color:var(--text-faint);">Moyenne</td>
+            <td>${score(repasAvgAdh)}</td><td>${score(repasAvgDig)}</td><td>${score(repasAvgApp)}</td>
+          </tr>`:''}
+        </tbody>
+      </table></div>
+    </div>`:''}
+
+    ${(d.commentaireAlim||d.commentaireJour||d.commentaireActivite)?`<div class="table-card">
+      <div class="table-toolbar"><div class="title">Commentaires client</div></div>
+      <div style="padding:0 20px 16px;display:flex;flex-direction:column;gap:12px;">
+        ${d.commentaireAlim?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Nutrition</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireAlim)}</div></div>`:''}
+        ${d.commentaireJour?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Journée</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireJour)}</div></div>`:''}
+        ${d.commentaireActivite?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Activité</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireActivite)}</div></div>`:''}
+      </div>
+    </div>`:''}`;
 }
 
 // ── Page Classement ───────────────────────────────────────────────────
