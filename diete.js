@@ -121,7 +121,7 @@ async function ouvrirDieteSupabase(templateNom) {
     const tmplId = templates[0].id;
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
-      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
