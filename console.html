@@ -514,6 +514,13 @@ let _ficheMensurations = null;
 let _ficheMensurationsLoading = false;
 let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
+let _progLogsView = 'semaine'; // 'semaine' | 'progression'
+let clientProgEnEdition = null;
+let _origClientProgBlocIds = [];
+let _origClientProgSeanceIds = [];
+let _origClientProgExoIds = [];
+let _cpPickerCible = null;
+let _cpDragExoSource = null;
 let dieteTemplatesData = null;
 let dieteTplEnEdition = null;
 let dietesPageTab = 'templates'; // 'templates' | 'recettes'
@@ -599,7 +606,7 @@ function renderSidebar(){
       ${g.items.map(it => {
         let count = it.id === 'base' ? baseCount : (it.id === 'bilans' ? bilansCount : 0);
         return `
-        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients')||(state.nav==='migration-preview'&&it.id==='migration')||(state.nav==='bilan-detail'&&it.id==='bilans'))?'active':''}" onclick="setNav('${it.id}')">
+        <button class="nav-item ${(state.nav===it.id||(state.nav==='fiche-client'&&it.id==='clients')||(state.nav==='prog-logs'&&it.id==='clients')||(state.nav==='editeur-client-prog'&&it.id==='clients')||(state.nav==='migration-preview'&&it.id==='migration')||(state.nav==='bilan-detail'&&it.id==='bilans'))?'active':''}" onclick="setNav('${it.id}')">
           ${it.icon}<span>${it.label}</span>
           ${count ? `<span class="nav-count">${count}</span>` : ''}
         </button>`;
@@ -709,6 +716,7 @@ function renderMain(){
   if (state.nav === 'editeur-diete') { renderEditeurDietePage(el); return; }
   if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
   if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
+  if (state.nav === 'editeur-client-prog') { renderEditeurProgrammeClient(el); return; }
   if (state.nav === 'mensurations') { renderMensurationsPage(el); return; }
   if (state.nav === 'migration') { renderMigrationPage(el); return; }
   if (state.nav === 'migration-preview') { renderMigrationPreviewPage(el); return; }
@@ -1915,7 +1923,7 @@ async function ouvrirEditeurTemplate(id){
           titre: s.titre,
           exercices: (s.programme_seance_exercices || []).map(l => {
             const ex = exercicesData.find(e=>e.id===l.exercice_id);
-            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir };
+            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir };
           })
         }))
       }))
@@ -1945,6 +1953,7 @@ function renderEditeurTemplate(){
     </div>
     <div id="blocsContainer"></div>
     <button class="btn" style="width:100%;margin-bottom:16px;" onclick="ajouterBlocTemplate()">+ Ajouter un bloc de périodisation</button>
+    <div id="tplRepartitionContainer"></div>
     <div id="tplErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:8px;">
       <button class="btn" style="flex:1;justify-content:center;" onclick="progTab='templates';renderProgrammesPage(document.getElementById('main'))">Annuler</button>
@@ -1976,7 +1985,10 @@ function renderBlocsTemplate(){
           ${seance.exercices.map((ex, ei) => `
             <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
-              <span class="nom" title="${esc(ex.nom)}">${esc(ex.nom)}</span>
+              <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
+                <span class="nom" style="flex:unset;" title="${esc(ex.nom)}">${esc(ex.nom)}</span>
+                ${ex.groupe_musculaire ? `<span style="font-size:10px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(ex.groupe_musculaire)}</span>` : ''}
+              </div>
               <div class="exo-champ"><label>Séries</label><input type="text" inputmode="numeric" value="${esc(ex.series||'')}" placeholder="3" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].series=this.value"></div>
               <div class="exo-champ"><label>Reps</label><input type="text" value="${esc(ex.reps||'')}" placeholder="8-12" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].reps=this.value"></div>
               <div class="exo-champ"><label>Repos</label><input type="text" value="${esc(ex.repos||'')}" placeholder="90s" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].repos=this.value"></div>
@@ -1992,6 +2004,37 @@ function renderBlocsTemplate(){
         <button class="btn" style="width:100%;justify-content:center;" onclick="ajouterSeanceTemplate(${bi})">+ Ajouter une séance</button>
       </div>
     </div>`).join('');
+  renderRepartition();
+}
+
+function renderRepartition(){
+  const cont = document.getElementById('tplRepartitionContainer');
+  if (!cont) return;
+  renderRepartitionInto(cont, tplEnEdition ? tplEnEdition.blocs : []);
+}
+
+function renderRepartitionInto(cont, blocs){
+  const map = {};
+  (blocs||[]).forEach(b => (b.seances||[]).forEach(s => (s.exercices||[]).forEach(ex => {
+    const g = ex.groupe_musculaire || 'Non défini';
+    const n = parseInt(ex.series) || 0;
+    map[g] = (map[g]||0) + n;
+  })));
+  const total = Object.values(map).reduce((a,b)=>a+b,0);
+  if (!total) { cont.innerHTML=''; return; }
+  const sorted = Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  cont.innerHTML = `
+    <div class="table-card" style="padding:16px;margin-bottom:16px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:10px;">Répartition des séries par groupe musculaire</div>
+      ${sorted.map(([g,n])=>`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+          <div style="width:150px;font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(g)}</div>
+          <div style="flex:1;height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;">
+            <div style="height:100%;width:${Math.round(n/total*100)}%;background:var(--accent);border-radius:4px;"></div>
+          </div>
+          <div style="width:50px;font-size:12px;font-weight:700;text-align:right;">${n} sér.</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 function ajouterBlocTemplate(){
@@ -2086,7 +2129,7 @@ function ajouterExerciceASeance(exerciceId){
   const reps = blocType && ex['reps_'+blocType] ? ex['reps_'+blocType] : '';
   const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
   tplEnEdition.blocs[bi].seances[si].exercices.push({
-    exercice_id: exerciceId, nom: ex.nom,
+    exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
     series: null, reps, repos, tempo: '', rir: '',
   });
   document.getElementById('modal-picker').remove();
@@ -2697,6 +2740,7 @@ function renderFicheProgTab(c){
           <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
         </div>
         ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
       </div>`).join('')
@@ -2871,9 +2915,11 @@ function ouvrirLogsProgramme(progId){
   state.progLogsId = progId;
   progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
   progLogsSemaine = 1;
+  _progLogsView = 'semaine';
   renderSidebar();
   renderMain();
-  chargerProgrammeById(progId).then(prog => {
+  const exLoad = exercicesData === null ? chargerExercices().then(d=>{ exercicesData=d; }).catch(()=>{}) : Promise.resolve();
+  Promise.all([chargerProgrammeById(progId), exLoad]).then(([prog]) => {
     progLogsData = { loaded:true, programme:prog, blocs:prog?prog.blocs:[], logs:prog?prog.logs:{} };
     if (state.nav==='prog-logs' && state.progLogsId===progId) renderMain();
   }).catch(e => {
@@ -2912,6 +2958,18 @@ function renderProgLogsPage(el){
   const semainesAvecLogs = new Set();
   Object.keys(logs).forEach(k => { const parts=k.split('|'); if(parts[1]) semainesAvecLogs.add(parseInt(parts[1])); });
 
+  // Build progression data across all weeks
+  const progByEx = {};
+  Object.entries(logs).forEach(([key, l]) => {
+    const parts = key.split('|');
+    const exId = parts[0], sem = parseInt(parts[1]);
+    const charge = parseFloat(l.charge);
+    if (!isNaN(charge) && charge > 0) {
+      if (!progByEx[exId]) progByEx[exId] = {};
+      if (!progByEx[exId][sem] || charge > progByEx[exId][sem]) progByEx[exId][sem] = charge;
+    }
+  });
+
   el.innerHTML = `
     <button class="fiche-back" onclick="retourFicheClient()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -2923,34 +2981,75 @@ function renderProgLogsPage(el){
         <div class="eyebrow">Logs du programme</div>
         <h1>${esc(prog.nom)}</h1>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         ${prog.actif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}
-        <span class="meta">Assigné le ${prog.created_at ? new Date(prog.created_at).toLocaleDateString('fr-FR') : '—'}</span>
+        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="ouvrirEditeurProgrammeClient(${prog.id})">Éditer</button>
       </div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
-      <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(-1)">‹</button>
-      <span style="font-size:14px;font-weight:700;min-width:120px;text-align:center;">Semaine ${progLogsSemaine} / ${totalSemaines}</span>
-      <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(1)">›</button>
-      ${semainesAvecLogs.size ? `<span style="font-size:11.5px;color:var(--text-faint);">${semainesAvecLogs.size} semaine${semainesAvecLogs.size>1?'s':''} avec données</span>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
+      <button class="btn ${_progLogsView==='semaine'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='semaine';renderMain()">Vue semaine</button>
+      <button class="btn ${_progLogsView==='progression'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='progression';renderMain()">Progression</button>
+      ${_progLogsView==='semaine' ? `
+        <div style="display:flex;align-items:center;gap:8px;margin-left:8px;">
+          <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(-1)">‹</button>
+          <span style="font-size:14px;font-weight:700;min-width:120px;text-align:center;">Semaine ${progLogsSemaine} / ${totalSemaines}</span>
+          <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(1)">›</button>
+          ${semainesAvecLogs.size ? `<span style="font-size:11.5px;color:var(--text-faint);">${semainesAvecLogs.size} sem. avec données</span>` : ''}
+        </div>` : ''}
     </div>
 
-    ${blocs.map(b=>`
+    ${_progLogsView === 'progression' ? (() => {
+      const allEx = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[])));
+      const withData = allEx.filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
+      if (!withData.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
+      return withData.map(ex => {
+        const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+        const groupe = exData ? exData.groupe_musculaire : null;
+        const pts = Object.entries(progByEx[ex.id]||{}).sort((a,b)=>+a[0]-+b[0]);
+        const charges = pts.map(p=>p[1]);
+        const maxC = Math.max(...charges), minC = Math.min(...charges);
+        const W=300, H=60, PL=6, PR=6, PT=8, PB=14;
+        const iW=W-PL-PR, iH=H-PT-PB;
+        const xs = pts.map((_,i)=>PL+(pts.length<2?iW/2:i/(pts.length-1)*iW));
+        const ys = charges.map(c=>PT+(maxC===minC?iH/2:iH-(c-minC)/(maxC-minC)*iH));
+        const polyline = xs.map((x,i)=>`${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+        const first = charges[0], last = charges[charges.length-1];
+        const delta = last - first;
+        const deltaStr = (delta>=0?'+':'')+delta.toFixed(1)+' kg';
+        const deltaColor = delta>0?'#4caf50':delta<0?'var(--critical)':'var(--text-faint)';
+        return `<div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;padding:12px 14px;box-shadow:var(--shadow-sm);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+            <div>
+              <div style="font-size:12.5px;font-weight:700;">${esc(ex.nom)}</div>
+              ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:13px;font-weight:700;">${last} kg</div>
+              <div style="font-size:11px;color:${deltaColor};">${deltaStr}</div>
+            </div>
+          </div>
+          ${pts.length >= 2 ? `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;">
+            <polyline points="${polyline}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            ${xs.map((x,i)=>`<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="3" fill="var(--accent)"/>`).join('')}
+            <text x="${xs[0]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:var(--text-faint);">S${pts[0][0]}</text>
+            <text x="${xs[xs.length-1]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:var(--text-faint);">S${pts[pts.length-1][0]}</text>
+          </svg>` : `<div style="font-size:12px;color:var(--text-faint);">1 donnée — sem. ${pts[0][0]} : ${charges[0]} kg</div>`}
+        </div>`;
+      }).join('');
+    })() : blocs.map(b=>`
       ${b.type ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:16px 0 6px;">${esc(BLOC_LABELS_COACH[b.type]||b.type)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem.':''}</div>` : ''}
       ${(b.client_programme_seances||[]).map(s=>`
         <div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow-sm);">
-          <div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;gap:8px;">
-            ${esc(s.titre)}
-          </div>
+          <div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);">${esc(s.titre)}</div>
           ${(s.client_programme_exercices||[]).map(ex=>{
+            const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+            const groupe = exData ? exData.groupe_musculaire : null;
             const nbSeries = ex.series||1;
-            let hasAnyLog = false;
             let setsHtml = '';
             for(let sr=1;sr<=nbSeries;sr++){
               const l = logs[ex.id+'|'+progLogsSemaine+'|'+sr]||{};
               const hasLog = l.charge!=null||l.reps!=null;
-              if(hasLog) hasAnyLog=true;
               setsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
                 <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
                 <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);font-style:italic;'}">
@@ -2960,8 +3059,11 @@ function renderProgLogsPage(el){
             }
             const firstLog = logs[ex.id+'|'+progLogsSemaine+'|1']||{};
             return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-                <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+                <div>
+                  <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+                  ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+                </div>
                 <div style="font-size:11px;color:var(--text-faint);">Cible: ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · '+esc(ex.repos):''}${ex.rir?' · RIR '+ex.rir:''}</div>
               </div>
               ${setsHtml}
@@ -2976,6 +3078,223 @@ function retourFicheClient(){
   state.nav = 'fiche-client';
   renderSidebar();
   renderMain();
+}
+
+// ── Éditeur programme client ──────────────────────────────────────────
+
+async function ouvrirEditeurProgrammeClient(progId){
+  if (exercicesData === null) { try { exercicesData = await chargerExercices(); } catch(e) { exercicesData = []; } }
+  const prog = await chargerProgrammeById(progId);
+  if (!prog) { alert('Programme introuvable'); return; }
+  clientProgEnEdition = {
+    id: prog.id, client_id: prog.client_id, nom: prog.nom, actif: prog.actif,
+    blocs: (prog.blocs||[]).map(b => ({
+      id: b.id, type: b.type||null, nombre_semaines: b.nombre_semaines||null,
+      seances: (b.client_programme_seances||[]).map(s => ({
+        id: s.id, titre: s.titre,
+        exercices: (s.client_programme_exercices||[]).map(ex => {
+          const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir };
+        })
+      }))
+    }))
+  };
+  _origClientProgBlocIds = clientProgEnEdition.blocs.map(b=>b.id).filter(Boolean);
+  _origClientProgSeanceIds = clientProgEnEdition.blocs.flatMap(b=>b.seances.map(s=>s.id)).filter(Boolean);
+  _origClientProgExoIds = clientProgEnEdition.blocs.flatMap(b=>b.seances.flatMap(s=>s.exercices.map(ex=>ex.id))).filter(Boolean);
+  state.nav = 'editeur-client-prog';
+  renderSidebar();
+  renderMain();
+}
+
+function renderEditeurProgrammeClient(el){
+  const cp = clientProgEnEdition;
+  el.innerHTML = `
+    <button class="fiche-back" onclick="retourFicheClient()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+      Retour à la fiche client
+    </button>
+    <div class="page-head" style="margin-bottom:16px;">
+      <div style="flex:1;min-width:0;">
+        <div class="eyebrow">Éditeur programme</div>
+        <input id="cpNom" type="text" value="${esc(cp.nom)}" oninput="clientProgEnEdition.nom=this.value" style="font-size:22px;font-weight:800;background:transparent;border:none;color:var(--text);font-family:var(--font-display);width:100%;padding:0;" placeholder="Nom du programme">
+      </div>
+    </div>
+    <div id="cpBlocsContainer"></div>
+    <button class="btn" style="width:100%;margin-bottom:16px;" onclick="cpAjouterBloc()">+ Ajouter un bloc de périodisation</button>
+    <div id="cpRepartitionContainer"></div>
+    <div id="cpErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:40px;">
+      <button class="btn" style="flex:1;justify-content:center;" onclick="retourFicheClient()">Annuler</button>
+      <button id="clientProgSaveBtn" class="btn primary" style="flex:1;justify-content:center;" onclick="sauvegarderProgrammeClient()">Enregistrer</button>
+    </div>`;
+  renderBlocsClientProg();
+}
+
+function renderBlocsClientProg(){
+  const cont = document.getElementById('cpBlocsContainer');
+  if (!cont) return;
+  const cp = clientProgEnEdition;
+  const simple = cp.blocs.length===1 && !cp.blocs[0].type && !cp.blocs[0].nombre_semaines;
+  cont.innerHTML = cp.blocs.map((bloc,bi)=>`
+    <div class="day-block" style="margin-bottom:18px;">
+      ${simple ? '' : `
+      <div class="day-head" style="flex-wrap:wrap;">
+        <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+          ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+        <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        ${cp.blocs.length>1?`<button class="icon-btn del" style="margin-left:auto;" onclick="cpRetirerBloc(${bi})">${iTrash()}</button>`:''}
+      </div>`}
+      ${bloc.seances.map((seance,si)=>`
+        <div style="border-top:1px solid var(--hairline);">
+          <div class="day-head">
+            <input type="text" value="${esc(seance.titre)}" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;">
+            <button class="icon-btn del" onclick="cpRetirerSeance(${bi},${si})">${iTrash()}</button>
+          </div>
+          ${seance.exercices.map((ex,ei)=>`
+            <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropExo(event,${bi},${si},${ei})">
+              <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
+              <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
+                <span class="nom" style="flex:unset;">${esc(ex.nom)}</span>
+                ${ex.groupe_musculaire?`<span style="font-size:10px;color:var(--text-faint);">${esc(ex.groupe_musculaire)}</span>`:''}
+              </div>
+              <div class="exo-champ"><label>Séries</label><input type="text" inputmode="numeric" value="${esc(ex.series||'')}" placeholder="3" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].series=this.value"></div>
+              <div class="exo-champ"><label>Reps</label><input type="text" value="${esc(ex.reps||'')}" placeholder="8-12" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].reps=this.value"></div>
+              <div class="exo-champ"><label>Repos</label><input type="text" value="${esc(ex.repos||'')}" placeholder="90s" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].repos=this.value"></div>
+              <div class="exo-champ"><label>Tempo</label><input type="text" value="${esc(ex.tempo||'')}" placeholder="2010" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].tempo=this.value"></div>
+              <div class="exo-champ"><label>RIR</label><input type="text" value="${esc(ex.rir||'')}" placeholder="1-2" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].rir=this.value"></div>
+              <button class="mini-btn" style="margin-left:auto;align-self:center;" onclick="cpRetirerExo(${bi},${si},${ei})">✕</button>
+            </div>`).join('')}
+          <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+            <button class="btn" style="width:100%;justify-content:center;" onclick="cpOuvrirPicker(${bi},${si})">+ Ajouter un exercice</button>
+          </div>
+        </div>`).join('')}
+      <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+        <button class="btn" style="width:100%;justify-content:center;" onclick="cpAjouterSeance(${bi})">+ Ajouter une séance</button>
+      </div>
+    </div>`).join('');
+  const rCont = document.getElementById('cpRepartitionContainer');
+  if (rCont) renderRepartitionInto(rCont, cp.blocs);
+}
+
+function cpAjouterBloc(){ clientProgEnEdition.blocs.push(blocVide()); renderBlocsClientProg(); }
+function cpRetirerBloc(bi){ clientProgEnEdition.blocs.splice(bi,1); renderBlocsClientProg(); }
+function cpAjouterSeance(bi){ const s=clientProgEnEdition.blocs[bi].seances; s.push({id:null,titre:'Séance '+(s.length+1),exercices:[]}); renderBlocsClientProg(); }
+function cpRetirerSeance(bi,si){ clientProgEnEdition.blocs[bi].seances.splice(si,1); renderBlocsClientProg(); }
+function cpRetirerExo(bi,si,ei){ clientProgEnEdition.blocs[bi].seances[si].exercices.splice(ei,1); renderBlocsClientProg(); }
+function cpOnDragStartExo(e,bi,si,ei){ _cpDragExoSource={bi,si,ei}; e.dataTransfer.effectAllowed='move'; }
+function cpOnDragEndExo(){ _cpDragExoSource=null; }
+function cpOnDropExo(e,bi,si,ei){
+  e.preventDefault();
+  const src=_cpDragExoSource; _cpDragExoSource=null;
+  if(!src||src.bi!==bi||src.si!==si||src.ei===ei){ renderBlocsClientProg(); return; }
+  const arr=clientProgEnEdition.blocs[bi].seances[si].exercices;
+  const [moved]=arr.splice(src.ei,1);
+  arr.splice(src.ei<ei?ei-1:ei,0,moved);
+  renderBlocsClientProg();
+}
+
+function cpOuvrirPicker(bi,si){
+  _cpPickerCible={bi,si}; pickerGroupeFiltre='all'; pickerRecherche='';
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay'; overlay.id='modal-picker-cp';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove();};
+  overlay.innerHTML=`
+    <div class="modal-box">
+      <h3>Choisir un exercice</h3>
+      <div class="field-row"><input type="text" id="cpPickerSearch" placeholder="Rechercher…" oninput="pickerRecherche=this.value;cpRenderPickerListe()"></div>
+      <div class="chip-filter" style="flex-wrap:wrap;margin-bottom:10px;">
+        <button class="${pickerGroupeFiltre==='all'?'active':''}" onclick="pickerGroupeFiltre='all';cpRenderPickerListe()">Tous</button>
+        ${GROUPES_MUSCULAIRES.map(g=>`<button class="${pickerGroupeFiltre===g?'active':''}" onclick="pickerGroupeFiltre='${g}';cpRenderPickerListe()">${g}</button>`).join('')}
+      </div>
+      <div id="cpPickerListe" style="max-height:280px;overflow-y:auto;"></div>
+      <div class="modal-actions"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-picker-cp').remove()">Fermer</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  cpRenderPickerListe();
+}
+
+function cpRenderPickerListe(){
+  const el=document.getElementById('cpPickerListe');
+  if(!el) return;
+  const q=(pickerRecherche||'').toLowerCase();
+  const list=(exercicesData||[]).filter(e=>pickerGroupeFiltre==='all'||e.groupe_musculaire===pickerGroupeFiltre).filter(e=>!q||e.nom.toLowerCase().includes(q));
+  el.innerHTML=list.length?list.map(e=>`
+    <div class="exo-row" style="cursor:pointer;" onclick="cpAjouterExo(${e.id})">
+      <span class="nom">${esc(e.nom)}</span>
+      <span class="stat">${esc(e.groupe_musculaire||'')}</span>
+    </div>`).join(''):`<div style="padding:16px;text-align:center;color:var(--text-faint);">Aucun exercice.</div>`;
+}
+
+function cpAjouterExo(exerciceId){
+  const ex=(exercicesData||[]).find(e=>e.id===exerciceId);
+  if(!ex||!_cpPickerCible) return;
+  const {bi,si}=_cpPickerCible;
+  const blocType=clientProgEnEdition.blocs[bi].type;
+  clientProgEnEdition.blocs[bi].seances[si].exercices.push({
+    id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
+    series:null, reps:blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'',
+    repos:blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'', tempo:'', rir:''
+  });
+  document.getElementById('modal-picker-cp').remove();
+  renderBlocsClientProg();
+}
+
+async function sauvegarderProgrammeClient(){
+  const cp=clientProgEnEdition;
+  if(!cp) return;
+  const btn=document.getElementById('clientProgSaveBtn');
+  const errEl=document.getElementById('cpErr');
+  if(btn){btn.disabled=true;btn.textContent='Enregistrement…';}
+  if(errEl) errEl.style.display='none';
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom})});
+    const newBlocIds=[],newSeanceIds=[],newExoIds=[];
+    for(let bi=0;bi<cp.blocs.length;bi++){
+      const b=cp.blocs[bi];
+      if(b.id){
+        await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=eq.${b.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})});
+      } else {
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_id:cp.id,type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})});
+        b.id=(await r.json())[0].id;
+      }
+      newBlocIds.push(b.id);
+      for(let si=0;si<b.seances.length;si++){
+        const s=b.seances[si];
+        if(s.id){
+          await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${s.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({titre:s.titre,ordre:si})});
+        } else {
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_bloc_id:b.id,titre:s.titre,ordre:si})});
+          s.id=(await r.json())[0].id;
+        }
+        newSeanceIds.push(s.id);
+        for(let ei=0;ei<s.exercices.length;ei++){
+          const ex=s.exercices[ei];
+          if(ex.id){
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null})});
+          } else {
+            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null})});
+            ex.id=(await r.json())[0].id;
+          }
+          newExoIds.push(ex.id);
+        }
+      }
+    }
+    const removedExos=_origClientProgExoIds.filter(id=>!newExoIds.includes(id));
+    for(const id of removedExos) await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${id}`,{method:'DELETE',headers:supaHeaders()});
+    const removedSeances=_origClientProgSeanceIds.filter(id=>!newSeanceIds.includes(id));
+    for(const id of removedSeances) await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${id}`,{method:'DELETE',headers:supaHeaders()});
+    const removedBlocs=_origClientProgBlocIds.filter(id=>!newBlocIds.includes(id));
+    for(const id of removedBlocs) await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=eq.${id}`,{method:'DELETE',headers:supaHeaders()});
+    ficheData.tous_programmes=await chargerTousProgrammes(cp.client_id);
+    ficheData.programme=ficheData.tous_programmes.find(p=>p.actif)||null;
+    state.nav='fiche-client'; state.selected=cp.client_id; ficheTab='programmes';
+    renderSidebar(); renderMain();
+  } catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Enregistrer';}
+    if(errEl){errEl.textContent='Erreur : '+e.message;errEl.style.display='block';}
+  }
 }
 
 async function sauvegarderFicheSandbox(clientId){
