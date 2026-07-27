@@ -115,7 +115,7 @@ async function ouvrirDieteSupabase(templateNom) {
     );
     const templates = tmplRes.ok ? await tmplRes.json() : [];
     if (!templates.length) {
-      _dDetail = { nom: templateNom, repas: [] };
+      _dDetail = { nom: templateNom, repas: [], _erreur: 'template_introuvable' };
       _dSubPage = 'detail'; setPage('diete'); return;
     }
     const tmplId = templates[0].id;
@@ -274,6 +274,12 @@ function renderDieteDetail() {
   _dCurrentOpt = [];
 
   let repasHtml = '';
+  if (!(data.repas || []).length) {
+    const msg = data._erreur === 'template_introuvable'
+      ? 'Diète non trouvée dans la base (template manquant). Contacte ton coach.'
+      : 'Aucun repas dans cette diète.';
+    repasHtml = `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">${msg}</div></div>`;
+  }
   (data.repas || []).forEach((r, idx) => {
     const options = [r].concat(r.equivalences || []);
     const hasOpts = options.length > 1;

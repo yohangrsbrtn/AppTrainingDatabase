@@ -138,12 +138,11 @@ function _pcMusclePanelHtml(seance) {
   });
   const entries = Object.entries(muscles).sort((a, b) => b[1] - a[1]);
   if (!entries.length) return '';
-  return `<div style="margin-bottom:10px;">
+  return `<div style="margin-bottom:6px;">
     <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Muscles</div>
-    ${entries.map(([g, s]) => `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-      <span style="font-size:11px;color:var(--text);line-height:1.2;">${esc(g)}</span>
-      <span style="font-size:11px;font-weight:700;color:var(--accent);margin-left:4px;">${s}S</span>
-    </div>`).join('')}
+    <div style="display:flex;flex-wrap:wrap;gap:4px;">
+      ${entries.map(([g, s]) => `<span style="font-size:11px;background:#1e2444;border:1px solid var(--border);border-radius:6px;padding:2px 8px;color:var(--text);"><strong style="color:var(--accent);">${s}S</strong> ${esc(g)}</span>`).join('')}
+    </div>
   </div>`;
 }
 
@@ -152,7 +151,7 @@ function _pcRenderChart(seance) {
   if (totalSem < 2) return '';
   const exos   = (seance.client_programme_exercices || []).slice(0, 4);
   const colors = ['#378ADD', '#1D9E75', '#D85A30', '#a78bfa'];
-  const W = 130, H = 60, PAD = 6;
+  const W = 300, H = 90, PAD = 10;
 
   const series = exos.map((ex, ei) => {
     const data = [];
@@ -192,10 +191,10 @@ function _pcRenderChart(seance) {
   });
 
   const legend = series.filter(s => s.data.some(v => v != null)).map(s =>
-    `<div style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);line-height:1.2;">
-      <div style="width:10px;height:2px;background:${s.color};border-radius:1px;flex-shrink:0;"></div>
-      <span>${esc(s.nom.length > 12 ? s.nom.substring(0, 11) + '…' : s.nom)}</span>
-    </div>`).join('');
+    `<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);">
+      <span style="display:inline-block;width:12px;height:2px;background:${s.color};border-radius:1px;"></span>
+      ${esc(s.nom.length > 16 ? s.nom.substring(0, 15) + '…' : s.nom)}
+    </span>`).join('');
 
   return `<div>
     <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Progression charge</div>
@@ -204,7 +203,7 @@ function _pcRenderChart(seance) {
       <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="#333" stroke-width="0.5"/>
       ${paths}
     </svg>
-    <div style="display:flex;flex-direction:column;gap:3px;margin-top:4px;">${legend}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;">${legend}</div>
   </div>`;
 }
 
@@ -212,10 +211,10 @@ function _pcRightPanel(seance) {
   const musclesHtml = _pcMusclePanelHtml(seance);
   const chartHtml   = _pcRenderChart(seance);
   if (!musclesHtml && !chartHtml) return '';
-  return `<div class="card" style="padding:10px;margin-bottom:0;margin-top:0;">
-    ${musclesHtml}
-    ${musclesHtml && chartHtml ? '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' : ''}
+  return `<div class="card" style="padding:12px;">
     ${chartHtml}
+    ${musclesHtml && chartHtml ? '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' : ''}
+    ${musclesHtml}
   </div>`;
 }
 
@@ -246,9 +245,9 @@ function renderPcSeancePage() {
       }
       setsHtml += refPrec + `<div class="set-row">
         <span class="set-num">S${s}</span>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"   style="padding:6px 2px;font-size:14px;">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" onchange="pcSauverLog(${ex.id},${s},'charge',this.value)" style="padding:6px 2px;font-size:14px;">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"    style="padding:6px 2px;font-size:14px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"   style="padding:6px 2px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" onchange="pcSauverLog(${ex.id},${s},'charge',this.value)" style="padding:6px 2px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"    style="padding:6px 2px;">
       </div>`;
     }
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
@@ -283,13 +282,9 @@ function renderPcSeancePage() {
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSeanceNav(this.value)">${optsSeances}</select>
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSemaineNav(this.value)">${optsSemaines}</select>
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-start;">
-        <div style="flex:1.5;min-width:0;">
-          ${exosHtml}
-          <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
-        </div>
-        ${rightPanel ? `<div style="flex:1;min-width:110px;max-width:155px;position:sticky;top:8px;">${rightPanel}</div>` : ''}
-      </div>
+      ${rightPanel ? `<div style="margin-bottom:12px;">${rightPanel}</div>` : ''}
+      ${exosHtml}
+      <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
     </div>
     <div id="pcChronoOverlay" style="display:none;"></div>
     ${renderNavBar('training')}
@@ -330,7 +325,7 @@ async function pcSauverLog(exerciceId, serie, field, value) {
     numero_serie: serie,
     charge: null, reps: null, rir: null, commentaire: null
   };
-  const parsed = field === 'charge' ? (parseFloat(value) || null)
+  const parsed = field === 'charge' ? (parseFloat((value + '').replace(',', '.')) || null)
     : field === 'reps'   ? (parseInt(value)   || null)
     : (value || null);
   // Mise à jour optimiste avant le fetch pour que les appels rapides successifs
