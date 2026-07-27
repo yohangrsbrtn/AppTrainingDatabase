@@ -81,12 +81,12 @@ Page refaite avec 2 onglets :
 
 ### Migration (`state.nav='migration'`) ✅
 
-Prévisualisation + import depuis GAS prod. 4 onglets : infos | mensurations | diète | programme.
+Prévisualisation + import depuis GAS prod. 5 onglets : infos | mensurations | diète | programme | bilans.
 - **`GAS_PROD_URL`** : URL GAS prod, distincte du GAS sandbox.
 - **`GAS_ID_MAP`** : `{ 'yohanp': 'yohan' }` — mapping ID Supabase → ID GAS.
 - **`apiGasProd(action, clientId, params)`** : lit toujours le GAS prod.
 - **Diète** : preview avec équivalences visibles, checkbox "Créer un template réutilisable" (décoché = `client_only=true`). Import **idempotent** : si le template existe déjà (même `nom`), supprime ses repas et les recrée ; ne duplique pas `client_dietes`. Crée template + repas + variantes (équivalences) + aliments + `client_dietes`. Ne désactive **pas** les diètes existantes (multi-diètes).
-- **Programme** : import structure (blocs/séances/exercices) + logs (charge/reps/rir/note) pour toutes les semaines. Semaines chargées en parallèle par séance.
+- **Programme** : prévisualisation exercices + logs par semaine (navigateur `‹ Sem X ›`, lazy-load par semaine via `_migLoadSemaineSeances`, cache `migPreviewSeancesCache`). Import structure (blocs/séances/exercices) + logs toutes semaines en parallèle par séance. **Attention** : exercices migrés n'ont pas d'`exercice_id` (juste `nom`) → lookup groupe musculaire par nom dans l'éditeur.
 
 ### Mensurations (`state.nav='mensurations'`) ✅
 
@@ -94,8 +94,11 @@ Dropdown client → charge Supabase. Bouton "⬇ Migrer depuis GAS".
 
 ### Fiche client (`state.nav='fiche-client'`) ✅
 
-5 onglets : profil, programmes, diète, progression, notes. Onglets surlignés en jaune correctement au changement.
+7 onglets : profil, programmes, diète, progression, notes, bilans, mensurations.
+- **Programmes** : liste des programmes assignés, boutons "Éditer" / "Désactiver/Activer". Clic sur le nom → logs. "Éditer" → `editeur-client-prog`.
 - **Diète** : liste toutes les diètes assignées (plusieurs simultanées OK), boutons "+ Assigner" / "+ Créer" / "Éditer" / "Retirer". "Éditer" charge le template par `nom` (sans filtre `client_only`) et ouvre l'éditeur ; après save, retour automatique sur la fiche.
+- **Bilans** : lazy-load depuis Supabase (`_ficheBilans`), tableau cliquable → détail bilan avec nav prev/next.
+- **Mensurations** : lazy-load depuis Supabase, graphique SVG poids + mesure + tableau.
 - **`_ficheCreateClientId`** : clientId pour création nouvelle diète depuis fiche. **`_ficheEditClientId`** : clientId pour édition diète depuis fiche.
 
 ### Diètes (`state.nav='dietes'`) ✅
@@ -114,6 +117,29 @@ Page dédiée (plus de modale). Ouverte depuis les templates ou la fiche client.
 - `retourDepuisEditeurDiete()` : gère le retour (fiche-client ou dietes)
 - **Multi-ajout aliments** : le picker `modal-ajout-aliment` reste ouvert après chaque ajout. Flash "✓ ajouté", compteur `_ajoutAlimCount`. Bouton "✓ Terminer" pour fermer.
 - `_updateAlimentsDom(ri)` : mise à jour partielle DOM (`#alim-list-${ri}`) sans re-render de la page. Utilisée par `supprimerAlimentDiete` et la confirmation d'ajout.
+
+### Éditeur programme client (`state.nav='editeur-client-prog'`) ✅
+
+Ouvert depuis fiche client → onglet Programmes → bouton "Éditer".
+- `ouvrirEditeurProgrammeClient(progId)` : charge le programme + exercicesData, construit `clientProgEnEdition`
+- Même UI que l'éditeur de templates (blocs, séances, drag & drop, picker)
+- Groupe musculaire affiché sous chaque exercice ; fallback lookup par nom si `exercice_id` null (programmes migrés)
+- Répartition des séries par groupe musculaire (barres proportionnelles, via `renderRepartitionInto`)
+- Save : PATCH champ par champ sur items existants (préserve les logs), INSERT pour nouveaux, DELETE pour supprimés
+- État : `clientProgEnEdition`, `_origClientProgBlocIds/SeanceIds/ExoIds`, `_cpPickerCible`, `_cpDragExoSource`
+
+### Logs programme (`state.nav='prog-logs'`) ✅
+
+- **Vue semaine** : logs par série, groupe musculaire sous chaque exercice
+- **Vue progression** : graphe SVG charge max par semaine par exercice + delta
+- Bouton "Éditer" → `editeur-client-prog`
+- `_progLogsView` : `'semaine'` | `'progression'`
+- `exercicesData` chargé en parallèle avec le programme dans `ouvrirLogsProgramme`
+
+### Éditeur templates programmes (`state.nav='programmes'` → onglet Templates) ✅
+
+- Groupe musculaire affiché sous chaque exercice dans les lignes d'exercice
+- Répartition séries par groupe musculaire (panel sous les blocs, `renderRepartition()` appelé en fin de `renderBlocsTemplate()`)
 
 ### Pages coach opérationnelles ✅
 
@@ -156,6 +182,9 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **Aliments migrés** : `repas_aliments` stocke macros directement (pas de FK `aliments_coach`). `diete.js` fait fallback sur les colonnes directes. L'éditeur coach (`editerDieteClient`) lit aussi directement via `select=*,repas_aliments(*)`.
 - **Re-migrer après ajout de fonctionnalités** : les équivalences et logs programme n'étaient pas importés dans les anciennes migrations — re-migrer pour avoir les données complètes. La migration est maintenant **idempotente** : re-migrer écrase proprement sans doublon.
 - **`client_only` sur `diete_templates`** : ajouté manuellement via SQL (`ALTER TABLE diete_templates ADD COLUMN IF NOT EXISTS client_only BOOLEAN NOT NULL DEFAULT false`). Idem `variante_index` sur `repas`.
+- **`client_programme_exercices.exercice_id`** : null pour les exercices migrés depuis GAS (la migration n'insère que `nom`). L'éditeur et la vue logs font un fallback lookup par nom dans `exercicesData` pour trouver `groupe_musculaire`.
+- **Race condition logs** (`pcSauverLog`) : corrigée avec mise à jour optimiste de `_pcLogs[key]` + queue `_pcSaveQueues[key]` par série. Enregistrement existant (a un `id`) → PATCH champ unique. Nouveau → POST avec tous les champs non-null accumulés. Ne jamais revenir à l'ancienne approche upsert sans queue.
+- **Bilan nav prev/next** : `_bilanNavList`, `_bilanNavIdx`, `_bilanNavSource` ('fiche'|'bilans'). Bouton retour contextuel. `_weekRange()` calcule "DD Mon → DD Mon" (dimanche = fin de semaine).
 
 ## Workflow
 
