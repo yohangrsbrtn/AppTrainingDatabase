@@ -4047,8 +4047,9 @@ async function _chargerMigPreviewData(clientId) {
     const supaClientProgs  = supaCliProgsRes.ok  ? await supaCliProgsRes.json()  : [];
     const gasMensurations  = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
     const gasDietes        = (typeof gasDietesRaw === 'string' ? JSON.parse(gasDietesRaw) : gasDietesRaw) || [];
-    const gasBilans        = (typeof gasBilansRaw === 'string' ? JSON.parse(gasBilansRaw) : gasBilansRaw) || [];
-    const supaBilansRows   = supaBilansRes?.ok ? await supaBilansRes.json() : [];
+    const _gasBilansUnwrap = (typeof gasBilansRaw === 'string') ? (() => { try { return JSON.parse(gasBilansRaw); } catch { return []; } })() : gasBilansRaw;
+    const gasBilans        = Array.isArray(_gasBilansUnwrap) ? _gasBilansUnwrap : [];
+    const supaBilansRows   = supaBilansRes?.ok ? (await supaBilansRes.json().catch(() => [])) : [];
     const supaBilanLignes  = new Set(supaBilansRows.map(r => r.gas_ligne_titre));
     const supaProfile = profRows[0] || null;
 
