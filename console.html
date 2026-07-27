@@ -5021,6 +5021,7 @@ async function migSelectDiete(ligne, col, nom) {
   try {
     const raw = await apiGasProd('chargerDieteParPosition', migPreviewClientId, { ligneTitre: ligne, colTitre: col });
     migPreviewDieteDetail = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    console.log('[migSelectDiete] raw response:', JSON.stringify(migPreviewDieteDetail));
   } catch(e) {
     migPreviewDieteDetail = { repas: [], erreur: e.message };
   }
