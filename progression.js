@@ -12,11 +12,68 @@ function getTierColors(tier) {
   }
 }
 
+async function chargerProgressionSupabase() {
+  const clientId = getClient();
+  const [profilRes, bilansRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() })
+  ]);
+  const [profils, bilans] = await Promise.all([profilRes.json(), bilansRes.json()]);
+  const profil = profils[0] || {};
+
+  const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
+  let seancesValidees = 0, pasTotal = 0;
+  const historiqueXP = [];
+
+  bilans.forEach(b => {
+    const jours = b.jours || [];
+    pasTotal += jours.reduce((s, j) => s + (j.steps || 0), 0);
+    const seancesWeek = jours.filter(j => j.training).length;
+    seancesValidees += seancesWeek;
+    if (b.envoye_coach && b.date_validation) {
+      const stepsMoy = jours.length ? Math.round(pasTotal / jours.length) : 0;
+      const bonusPas = stepsMoy >= 10000 ? 25 : 0;
+      historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: 100 + bonusPas, ts: b.date_validation || '' });
+    }
+  });
+  historiqueXP.splice(5);
+
+  const xpTotal = bilansValidies * 100 + seancesValidees * 50;
+  const XP_PAR_NIVEAU = 200;
+  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
+  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
+  const pct = Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+
+  const nbSemaines = bilans.length;
+  const seancesAttendues = nbSemaines * 4;
+  const bilansAttendus = nbSemaines;
+  const pctSeances = seancesAttendues > 0 ? Math.min(100, Math.round(seancesValidees / seancesAttendues * 100)) : 0;
+  const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;
+  const assiduiteGlobale = Math.round((pctSeances + pctBilans) / 2);
+
+  let titreActif = null;
+  try { titreActif = localStorage.getItem('titreActif_' + clientId) || null; } catch(e) {}
+  let seenTitres = 0;
+  try { seenTitres = parseInt(localStorage.getItem('seenTitres_' + clientId)) || 0; } catch(e) {}
+
+  return {
+    nom: [profil.prenom, profil.nom].filter(Boolean).join(' ') || clientId,
+    niveau, pct, xpTotal, xpManquant,
+    seancesValidees, seancesAttendues, pctSeances,
+    bilansValidies, bilansAttendus, pctBilans,
+    assiduiteGlobale, pasTotal,
+    historiqueXP, titreActif, seenTitres
+  };
+}
+
 async function loadProgression() {
-  if (isSupabase()) { hideLoadingOverlay(); goTo('home'); return; }
   showLoadingOverlay('Chargement…');
   try {
-    S.data.prog = await api('chargerProgressionClient');
+    if (isSupabase()) {
+      S.data.prog = await chargerProgressionSupabase();
+    } else {
+      S.data.prog = await api('chargerProgressionClient');
+    }
     hideLoadingOverlay();
     setPage('progression');
   } catch(e) { hideLoadingOverlay(); setPage('home'); }

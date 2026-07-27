@@ -99,10 +99,12 @@ const TITRES_DEF = [
 let _colTitreActif = null;
 
 async function loadCollection() {
-  if (isSupabase()) { goTo('home'); return; }
   showLoadingOverlay('Chargement…');
   try {
-    if (!S.data.prog) S.data.prog = await api('chargerProgressionClient');
+    if (!S.data.prog) {
+      if (isSupabase()) S.data.prog = await chargerProgressionSupabase();
+      else S.data.prog = await api('chargerProgressionClient');
+    }
     try {
       _colTitreActif = localStorage.getItem('titreActif_' + S.client)
         || (S.data.prog.titreActif || null) || null;
@@ -271,10 +273,9 @@ function verifierDeblocages(p) {
 // si elle est affichée, et corrige le cache de préchargement pour qu'un
 // retour ultérieur à l'accueil n'affiche pas un total XP périmé.
 async function rafraichirProgressionEtDeblocages() {
-  if (isSupabase()) return;
   if (_viewAsClientOverride) return;
   try {
-    const p = await api('chargerProgressionClient');
+    const p = isSupabase() ? await chargerProgressionSupabase() : await api('chargerProgressionClient');
     S.data.prog = p;
     if (typeof _pf !== 'undefined' && _pf.home) _pf.home.prog = p;
     if (S.page === 'home' && typeof _majCarteHeader === 'function') _majCarteHeader();
