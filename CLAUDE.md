@@ -4,7 +4,7 @@ Bac à sable de développement pour la migration de l'app de coaching vers Supab
 
 - **URL live** : https://yohangrsbrtn.github.io/AppTrainingDatabase/
 - **Supabase** : `https://sfacjbwiczwkcjpwneyg.supabase.co` — RLS ouverte à `anon`, pas d'auth Supabase pour l'instant
-- **Référence fonctionnelle** : `../AppTraining/Code.js` et `../AppTraining/Index.html` (GAS) — comportement cible
+- **Référence fonctionnelle** : `../AppTrainingPWA/` (GAS prod) — comportement cible. **Ne jamais lire `../AppTraining/`.**
 - **Production** : `../AppTrainingPWA/` — référence lecture seule, ne pas modifier
 
 ## Déploiement
@@ -85,7 +85,7 @@ Prévisualisation + import depuis GAS prod. 4 onglets : infos | mensurations | d
 - **`GAS_PROD_URL`** : URL GAS prod, distincte du GAS sandbox.
 - **`GAS_ID_MAP`** : `{ 'yohanp': 'yohan' }` — mapping ID Supabase → ID GAS.
 - **`apiGasProd(action, clientId, params)`** : lit toujours le GAS prod.
-- **Diète** : preview avec équivalences visibles, checkbox "Créer un template réutilisable" (décoché = `client_only=true`). Import crée template + repas + variantes (équivalences) + aliments + `client_dietes`. Ne désactive **pas** les diètes existantes (multi-diètes).
+- **Diète** : preview avec équivalences visibles, checkbox "Créer un template réutilisable" (décoché = `client_only=true`). Import **idempotent** : si le template existe déjà (même `nom`), supprime ses repas et les recrée ; ne duplique pas `client_dietes`. Crée template + repas + variantes (équivalences) + aliments + `client_dietes`. Ne désactive **pas** les diètes existantes (multi-diètes).
 - **Programme** : import structure (blocs/séances/exercices) + logs (charge/reps/rir/note) pour toutes les semaines. Semaines chargées en parallèle par séance.
 
 ### Mensurations (`state.nav='mensurations'`) ✅
@@ -101,8 +101,19 @@ Dropdown client → charge Supabase. Bouton "⬇ Migrer depuis GAS".
 ### Diètes (`state.nav='dietes'`) ✅
 
 2 onglets :
-- **Templates diète** : liste (`client_only=false` uniquement), éditeur (repas groupés par `ordre`, bouton "≡ + Variante" pour repas équivalents)
+- **Templates diète** : liste (`client_only=false` uniquement), éditeur en page dédiée
 - **Recettes** : CRUD recettes coach (table `recettes` Supabase)
+
+### Éditeur de diète (`state.nav='editeur-diete'`) ✅
+
+Page dédiée (plus de modale). Ouverte depuis les templates ou la fiche client.
+- `ouvrirEditeurDiete(id)` → depuis page Diètes
+- `editerDieteClient(nom, clientId)` / `ouvrirCreerDietePourClient(clientId)` → depuis fiche client
+- `_ficheEditClientId` / `_ficheCreateClientId` : contexte client en cours
+- `_dietNavBack` : page de retour après save/cancel
+- `retourDepuisEditeurDiete()` : gère le retour (fiche-client ou dietes)
+- **Multi-ajout aliments** : le picker `modal-ajout-aliment` reste ouvert après chaque ajout. Flash "✓ ajouté", compteur `_ajoutAlimCount`. Bouton "✓ Terminer" pour fermer.
+- `_updateAlimentsDom(ri)` : mise à jour partielle DOM (`#alim-list-${ri}`) sans re-render de la page. Utilisée par `supprimerAlimentDiete` et la confirmation d'ajout.
 
 ### Pages coach opérationnelles ✅
 
@@ -143,7 +154,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **`alimentsCoachData`** : lazy-loadé (null jusqu'au premier accès).
 - **Plusieurs templates avec le même nom** : `diete.js` prend le plus récent (`order=id.desc&limit=1`). La migration ne désactive plus les diètes existantes. Si deux templates partagent le même nom, le plus récent gagne côté client.
 - **Aliments migrés** : `repas_aliments` stocke macros directement (pas de FK `aliments_coach`). `diete.js` fait fallback sur les colonnes directes. L'éditeur coach (`editerDieteClient`) lit aussi directement via `select=*,repas_aliments(*)`.
-- **Re-migrer après ajout de fonctionnalités** : les équivalences et logs programme n'étaient pas importés dans les anciennes migrations — re-migrer pour avoir les données complètes.
+- **Re-migrer après ajout de fonctionnalités** : les équivalences et logs programme n'étaient pas importés dans les anciennes migrations — re-migrer pour avoir les données complètes. La migration est maintenant **idempotente** : re-migrer écrase proprement sans doublon.
 - **`client_only` sur `diete_templates`** : ajouté manuellement via SQL (`ALTER TABLE diete_templates ADD COLUMN IF NOT EXISTS client_only BOOLEAN NOT NULL DEFAULT false`). Idem `variante_index` sur `repas`.
 
 ## Workflow
@@ -152,4 +163,4 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - Tout développement **uniquement ici** (AppTrainingDatabase), pas dans AppTrainingPWA.
 - AppTrainingPWA = référence lecture seule pour comprendre le comportement attendu.
 - Tester avec `yohanp` (supabase_only).
-- Avant portage d'une fonctionnalité, relire `../AppTraining/Code.js` pour la logique GAS et `../AppTrainingPWA/` pour l'UI cible.
+- Avant portage d'une fonctionnalité, relire `../AppTrainingPWA/` pour la logique GAS et l'UI cible. **Ne jamais lire `../AppTraining/`.**
