@@ -502,7 +502,10 @@ const NAV = [
 let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null, progLogsId:null };
 let data = { clients:[], bilansCoach:[], logs:[], aValider:[] };
 let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
-let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes'
+let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
+let _ficheBilansClientId = null;
+let _ficheBilans = null; // null=non chargé, []=vide, [...]
+let _ficheBilansLoading = false;
 let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
 let dieteTemplatesData = null;
@@ -772,21 +775,73 @@ async function openBilanDetailFromLog(client, ts, coachTraite) {
   state.nav = 'bilan-detail';
   renderSidebar();
   renderMain();
+
+  // 1. Essai GAS sandbox
   try {
     const historique = await apiAs('chargerHistoriqueBilans', client);
     const tsMs = _parseTsMs(ts);
-    const match = historique.find(h => {
+    const match = Array.isArray(historique) ? historique.find(h => {
       const hMs = _parseTsMs(h.date);
       return hMs && tsMs && Math.abs(hMs - tsMs) <= 3*86400000;
+    }) : null;
+    if (match) {
+      bilanDetailState.ligneTitre = match.ligneTitre;
+      const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre: match.ligneTitre });
+      bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
+      if (state.nav === 'bilan-detail') renderMain();
+      return;
+    }
+  } catch(e) { /* GAS indisponible ou bilan absent — fallback Supabase */ }
+
+  // 2. Fallback Supabase
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(client)}&order=date_validation.desc`,
+      { headers: supaHeaders() }
+    );
+    const supaBilans = res.ok ? await res.json() : [];
+    const tsMs = _parseTsMs(ts);
+    const supMatch = supaBilans.find(b => {
+      if (!b.date_validation) return false;
+      const bMs = new Date(b.date_validation).getTime();
+      return tsMs && Math.abs(bMs - tsMs) <= 7*86400000;
     });
-    if (!match) throw new Error('Bilan introuvable dans la feuille Sheets — semaine non retrouvée.');
-    bilanDetailState.ligneTitre = match.ligneTitre;
-    const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre: match.ligneTitre });
-    bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
+    if (supMatch) { openBilanDetailSupabase(supMatch); return; }
+    throw new Error('Bilan introuvable dans GAS et dans Supabase.');
   } catch(e) {
     bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
   }
   if (state.nav === 'bilan-detail') renderMain();
+}
+
+function openBilanDetailSupabase(bilan) {
+  const dateIso = bilan.date_validation || '';
+  const dateFr  = dateIso ? dateIso.split('-').reverse().join('/') : '';
+  bilanDetailState = {
+    loaded: true,
+    client: bilan.client_id,
+    ligneTitre: bilan.gas_ligne_titre || null,
+    ts: null,
+    coachTraite: !!bilan.coach_traite,
+    data: {
+      dateValidation: dateFr,
+      jours: bilan.jours || [],
+      repas: bilan.repas_eval || [],
+      commentaireAlim: bilan.commentaire_alim || '',
+      commentaireJour: bilan.commentaire_jour || '',
+      commentaireActivite: bilan.commentaire_activite || '',
+    },
+    error: null,
+    _supabaseBilanId: bilan.id,
+  };
+  state.nav = 'bilan-detail';
+  renderSidebar();
+  renderMain();
+}
+
+function openFicheBilanDetail(idx) {
+  const b = (_ficheBilans || [])[idx];
+  if (b) openBilanDetailSupabase(b);
 }
 
 function renderBilansPage(el) {
@@ -969,7 +1024,7 @@ function renderBilanDetailPage(el) {
         ${dateValidation?`<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Validé le ${esc(dateValidation)}</div>`:''}
         ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
       </div>
-      ${!bilanDetailState.coachTraite&&bilanDetailState.ts?`<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite('${bilanDetailState.client}','${esc(bilanDetailState.ts)}')">Marquer traité</button>`:''}
+      ${!bilanDetailState.coachTraite&&(bilanDetailState.ts||bilanDetailState._supabaseBilanId)?`<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite('${bilanDetailState.client}','${esc(bilanDetailState.ts||'')}')">Marquer traité</button>`:''}
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
@@ -2163,10 +2218,26 @@ function renderDashboard(el){
 }
 
 async function marquerTraite(client, ts){
-  try {
-    await apiAs('marquerBilanTraiteServeur', client, { ts });
-    await rafraichir();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  if (bilanDetailState._supabaseBilanId) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
+        { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
+      );
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      bilanDetailState.coachTraite = true;
+      if (_ficheBilans) {
+        const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
+        if (b) b.coach_traite = true;
+      }
+      if (state.nav === 'bilan-detail') renderMain();
+    } catch(e) { alert('Erreur : ' + e.message); }
+  } else {
+    try {
+      await apiAs('marquerBilanTraiteServeur', client, { ts });
+      await rafraichir();
+    } catch(e) { alert('Erreur : ' + e.message); }
+  }
 }
 
 function renderClientsPage(el){
@@ -2352,6 +2423,7 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='diete'?'active':''}" onclick="setFicheTab('diete')">Diète</button>
       <button class="fiche-tab ${ficheTab==='progression'?'active':''}" onclick="setFicheTab('progression')">Progression</button>
       <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Notes</button>
+      <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
     </div>
 
     <div id="ficheTabContent">${renderFicheTabContent(c)}</div>`;
@@ -2375,7 +2447,57 @@ function renderFicheTabContent(c){
   if (ficheTab === 'diete')       return renderFicheDieteTab(c);
   if (ficheTab === 'progression') return renderFicheProgressionTab();
   if (ficheTab === 'notes')       return renderFicheNotesTab(c);
+  if (ficheTab === 'bilans')      return renderFicheBilansTab(c);
   return '';
+}
+
+function renderFicheBilansTab(c){
+  if (!c) return '';
+  if (_ficheBilansClientId !== c.id) {
+    _ficheBilansClientId = c.id;
+    _ficheBilans = null;
+    _ficheBilansLoading = false;
+  }
+  if (_ficheBilans === null) {
+    if (!_ficheBilansLoading) {
+      _ficheBilansLoading = true;
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&order=date_validation.desc`, { headers: supaHeaders() })
+        .then(r => r.json())
+        .then(rows => {
+          _ficheBilans = Array.isArray(rows) ? rows : [];
+          _ficheBilansLoading = false;
+          const el = document.getElementById('ficheTabContent');
+          if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+        })
+        .catch(() => { _ficheBilans = []; _ficheBilansLoading = false; });
+    }
+    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  }
+  if (_ficheBilans.length === 0) {
+    return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
+  }
+  const rows = _ficheBilans.map((b, idx) => {
+    const dateFr = (b.date_validation||'').split('-').reverse().join('/') || '—';
+    const traite = b.coach_traite;
+    const chip = traite
+      ? `<span class="chip ok"><span class="dot"></span>Traité</span>`
+      : `<span class="chip late"><span class="dot"></span>À traiter</span>`;
+    return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
+      <td>${dateFr}</td>
+      <td>${esc(b.commentaire_alim||'').slice(0,60)||'—'}</td>
+      <td>${chip}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="fiche-card" style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
+        <th style="text-align:left;padding:6px 8px;">Date</th>
+        <th style="text-align:left;padding:6px 8px;">Commentaire alim.</th>
+        <th style="text-align:left;padding:6px 8px;">Statut</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 }
 
 function renderFicheProfilTab(c){
