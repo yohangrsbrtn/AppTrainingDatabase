@@ -7,6 +7,7 @@ let _pcClientProgramme = null; // null | 'error' | objet programme
 let _pcSemaine         = 1;
 let _pcSeanceId        = null; // id de la séance sélectionnée
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
+const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
 
 // ── Chargement ─────────────────────────────────────────────────────────
@@ -332,16 +333,41 @@ async function pcSauverLog(exerciceId, serie, field, value) {
   const parsed = field === 'charge' ? (parseFloat(value) || null)
     : field === 'reps'   ? (parseInt(value)   || null)
     : (value || null);
-  const updated = Object.assign({}, current, { [field]: parsed });
-  delete updated.id; delete updated.updated_at;
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
-      { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(updated) }
-    );
-    if (!res.ok) throw new Error('supabase_' + res.status);
-    _pcLogs[key] = (await res.json())[0];
-  } catch(e) { alert('Erreur de sauvegarde : ' + e.message); }
+  // Mise à jour optimiste avant le fetch pour que les appels rapides successifs
+  // lisent toujours l'état le plus récent (évite race condition reps/charge)
+  _pcLogs[key] = Object.assign({}, current, { [field]: parsed });
+
+  // Sérialise les requêtes pour cette clé : chaque item lit l'état courant au moment
+  // de son exécution, pas au moment de l'enqueue
+  _pcSaveQueues[key] = (_pcSaveQueues[key] || Promise.resolve()).then(async () => {
+    const log = _pcLogs[key];
+    try {
+      if (log.id) {
+        // Enregistrement existant : PATCH sur un seul champ, aucun risque d'écraser les autres
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/client_programme_logs?id=eq.${log.id}`,
+          { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: parsed }) }
+        );
+      } else {
+        // Nouveau : POST avec tous les champs non-null accumulés jusqu'ici
+        const l = _pcLogs[key];
+        const body = { client_programme_exercice_id: exerciceId, semaine: _pcSemaine, numero_serie: serie };
+        if (l.charge      != null) body.charge      = l.charge;
+        if (l.reps        != null) body.reps        = l.reps;
+        if (l.rir         != null) body.rir         = l.rir;
+        if (l.commentaire != null) body.commentaire = l.commentaire;
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
+          { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
+        );
+        if (res.ok) {
+          const rows = await res.json();
+          // On récupère uniquement l'id pour les PATCH suivants ; on garde l'état optimiste
+          if (rows[0]?.id) _pcLogs[key] = Object.assign({}, _pcLogs[key], { id: rows[0].id });
+        }
+      }
+    } catch(e) { /* silencieux pour ne pas alerter à chaque frappe */ }
+  });
 }
 
 async function pcSauverCommentaire(exerciceId, value) {
