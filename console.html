@@ -519,6 +519,8 @@ let alimOffResults = [];        // résultats OFF sur la page Base alimentaire
 let alimOffQuery = '';
 let ajoutAlimTab = 'base';      // 'base' | 'off' | 'manuel'
 let ajoutAlimRI = null;
+let _ajoutAlimCount = 0;        // nb d'aliments ajoutés dans la session picker en cours
+let _dietNavBack = 'dietes';    // où revenir après save/cancel éditeur diète
 
 // ── Notes de coaching (Supabase) ──────────────────────────────────────
 // SUPABASE_URL, SUPABASE_ANON_KEY et supaHeaders() viennent de api.js
@@ -695,6 +697,7 @@ function renderMain(){
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
   if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
   if (state.nav === 'dietes') { renderDietesPage(el); return; }
+  if (state.nav === 'editeur-diete') { renderEditeurDietePage(el); return; }
   if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
   if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
   if (state.nav === 'mensurations') { renderMensurationsPage(el); return; }
@@ -3122,6 +3125,7 @@ async function supprimerDieteTemplate(id){
 
 // ── Éditeur de template diète ─────────────────────────────────────────
 async function ouvrirEditeurDiete(id){
+  _dietNavBack = 'dietes';
   if (id) {
     const tpl = dieteTemplatesData.find(t=>t.id===id);
     const res = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers:supaHeaders() });
@@ -3134,15 +3138,49 @@ async function ouvrirEditeurDiete(id){
   } else {
     dieteTplEnEdition = { id:null, nom:'', description:'', repas:[{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }] };
   }
-  renderEditeurDiete();
+  setNav('editeur-diete');
 }
 
-function renderEditeurDiete(){
+// ── Helper : HTML aliments d'un repas (mis à jour sans re-render complet) ──
+function _renderAlimListHtml(ri) {
+  const r = dieteTplEnEdition.repas[ri];
+  if (!r) return '';
+  const repasM = macrosDiete([{ repas_aliments: r.aliments }]);
+  return `
+    ${r.aliments.map((a,ai) => `
+      <div class="aliment-row">
+        <span class="a-nom">${esc(a.nom)}</span>
+        <span class="macro-pills">${a.quantite_g}g · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+        <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
+      </div>`).join('')}
+    ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}">
+      <div><div class="mk">Repas</div><div class="mn">${repasM.kcal}</div><div class="mu">kcal</div></div>
+      <div><div class="mk"> </div><div class="mn">${repasM.prot}g</div><div class="mu">prot</div></div>
+      <div><div class="mk"> </div><div class="mn">${repasM.glu}g</div><div class="mu">gluc</div></div>
+      <div><div class="mk"> </div><div class="mn">${repasM.lip}g</div><div class="mu">lip</div></div>
+    </div>` : `<div id="repas-macros-${ri}"></div>`}`;
+}
+
+function _updateAlimentsDom(ri) {
+  const el = document.getElementById(`alim-list-${ri}`);
+  if (el) el.innerHTML = _renderAlimListHtml(ri);
+  // Recalcul total
   const tpl = dieteTplEnEdition;
-  // Totaux uniquement sur les repas principaux (variante_index=0)
+  const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
+  const tot = document.getElementById('ed-total-macros');
+  if (tot) tot.innerHTML = totalM.kcal ? `
+    <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
+    <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
+    <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
+    <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>` : '';
+}
+
+function renderEditeurDiete() { setNav('editeur-diete'); }
+
+function renderEditeurDietePage(el) {
+  const tpl = dieteTplEnEdition;
   const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
 
-  // Grouper par ordre pour afficher variantes ensemble
   const grouped = {};
   tpl.repas.forEach((r,ri) => {
     const o = r.ordre != null ? r.ordre : ri;
@@ -3156,7 +3194,6 @@ function renderEditeurDiete(){
     const blocksHtml = variants.map(r => {
       const ri = r._ri;
       const isVariante = (r.variante_index||0) > 0;
-      const repasM = macrosDiete([{ repas_aliments:r.aliments }]);
       return `
       <div class="repas-block" style="${isVariante ? 'margin-left:16px;border-left:3px solid var(--accent-soft);padding-left:4px;' : ''}">
         <div class="repas-head">
@@ -3164,21 +3201,10 @@ function renderEditeurDiete(){
           <input type="text" value="${esc(r.nom)}" onchange="dieteTplEnEdition.repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri})">${iTrash()}</button>
         </div>
-        ${r.aliments.map((a,ai)=>`
-          <div class="aliment-row">
-            <span class="a-nom">${esc(a.nom)}</span>
-            <span class="macro-pills">${a.quantite_g}g · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
-            <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
-          </div>`).join('')}
+        <div id="alim-list-${ri}">${_renderAlimListHtml(ri)}</div>
         <div style="padding:8px 14px;">
-          <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri})">+ Ajouter un aliment</button>
+          <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri})">+ Ajouter des aliments</button>
         </div>
-        ${repasM.kcal ? `<div class="macro-band">
-          <div><div class="mk">${isVariante?'Variante':'Repas'}</div><div class="mn">${repasM.kcal}</div><div class="mu">kcal</div></div>
-          <div><div class="mk"> </div><div class="mn">${repasM.prot}g</div><div class="mu">prot</div></div>
-          <div><div class="mk"> </div><div class="mn">${repasM.glu}g</div><div class="mu">gluc</div></div>
-          <div><div class="mk"> </div><div class="mn">${repasM.lip}g</div><div class="mu">lip</div></div>
-        </div>` : ''}
       </div>`;
     }).join('');
     return blocksHtml + `<div style="padding:0 0 10px ${variants.length>1?'16':'0'}px;">
@@ -3186,37 +3212,47 @@ function renderEditeurDiete(){
     </div>`;
   }).join('');
 
-  const overlay = document.getElementById('modal-editeur-diete') || document.createElement('div');
-  overlay.id = 'modal-editeur-diete';
-  overlay.className = 'modal-overlay';
-  overlay.onclick = e => { if(e.target===overlay && confirm('Fermer sans sauvegarder ?')) overlay.remove(); };
-  overlay.innerHTML = `
-    <div class="modal-box" style="max-width:640px;">
-      <h3>${tpl.id ? 'Modifier' : 'Nouveau'} template de diète</h3>
+  const isClient = !!(_ficheCreateClientId || _ficheEditClientId);
+  const titre = _ficheCreateClientId ? 'Nouvelle diète client'
+    : _ficheEditClientId ? 'Modifier diète client'
+    : tpl.id ? 'Modifier template' : 'Nouveau template';
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10;">
+      <button class="btn" onclick="retourDepuisEditeurDiete()">← Retour</button>
+      <div style="flex:1;">
+        <div class="eyebrow">${isClient ? 'Diète client' : 'Template diète'}</div>
+        <div style="font-weight:700;font-size:15px;">${titre}</div>
+      </div>
+      <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
+    </div>
+    <div style="max-width:720px;padding:20px 24px;">
       <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
-      <div class="field-row"><label>Description (optionnelle)</label><input id="dDesc" type="text" value="${esc(tpl.description)}" placeholder="Contexte, objectifs…"></div>
-      ${totalM.kcal ? `<div style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;">
-        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal total</div></div>
+      <div class="field-row"><label>Description (optionnelle)</label><input id="dDesc" type="text" value="${esc(tpl.description||'')}" placeholder="Contexte, objectifs…"></div>
+      ${isClient ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" ${!_ficheCreateClientId?'':'checked'}> Enregistrer comme template réutilisable</label>` : ''}
+      <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;${totalM.kcal?'':'display:none;'}">
+        ${totalM.kcal ? `
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
-        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>
-      </div>` : ''}
+        <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>` : ''}
+      </div>
       ${repasHtml}
       <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px;" onclick="ajouterRepas()">+ Ajouter un repas</button>
       <div id="dErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
-      <div class="modal-actions">
-        <button class="btn" onclick="document.getElementById('modal-editeur-diete').remove()">Annuler</button>
-        <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
-      </div>
     </div>`;
-  if (!document.getElementById('modal-editeur-diete')) document.body.appendChild(overlay);
-  else { const old=document.getElementById('modal-editeur-diete'); old.replaceWith(overlay); }
+}
+
+function retourDepuisEditeurDiete() {
+  if (_ficheEditClientId) { _ficheEditClientId = null; setNav('fiche-client'); }
+  else if (_ficheCreateClientId) { _ficheCreateClientId = null; setNav('fiche-client'); }
+  else { setNav(_dietNavBack || 'dietes'); }
 }
 
 function ajouterRepas(){
   const maxOrdre = dieteTplEnEdition.repas.reduce((m,r) => Math.max(m, r.ordre != null ? r.ordre : 0), -1);
   dieteTplEnEdition.repas.push({ nom:`Repas ${maxOrdre+2}`, ordre:maxOrdre+1, variante_index:0, aliments:[] });
-  renderEditeurDiete();
+  setNav('editeur-diete');
 }
 
 function ajouterVarianteRepas(ordre){
@@ -3225,22 +3261,23 @@ function ajouterVarianteRepas(ordre){
   const maxVariante = existing.reduce((m,r) => Math.max(m, r.variante_index||0), 0);
   const mainNom = (existing.find(r=>(r.variante_index||0)===0)||existing[0]||{}).nom || 'Repas';
   dieteTplEnEdition.repas.push({ nom:mainNom+' (variante)', ordre, variante_index:maxVariante+1, aliments:[] });
-  renderEditeurDiete();
+  setNav('editeur-diete');
 }
 
 function supprimerRepas(ri){
   dieteTplEnEdition.repas.splice(ri,1);
-  renderEditeurDiete();
+  setNav('editeur-diete');
 }
 
 function supprimerAlimentDiete(ri, ai){
   dieteTplEnEdition.repas[ri].aliments.splice(ai,1);
-  renderEditeurDiete();
+  _updateAlimentsDom(ri);
 }
 
 function ouvrirAjoutAliment(ri){
   ajoutAlimRI = ri;
   ajoutAlimTab = 'base';
+  _ajoutAlimCount = 0;
   _renderModalAjoutAliment();
 }
 
@@ -3257,7 +3294,10 @@ function _renderModalAjoutAliment(){
   const baseList = alimentsCoachData || [];
   modal.innerHTML = `
     <div class="modal-box" style="max-width:460px;">
-      <h3>Ajouter un aliment</h3>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
+        <h3 style="margin:0;">Ajouter des aliments</h3>
+        ${ajoutAlimRI !== null && dieteTplEnEdition?.repas?.[ajoutAlimRI] ? `<span style="font-size:11px;color:var(--text-faint);">→ ${esc(dieteTplEnEdition.repas[ajoutAlimRI].nom)}</span>` : ''}
+      </div>
       <div class="modal-tabs">
         <button class="modal-tab ${ajoutAlimTab==='base'?'active':''}" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">📦 Base coach</button>
         <button class="modal-tab ${ajoutAlimTab==='off'?'active':''}" onclick="ajoutAlimTab='off';_renderModalAjoutAliment()">🌍 Open Food Facts</button>
@@ -3283,7 +3323,7 @@ function _renderModalAjoutAliment(){
             </div>`).join('')}
           ${baseList.length===0&&alimentsCoachData!==null?`<div style="text-align:center;padding:20px;color:var(--text-faint);">Base vide — ajoute des aliments depuis la page "Base alimentaire".</div>`:''}
         </div>
-        <div style="margin-top:10px;font-size:11.5px;color:var(--text-faint);">Clic sur un aliment → saisie de la quantité.</div>
+        <div id="picker-flash" style="font-size:11.5px;color:var(--success);min-height:18px;transition:opacity .4s;opacity:0;margin-top:6px;"></div>
       ` : ajoutAlimTab === 'off' ? `
         <div style="display:flex;gap:8px;margin-bottom:8px;">
           <input id="aOffSearch" type="text" placeholder="Rechercher (ex: riz complet)…" style="flex:1;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-family:inherit;"
@@ -3291,7 +3331,9 @@ function _renderModalAjoutAliment(){
           <button class="btn primary" onclick="_rechercherOFF()">Chercher</button>
         </div>
         <div class="alim-pick-list" id="aOffList"><div style="text-align:center;padding:20px;color:var(--text-faint);">Lance une recherche pour voir les résultats.</div></div>
+        <div id="picker-flash" style="font-size:11.5px;color:var(--success);min-height:18px;transition:opacity .4s;opacity:0;margin-top:6px;"></div>
       ` : `
+        <div id="picker-flash" style="font-size:11.5px;color:var(--success);min-height:18px;transition:opacity .4s;opacity:0;margin-bottom:4px;"></div>
         <div class="field-row"><label>Nom</label><input id="aNom" type="text" placeholder="ex: Riz complet cuit" style="font-size:16px;"></div>
         <div class="field-row"><label>Quantité (g)</label><input id="aQte" type="number" min="1" value="100" style="font-size:16px;"></div>
         <p style="font-size:11.5px;color:var(--text-faint);margin:0 0 8px;">Valeurs pour 100g</p>
@@ -3302,12 +3344,12 @@ function _renderModalAjoutAliment(){
           <div class="field-row" style="margin:0;"><label>Lip</label><input id="aLip" type="number" min="0" step="0.1" placeholder="0" style="font-size:16px;"></div>
         </div>
         <div id="aErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
-        <div class="modal-actions">
-          <button class="btn" onclick="document.getElementById('modal-ajout-aliment').remove()">Annuler</button>
-          <button class="btn primary" onclick="confirmerAjoutAliment()">Ajouter</button>
-        </div>
+        <button class="btn primary" style="width:100%;margin-bottom:8px;" onclick="confirmerAjoutAliment()">+ Ajouter cet aliment</button>
       `}
-      ${ajoutAlimTab !== 'manuel' ? `<div class="modal-actions" style="margin-top:12px;"><button class="btn" onclick="document.getElementById('modal-ajout-aliment').remove()">Annuler</button></div>` : ''}
+      <div class="modal-actions" style="margin-top:8px;border-top:1px solid var(--hairline);padding-top:10px;">
+        <span style="font-size:12px;color:var(--text-faint);">${_ajoutAlimCount > 0 ? `${_ajoutAlimCount} ajouté${_ajoutAlimCount>1?'s':''}` : ''}</span>
+        <button class="btn primary" onclick="document.getElementById('modal-ajout-aliment').remove()">✓ Terminer</button>
+      </div>
     </div>`;
 
   if (ajoutAlimTab === 'base' && alimentsCoachData === null && !alimentsCoachErr){
@@ -3369,14 +3411,15 @@ function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
   const modal = document.getElementById('modal-ajout-aliment');
   const box = modal.querySelector('.modal-box');
   box.innerHTML = `
-    <h3>${esc(nom)}</h3>
+    <h3 style="margin-bottom:4px;">${esc(nom)}</h3>
+    ${_ajoutAlimCount > 0 ? `<div style="font-size:11px;color:var(--success);margin-bottom:10px;">✓ ${_ajoutAlimCount} aliment${_ajoutAlimCount>1?'s':''} ajouté${_ajoutAlimCount>1?'s':''} à ce repas</div>` : ''}
     <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
       <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*100)}</div><div class="mu">/ 100g</div></div>
       <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*100)}g</div><div class="mu">/ 100g</div></div>
       <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*100)}g</div><div class="mu">/ 100g</div></div>
       <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*100)}g</div><div class="mu">/ 100g</div></div>
     </div>
-    <div class="field-row"><label>Quantité (g)</label><input id="aQteSelected" type="number" min="1" value="100" style="font-size:16px;"></div>
+    <div class="field-row"><label>Quantité (g)</label><input id="aQteSelected" type="number" min="1" value="100" style="font-size:16px;" onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg})"></div>
     <div class="modal-actions">
       <button class="btn" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">← Retour</button>
       <button class="btn primary" onclick="_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg})">Ajouter</button>
@@ -3387,8 +3430,15 @@ function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
 function _confirmerAlimSelectionne(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
   const qte = parseFloat(document.getElementById('aQteSelected').value)||0;
   dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal_pg, prot_par_gramme:prot_pg, glu_par_gramme:glu_pg, lip_par_gramme:lip_pg });
-  document.getElementById('modal-ajout-aliment').remove();
-  renderEditeurDiete();
+  _ajoutAlimCount++;
+  _updateAlimentsDom(ajoutAlimRI);
+  // Retour à la recherche avec flash de confirmation
+  ajoutAlimTab = 'base';
+  _renderModalAjoutAliment();
+  setTimeout(() => {
+    const flash = document.getElementById('picker-flash');
+    if (flash) { flash.textContent = `✓ ${nom} ajouté`; flash.style.opacity = '1'; setTimeout(()=>{ if(flash) flash.style.opacity='0'; }, 2500); }
+  }, 30);
 }
 
 function confirmerAjoutAliment(){
@@ -3401,8 +3451,15 @@ function confirmerAjoutAliment(){
   const glu  = (parseFloat(document.getElementById('aGlu').value)||0) / 100;
   const lip  = (parseFloat(document.getElementById('aLip').value)||0) / 100;
   dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip });
-  document.getElementById('modal-ajout-aliment').remove();
-  renderEditeurDiete();
+  _ajoutAlimCount++;
+  _updateAlimentsDom(ajoutAlimRI);
+  // Reset le formulaire pour un autre ajout manuel
+  document.getElementById('aNom').value = '';
+  document.getElementById('aQte').value = '100';
+  ['aKcal','aProt','aGlu','aLip'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  const flash = document.getElementById('picker-flash');
+  if (flash) { flash.textContent = `✓ ${nom} ajouté`; flash.style.opacity = '1'; setTimeout(()=>{ if(flash) flash.style.opacity='0'; }, 2500); }
+  setTimeout(()=>document.getElementById('aNom')?.focus(), 30);
 }
 
 async function sauvegarderDieteTemplate(){
@@ -3432,7 +3489,6 @@ async function sauvegarderDieteTemplate(){
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
-    document.getElementById('modal-editeur-diete').remove();
     dieteTemplatesData = null;
     dieteTemplatesData = await chargerDieteTemplates();
     if (_ficheEditClientId) {
@@ -3440,8 +3496,9 @@ async function sauvegarderDieteTemplate(){
       _ficheEditClientId = null;
       await openPanel(cid);
       setFicheTab('diete');
+      setNav('fiche-client');
     } else {
-      renderDieteTemplatesSub();
+      setNav('dietes');
     }
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
 }
@@ -4658,22 +4715,9 @@ let _ficheEditClientId = null;   // clientId en cours d'édition diète
 
 function ouvrirCreerDietePourClient(clientId) {
   _ficheCreateClientId = clientId;
-  ouvrirEditeurDiete(null);
-  // Modifier le titre et le bouton save du modal
-  setTimeout(() => {
-    const modal = document.getElementById('modal-editeur-diete');
-    if (!modal) return;
-    const h3 = modal.querySelector('h3');
-    if (h3) h3.textContent = 'Nouvelle diète pour ce client';
-    // Ajouter checkbox "aussi comme template"
-    const actions = modal.querySelector('.modal-actions');
-    if (actions && !modal.querySelector('#cbDieteCommeTemplate')) {
-      const cb = document.createElement('label');
-      cb.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-right:auto;cursor:pointer;';
-      cb.innerHTML = `<input type="checkbox" id="cbDieteCommeTemplate" checked> Enregistrer comme template réutilisable`;
-      actions.insertBefore(cb, actions.firstChild);
-    }
-  }, 50);
+  _dietNavBack = 'fiche-client';
+  dieteTplEnEdition = { id:null, nom:'', description:'', repas:[{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }] };
+  setNav('editeur-diete');
 }
 
 async function sauvegarderDietePourClient() {
@@ -4708,16 +4752,18 @@ async function sauvegarderDietePourClient() {
     await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
       { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: _ficheCreateClientId, nom: tpl.nom, actif: true }) });
     dieteTemplatesData = null;
-    document.getElementById('modal-editeur-diete').remove();
+    const cid = _ficheCreateClientId;
     _ficheCreateClientId = null;
-    // Recharger la fiche (openPanel recharge tout et reste sur fiche-client)
-    await openPanel(state.selected);
+    await openPanel(cid);
+    setFicheTab('diete');
+    setNav('fiche-client');
     setFicheTab('diete');
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
 }
 
 async function editerDieteClient(nomDiete, clientId) {
   _ficheEditClientId = clientId;
+  _dietNavBack = 'fiche-client';
   const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nomDiete)}&select=*`, { headers: supaHeaders() });
   if (!res.ok) { alert('Erreur chargement template'); _ficheEditClientId = null; return; }
   const tpls = await res.json();
@@ -4730,7 +4776,7 @@ async function editerDieteClient(nomDiete, clientId) {
     repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
   };
   if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
-  renderEditeurDiete();
+  setNav('editeur-diete');
 }
 
 function ouvrirCreerProgrammePourClient(clientId) {
