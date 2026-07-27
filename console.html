@@ -4978,20 +4978,27 @@ async function migrerSelectionMensu() {
       return null;
     }));
 
+    // Convertit string FR ("65,5") ou number → float ou null
+    const _num = v => {
+      if (v == null || v === '') return null;
+      const n = parseFloat(String(v).replace(',', '.'));
+      return isNaN(n) ? null : n;
+    };
+
     const rows = selected.map(({ isoDate, raw }, i) => {
       const d = detailResults[i] || {};
       return {
         client_id: migPreviewClientId,
         date: isoDate,
         phase: raw.phase || d.phase || null,
-        poids: raw.poids != null ? raw.poids : (d.poids != null ? d.poids : null),
-        mesure: raw.taille != null ? raw.taille : (d.taille != null ? d.taille : null),
-        fessiers: d.fessiers != null ? d.fessiers : (raw.fessiers != null ? raw.fessiers : null),
-        cuisses:  d.cuisses  != null ? d.cuisses  : (raw.cuisses  != null ? raw.cuisses  : null),
-        mollets:  d.mollets  != null ? d.mollets  : (raw.mollets  != null ? raw.mollets  : null),
-        poitrine: d.poitrine != null ? d.poitrine : (raw.poitrine != null ? raw.poitrine : null),
-        epaules:  d.epaules  != null ? d.epaules  : (raw.epaules  != null ? raw.epaules  : null),
-        bras:     d.bras     != null ? d.bras     : (raw.bras     != null ? raw.bras     : null),
+        poids:    _num(raw.poids   ?? d.poids),
+        mesure:   _num(raw.taille  ?? d.taille),
+        fessiers: _num(d.fessiers  ?? raw.fessiers),
+        cuisses:  _num(d.cuisses   ?? raw.cuisses),
+        mollets:  _num(d.mollets   ?? raw.mollets),
+        poitrine: _num(d.poitrine  ?? raw.poitrine),
+        epaules:  _num(d.epaules   ?? raw.epaules),
+        bras:     _num(d.bras      ?? raw.bras),
       };
     });
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
