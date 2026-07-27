@@ -4680,8 +4680,28 @@ async function _chargerMigPreviewData(clientId) {
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
     migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
     migBilanSel = new Set(gasBilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).map(b => b.ligneTitre));
-    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, gasSaisiesMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, gasSaisiesMensurations, gasMensurationsDetail: {}, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
+
+    // Charger les détails complets (fessiers, cuisses, etc.) en arrière-plan
+    if (gasSaisiesMensurations.length) {
+      const details = {};
+      await Promise.all(gasSaisiesMensurations.map(async s => {
+        if (s.ligne == null) return;
+        try {
+          const raw = await apiGasProd('chargerSaisieMensuration', clientId, { ligne: s.ligne });
+          const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (d && s.date) details[s.date] = d;
+        } catch(e) {}
+      }));
+      if (migPreviewClientId === clientId) {
+        migPreviewData.gasMensurationsDetail = details;
+        if (state.nav === 'migration-preview' && migPreviewTab === 'mensurations') {
+          const content = document.getElementById('migPreviewContent');
+          if (content) content.innerHTML = _renderMigPreviewTabContent();
+        }
+      }
+    }
   } catch(e) {
     migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [], gasDietes: [], gasFeuilles: [], supaClientDietes: [], supaClientProgs: [] };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
@@ -4835,27 +4855,30 @@ function _renderMigPreviewMensurations() {
 
   if (!gasRows.length) return `<div style="color:var(--text-faint);padding:24px;">Aucune mensuration dans GAS pour ce client.</div>`;
 
+  const details = migPreviewData.gasMensurationsDetail || {};
+  const detailsLoaded = Object.keys(details).length > 0 || (migPreviewData.gasSaisiesMensurations||[]).length === 0;
   const rows = gasRows.map(r => {
     const isoDate = _parseDateFr(r.date);
     const exists = isoDate && supaDateSet.has(isoDate);
     const checked = isoDate && migPreviewSel.has(isoDate);
     const statusColor = exists ? 'var(--text-faint)' : 'var(--success)';
     const statusLabel = exists ? 'Déjà migré' : 'Nouveau';
+    const d = details[r.date] || {};
     const _cm = v => v!=null&&v!==''?v+' cm':'—';
     return `<tr style="opacity:${exists&&!checked?'0.5':'1'};">
       <td style="padding:6px 12px;width:36px;">
         ${isoDate ? `<input type="checkbox" ${checked?'checked':''} onchange="toggleMigPreviewSel('${isoDate}',this.checked)" style="accent-color:var(--accent);">` : ''}
       </td>
       <td class="mono" style="font-size:12px;padding:6px 12px;">${esc(r.date||'')}</td>
-      <td style="font-size:12px;padding:6px 12px;color:var(--text-faint);">${esc(r.phase||'—')}</td>
-      <td style="font-size:12px;padding:6px 12px;">${r.poids!=null?r.poids+' kg':'—'}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.taille)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.fessiers)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.cuisses)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.mollets)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.poitrine)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.epaules)}</td>
-      <td style="font-size:12px;padding:6px 12px;">${_cm(r.bras)}</td>
+      <td style="font-size:12px;padding:6px 12px;color:var(--text-faint);">${esc(r.phase||d.phase||'—')}</td>
+      <td style="font-size:12px;padding:6px 12px;">${r.poids!=null?r.poids+' kg':(d.poids!=null?d.poids+' kg':'—')}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.taille??d.taille)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.fessiers):'…'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.cuisses):'…'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.mollets):'…'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.poitrine):'…'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.epaules):'…'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${detailsLoaded?_cm(d.bras):'…'}</td>
       <td style="font-size:11px;padding:6px 12px;color:${statusColor};">${statusLabel}</td>
     </tr>`;
   }).join('');
