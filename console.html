@@ -3093,7 +3093,8 @@ async function ouvrirEditeurProgrammeClient(progId){
       seances: (b.client_programme_seances||[]).map(s => ({
         id: s.id, titre: s.titre,
         exercices: (s.client_programme_exercices||[]).map(ex => {
-          const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+          const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id) ||
+                         (exercicesData||[]).find(e=>e.nom.toLowerCase()===(ex.nom||'').toLowerCase());
           return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir };
         })
       }))
