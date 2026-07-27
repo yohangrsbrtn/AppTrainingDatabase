@@ -128,6 +128,96 @@ function renderPcSelectorPage() {
   </div>`;
 }
 
+function _pcMusclePanelHtml(seance) {
+  const muscles = {};
+  (seance.client_programme_exercices || []).forEach(ex => {
+    const g = ex.groupe_musculaire || ex.muscle || ex.groupe || null;
+    if (!g) return;
+    muscles[g] = (muscles[g] || 0) + (parseInt(ex.series) || 3);
+  });
+  const entries = Object.entries(muscles).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return '';
+  return `<div style="margin-bottom:10px;">
+    <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Muscles</div>
+    ${entries.map(([g, s]) => `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+      <span style="font-size:11px;color:var(--text);line-height:1.2;">${esc(g)}</span>
+      <span style="font-size:11px;font-weight:700;color:var(--accent);margin-left:4px;">${s}S</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+function _pcRenderChart(seance) {
+  const totalSem = _pcTotalSemaines();
+  if (totalSem < 2) return '';
+  const exos   = (seance.client_programme_exercices || []).slice(0, 4);
+  const colors = ['#378ADD', '#1D9E75', '#D85A30', '#a78bfa'];
+  const W = 130, H = 60, PAD = 6;
+
+  const series = exos.map((ex, ei) => {
+    const data = [];
+    for (let sem = 1; sem <= totalSem; sem++) {
+      const charges = [];
+      for (let s = 1; s <= (parseInt(ex.series) || 3); s++) {
+        const log = _pcLogs[ex.id + '|' + sem + '|' + s];
+        if (log?.charge) charges.push(parseFloat(log.charge));
+      }
+      data.push(charges.length ? Math.max(...charges) : null);
+    }
+    return { nom: ex.nom, data, color: colors[ei] };
+  });
+
+  const allVals = series.flatMap(s => s.data.filter(v => v != null));
+  if (!allVals.length) return `<div style="font-size:10px;color:var(--muted);text-align:center;padding:8px 0;font-style:italic;">Aucun log</div>`;
+
+  const minV = Math.min(...allVals), maxV = Math.max(...allVals);
+  const rangeV = maxV - minV || 1;
+  const xOf = sem => PAD + (sem - 1) / (totalSem - 1) * (W - 2 * PAD);
+  const yOf = v   => H - PAD - (v - minV) / rangeV * (H - 2 * PAD);
+
+  let paths = '';
+  series.forEach(s => {
+    let d = '', last = null;
+    s.data.forEach((v, i) => {
+      if (v == null) { last = null; return; }
+      const x = xOf(i + 1).toFixed(1), y = yOf(v).toFixed(1);
+      d += last ? `L${x},${y}` : `M${x},${y}`;
+      last = { x, y };
+    });
+    if (d) paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    s.data.forEach((v, i) => {
+      if (v == null) return;
+      paths += `<circle cx="${xOf(i+1).toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="2" fill="${s.color}"/>`;
+    });
+  });
+
+  const legend = series.filter(s => s.data.some(v => v != null)).map(s =>
+    `<div style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--muted);line-height:1.2;">
+      <div style="width:10px;height:2px;background:${s.color};border-radius:1px;flex-shrink:0;"></div>
+      <span>${esc(s.nom.length > 12 ? s.nom.substring(0, 11) + '…' : s.nom)}</span>
+    </div>`).join('');
+
+  return `<div>
+    <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Progression charge</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;">
+      <line x1="${PAD}" y1="${PAD}" x2="${PAD}" y2="${H-PAD}" stroke="#333" stroke-width="0.5"/>
+      <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="#333" stroke-width="0.5"/>
+      ${paths}
+    </svg>
+    <div style="display:flex;flex-direction:column;gap:3px;margin-top:4px;">${legend}</div>
+  </div>`;
+}
+
+function _pcRightPanel(seance) {
+  const musclesHtml = _pcMusclePanelHtml(seance);
+  const chartHtml   = _pcRenderChart(seance);
+  if (!musclesHtml && !chartHtml) return '';
+  return `<div class="card" style="padding:10px;margin-bottom:0;margin-top:0;">
+    ${musclesHtml}
+    ${musclesHtml && chartHtml ? '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' : ''}
+    ${chartHtml}
+  </div>`;
+}
+
 function renderPcSeancePage() {
   const seance = _pcAllSeances().find(s => s.id === _pcSeanceId);
   if (!seance) { _pcSubPage = 'selector'; return renderPcSelectorPage(); }
@@ -155,9 +245,9 @@ function renderPcSeancePage() {
       }
       setsHtml += refPrec + `<div class="set-row">
         <span class="set-num">S${s}</span>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Reps"   value="${log.reps   != null ? log.reps   : ''}" onchange="pcSauverLog(${ex.id},${s},'reps',this.value)">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Charge" value="${log.charge != null ? log.charge : ''}" onchange="pcSauverLog(${ex.id},${s},'charge',this.value)">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   onchange="pcSauverLog(${ex.id},${s},'rir',this.value)">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"   style="padding:6px 2px;font-size:14px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" onchange="pcSauverLog(${ex.id},${s},'charge',this.value)" style="padding:6px 2px;font-size:14px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"    style="padding:6px 2px;font-size:14px;">
       </div>`;
     }
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
@@ -169,33 +259,36 @@ function renderPcSeancePage() {
       ex.rir    ? '· RIR ' + ex.rir     : ''
     ].filter(Boolean).join(' ');
 
-    return `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-        <div style="flex:1;">
-          <div style="font-size:16px;font-weight:600;">${idx + 1}. ${esc(ex.nom)}</div>
-          ${cible ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">${cible}</div>` : ''}
+    return `<div class="card" style="padding:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;line-height:1.3;">${idx + 1}. ${esc(ex.nom)}</div>
+          ${cible ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cible}</div>` : ''}
         </div>
-        ${ex.repos ? `<button class="chrono-btn" onclick="pcLancerChrono('${esc(ex.repos)}')">⏱ ${esc(ex.repos)}</button>` : ''}
+        ${ex.repos ? `<button class="chrono-btn" style="font-size:11px;padding:5px 7px;" onclick="pcLancerChrono('${esc(ex.repos)}')">⏱</button>` : ''}
       </div>
       ${setsHtml}
-      <div style="margin-top:10px;">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px;">Note</div>
-        <textarea class="bilan-input" rows="1" placeholder="Ajouter une note…"
-          onchange="pcSauverCommentaire(${ex.id},this.value)"
-          style="margin-top:4px;font-size:16px;">${esc(commentaireLog.commentaire || '')}</textarea>
-      </div>
+      <textarea class="bilan-input" rows="1" placeholder="Note…"
+        onchange="pcSauverCommentaire(${ex.id},this.value)"
+        style="margin-top:6px;font-size:16px;">${esc(commentaireLog.commentaire || '')}</textarea>
     </div>`;
   }).join('') || `<div class="empty"><div class="empty-text">Aucun exercice dans cette séance.</div></div>`;
 
+  const rightPanel = _pcRightPanel(seance);
   return `<div id="app">
     ${renderHeader(esc(seance.titre), 'Semaine ' + _pcSemaine, false)}
     <div class="page">
-      <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSeanceNav(this.value)">${optsSeances}</select>
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSemaineNav(this.value)">${optsSemaines}</select>
       </div>
-      ${exosHtml}
-      <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;">← Retour</button>
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <div style="flex:1.5;min-width:0;">
+          ${exosHtml}
+          <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
+        </div>
+        ${rightPanel ? `<div style="flex:1;min-width:110px;max-width:155px;position:sticky;top:8px;">${rightPanel}</div>` : ''}
+      </div>
     </div>
     <div id="pcChronoOverlay" style="display:none;"></div>
     ${renderNavBar('training')}

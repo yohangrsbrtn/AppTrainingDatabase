@@ -44,6 +44,7 @@ let _dScanTraitementEnCours = false; // verrou anti double-décodage pendant le 
 // pas marché). `this` dans un attribut onclick pointe l'élément cliqué, d'où l'appel
 // _guardAction(fn, this) plutôt qu'un simple _guardAction(fn).
 let _dActionEnCours = false;
+let _dEditAliment = null; // { repasIdx, varIdx, alimIdx, ref: aliment }
 async function _guardAction(fn, btn) {
   if (_dActionEnCours) return;
   _dActionEnCours = true;
@@ -145,7 +146,8 @@ async function ouvrirDieteSupabase(templateNom) {
         cals: Math.round(kcal*q),
         prot: Math.round(prot*q*10)/10,
         glu:  Math.round(glu*q*10)/10,
-        lip:  Math.round(lip*q*10)/10 };
+        lip:  Math.round(lip*q*10)/10,
+        kcalPG: kcal, protPG: prot, gluPG: glu, lipPG: lip };
     });
 
     _dDetail = {
@@ -290,12 +292,12 @@ function renderDieteDetail() {
       options.forEach((opt, oIdx) => {
         repasHtml += `<div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
           ${oIdx > 0 ? `<div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(opt.nom)}</div>` : ''}
-          ${rendreCorpsRepas(opt)}
+          ${rendreCorpsRepas(opt, idx, oIdx)}
         </div>`;
       });
       repasHtml += `</div>`;
     } else {
-      repasHtml += rendreCorpsRepas(options[0]);
+      repasHtml += rendreCorpsRepas(options[0], idx, 0);
     }
 
     repasHtml += `</div>`;
@@ -339,30 +341,153 @@ function renderDieteDetail() {
       ${repasHtml}
     </div>
     ${renderNavBar('diete')}
+    <div id="dEditOverlay" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:1000;"></div>
   </div>`;
 }
 
-function rendreCorpsRepas(r) {
+function rendreCorpsRepas(r, ri, vi) {
   let sCals = 0, sProt = 0, sGlu = 0, sLip = 0;
   (r.aliments || []).forEach(a => {
-    const cals = a.cals != null ? a.cals : (a.kcal || 0);
-    sCals += cals; sProt += a.prot || 0;
-    sGlu  += a.glu  || 0; sLip += a.lip || 0;
+    sCals += a.cals != null ? a.cals : (a.kcal || 0);
+    sProt += a.prot || 0; sGlu += a.glu || 0; sLip += a.lip || 0;
   });
 
-  const aliments = (r.aliments || []).map(a => `
-    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
-      <div style="font-size:14px;">${esc(a.nom)}${a.modifie ? `<span style="display:inline-block;font-size:8px;font-weight:700;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">modifié</span>` : ''}</div>
-      <div style="font-size:13px;color:var(--muted);white-space:nowrap;margin-left:10px;">${a.qte != null ? a.qte : Math.round(a.quantite||0)}${a.unite ? ' ' + a.unite : 'g'}</div>
-    </div>`).join('');
-
-  return `${aliments}
-    <div style="display:flex;justify-content:space-around;text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid #378ADD;">
-      <div><span style="font-size:14px;font-weight:600;">${Math.round(sCals)}</span><div class="macro-label">KCAL</div></div>
-      <div><span style="font-size:14px;font-weight:600;color:#378ADD;">${Math.round(sProt)}</span><div class="macro-label">PROT</div></div>
-      <div><span style="font-size:14px;font-weight:600;color:var(--green);">${Math.round(sGlu)}</span><div class="macro-label">GLU</div></div>
-      <div><span style="font-size:14px;font-weight:600;color:#D85A30;">${Math.round(sLip)}</span><div class="macro-label">LIP</div></div>
+  const editable = ri != null && vi != null;
+  const aliments = (r.aliments || []).map((a, ai) => {
+    const cals = a.cals != null ? a.cals : (a.kcal || 0);
+    const prot = a.prot || 0, glu = a.glu || 0, lip = a.lip || 0;
+    const qte  = a.qte != null ? a.qte : Math.round(a.quantite || 0);
+    const canEdit = editable && a.kcalPG != null;
+    return `<div ${editable ? `id="dAlim_${ri}_${vi}_${ai}"` : ''}
+      style="padding:7px 0;border-bottom:1px solid var(--border);${canEdit ? 'cursor:pointer;' : ''}"
+      ${canEdit ? `onclick="ouvrirEditAliment(${ri},${vi},${ai})"` : ''}>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <div style="font-size:13px;flex:1;line-height:1.3;">${esc(a.nom)}${a.modifie ? `<span style="font-size:8px;font-weight:700;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">modifié</span>` : ''}</div>
+        <div class="d-alim-qte" style="font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;">${qte}${a.unite ? ' ' + a.unite : 'g'}</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:3px;align-items:center;">
+        <span class="d-alim-cals" style="font-size:11px;font-weight:600;">${Math.round(cals)} kcal</span>
+        <span class="d-alim-prot" style="font-size:11px;font-weight:600;color:#378ADD;">${Number(prot.toFixed(1))}P</span>
+        <span class="d-alim-glu"  style="font-size:11px;font-weight:600;color:var(--green);">${Number(glu.toFixed(1))}G</span>
+        <span class="d-alim-lip"  style="font-size:11px;font-weight:600;color:#D85A30;">${Number(lip.toFixed(1))}L</span>
+        ${canEdit ? `<span style="font-size:10px;color:#a78bfa;margin-left:auto;">✎</span>` : ''}
+      </div>
     </div>`;
+  }).join('');
+
+  const totId = editable ? `id="dRepasTot_${ri}_${vi}"` : '';
+  return `${aliments}
+    <div ${totId} style="display:flex;justify-content:space-around;text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid #378ADD;">
+      <div><span class="d-rtot" style="font-size:14px;font-weight:600;">${Math.round(sCals)}</span><div class="macro-label">KCAL</div></div>
+      <div><span class="d-rtot" style="font-size:14px;font-weight:600;color:#378ADD;">${Math.round(sProt)}</span><div class="macro-label">PROT</div></div>
+      <div><span class="d-rtot" style="font-size:14px;font-weight:600;color:var(--green);">${Math.round(sGlu)}</span><div class="macro-label">GLU</div></div>
+      <div><span class="d-rtot" style="font-size:14px;font-weight:600;color:#D85A30;">${Math.round(sLip)}</span><div class="macro-label">LIP</div></div>
+    </div>`;
+}
+
+// ── Édition d'aliment (modification de quantité en temps réel) ──────────────
+
+function _dGetAliments(repasIdx) {
+  const vi = _dCurrentOpt[repasIdx] || 0;
+  const r  = _dDetail.repas[repasIdx];
+  return { aliments: vi === 0 ? r.aliments : ((r.equivalences || [])[vi - 1]?.aliments || []), vi };
+}
+
+function ouvrirEditAliment(ri, vi, ai) {
+  const r = _dDetail.repas[ri];
+  const aliments = vi === 0 ? r.aliments : ((r.equivalences || [])[vi - 1]?.aliments || []);
+  const a = aliments[ai];
+  if (!a || a.kcalPG == null) return;
+  _dEditAliment = { ri, vi, ai, ref: a };
+  const overlay = document.getElementById('dEditOverlay');
+  if (!overlay) return;
+  overlay.innerHTML = _dEditModalHtml(a);
+  overlay.style.display = 'block';
+}
+
+function _dEditModalHtml(a) {
+  const qte  = a.qte != null ? a.qte : 0;
+  const cals = Math.round((a.kcalPG || 0) * qte);
+  const prot = ((a.protPG || 0) * qte).toFixed(1);
+  const glu  = ((a.gluPG  || 0) * qte).toFixed(1);
+  const lip  = ((a.lipPG  || 0) * qte).toFixed(1);
+  return `<div style="background:#1a1d29;border-top:2px solid #a78bfa;padding:20px 16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));">
+    <div style="font-size:13px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">${esc(a.nom)}</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <label style="font-size:13px;color:var(--muted);white-space:nowrap;">Quantité (g)</label>
+      <input id="dEditQte" type="number" inputmode="decimal" value="${qte}" step="5" min="0"
+        style="flex:1;background:#2d3142;border:1px solid #444;color:#fff;border-radius:8px;padding:10px;font-size:16px;text-align:center;"
+        oninput="dLiveUpdateAliment(this.value)">
+    </div>
+    <div id="dEditMacros" style="display:flex;justify-content:space-around;text-align:center;background:#2d3142;border-radius:10px;padding:12px;margin-bottom:16px;">
+      <div><div style="font-size:18px;font-weight:700;">${cals}</div><div style="font-size:10px;color:var(--muted);">KCAL</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:#378ADD;">${prot}</div><div style="font-size:10px;color:var(--muted);">PROT</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:var(--green);">${glu}</div><div style="font-size:10px;color:var(--muted);">GLU</div></div>
+      <div><div style="font-size:18px;font-weight:700;color:#D85A30;">${lip}</div><div style="font-size:10px;color:var(--muted);">LIP</div></div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="dFermerEditModal()" style="flex:1;padding:13px;background:#2d3142;color:white;border:none;border-radius:8px;font-size:15px;cursor:pointer;">Annuler</button>
+      <button onclick="dConfirmEditAliment()" style="flex:2;padding:13px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);color:white;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">✓ Valider</button>
+    </div>
+  </div>`;
+}
+
+function dLiveUpdateAliment(qteStr) {
+  if (!_dEditAliment) return;
+  const a    = _dEditAliment.ref;
+  const newQte = Math.max(0, parseFloat(qteStr) || 0);
+  const cals = Math.round((a.kcalPG || 0) * newQte);
+  const prot = ((a.protPG || 0) * newQte).toFixed(1);
+  const glu  = ((a.gluPG  || 0) * newQte).toFixed(1);
+  const lip  = ((a.lipPG  || 0) * newQte).toFixed(1);
+
+  const macrosEl = document.getElementById('dEditMacros');
+  if (macrosEl) macrosEl.innerHTML = `
+    <div><div style="font-size:18px;font-weight:700;">${cals}</div><div style="font-size:10px;color:var(--muted);">KCAL</div></div>
+    <div><div style="font-size:18px;font-weight:700;color:#378ADD;">${prot}</div><div style="font-size:10px;color:var(--muted);">PROT</div></div>
+    <div><div style="font-size:18px;font-weight:700;color:var(--green);">${glu}</div><div style="font-size:10px;color:var(--muted);">GLU</div></div>
+    <div><div style="font-size:18px;font-weight:700;color:#D85A30;">${lip}</div><div style="font-size:10px;color:var(--muted);">LIP</div></div>`;
+
+  a.qte  = newQte;
+  a.cals = cals;
+  a.prot = parseFloat(prot);
+  a.glu  = parseFloat(glu);
+  a.lip  = parseFloat(lip);
+
+  const { ri, vi, ai } = _dEditAliment;
+  const alimEl = document.getElementById(`dAlim_${ri}_${vi}_${ai}`);
+  if (alimEl) {
+    const q = alimEl.querySelector('.d-alim-qte');   if (q) q.textContent = newQte + 'g';
+    const c = alimEl.querySelector('.d-alim-cals');  if (c) c.textContent = cals + ' kcal';
+    const p = alimEl.querySelector('.d-alim-prot');  if (p) p.textContent = prot + 'P';
+    const g = alimEl.querySelector('.d-alim-glu');   if (g) g.textContent = glu  + 'G';
+    const l = alimEl.querySelector('.d-alim-lip');   if (l) l.textContent = lip  + 'L';
+  }
+
+  const r      = _dDetail.repas[ri];
+  const alims  = vi === 0 ? r.aliments : ((r.equivalences || [])[vi - 1]?.aliments || []);
+  const tot    = _sommeAliments(alims);
+  const totEl  = document.getElementById(`dRepasTot_${ri}_${vi}`);
+  if (totEl) {
+    const spans = totEl.querySelectorAll('.d-rtot');
+    const vals  = [Math.round(tot.cals), Math.round(tot.prot), Math.round(tot.glu), Math.round(tot.lip)];
+    spans.forEach((s, i) => { s.textContent = vals[i]; });
+  }
+
+  if (_dOptionTotals[ri]) _dOptionTotals[ri][vi] = tot;
+  _recalcDieteTotal();
+}
+
+function dConfirmEditAliment() {
+  const qteEl = document.getElementById('dEditQte');
+  if (qteEl) dLiveUpdateAliment(qteEl.value);
+  dFermerEditModal();
+}
+
+function dFermerEditModal() {
+  _dEditAliment = null;
+  const overlay = document.getElementById('dEditOverlay');
+  if (overlay) overlay.style.display = 'none';
 }
 
 // ── Onglet "Mes menus" ───────────────────────────────────────────────────────
