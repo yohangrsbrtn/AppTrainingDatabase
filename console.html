@@ -4623,7 +4623,7 @@ async function migrerProfils() {
 // ── Migration Preview ──────────────────────────────────────────────────
 let migPreviewClientId = null;
 let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'diete' | 'programme'
-let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasBilans: null, supaBilanLignes: null };
+let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasBilans: null, supaBilanLignes: null };
 let migPreviewSel = new Set(); // dates ISO sélectionnées pour migration mensu
 let migBilanSel = new Set(); // ligneTitres sélectionnés pour migration bilans
 let migPreviewDieteSel = null;      // {nom, ligne, col} sélectionnée
@@ -4639,7 +4639,7 @@ let migPreviewSeancesLoading = false;
 function openMigrationPreview(clientId) {
   migPreviewClientId = clientId;
   migPreviewTab = 'infos';
-  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
+  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
   migPreviewSel = new Set();
   migBilanSel = new Set();
   migPreviewDieteSel = null; migPreviewDieteDetail = null; migPreviewDieteLoading = false;
@@ -4652,12 +4652,13 @@ function openMigrationPreview(clientId) {
 
 async function _chargerMigPreviewData(clientId) {
   try {
-    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasDietesRaw, gasFeuilles, gasBilansRaw, supaBilansRes] = await Promise.all([
+    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasSaisiesRaw, gasDietesRaw, gasFeuilles, gasBilansRaw, supaBilansRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
       apiGasProd('chargerMensurations', clientId).catch(() => []),
+      apiGasProd('listerSaisiesMensurations', clientId).catch(() => []),
       apiGasProd('listerDietes', clientId).catch(() => []),
       apiGasProd('listerFeuilles', clientId).catch(() => []),
       apiGasProd('chargerHistoriqueBilans', clientId).catch(() => []),
@@ -4667,8 +4668,9 @@ async function _chargerMigPreviewData(clientId) {
     const supaMensurations = supaMenuRes.ok   ? await supaMenuRes.json()    : [];
     const supaClientDietes = supaCliDietesRes.ok ? await supaCliDietesRes.json() : [];
     const supaClientProgs  = supaCliProgsRes.ok  ? await supaCliProgsRes.json()  : [];
-    const gasMensurations  = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
-    const gasDietes        = (typeof gasDietesRaw === 'string' ? JSON.parse(gasDietesRaw) : gasDietesRaw) || [];
+    const gasMensurations       = (typeof gasMenuRaw    === 'string' ? JSON.parse(gasMenuRaw)    : gasMenuRaw)    || [];
+    const gasSaisiesMensurations = (typeof gasSaisiesRaw === 'string' ? JSON.parse(gasSaisiesRaw) : gasSaisiesRaw) || [];
+    const gasDietes              = (typeof gasDietesRaw  === 'string' ? JSON.parse(gasDietesRaw)  : gasDietesRaw)  || [];
     const _gasBilansUnwrap = (typeof gasBilansRaw === 'string') ? (() => { try { return JSON.parse(gasBilansRaw); } catch { return []; } })() : gasBilansRaw;
     const gasBilans        = Array.isArray(_gasBilansUnwrap) ? _gasBilansUnwrap : [];
     const supaBilansRows   = supaBilansRes?.ok ? (await supaBilansRes.json().catch(() => [])) : [];
@@ -4678,7 +4680,7 @@ async function _chargerMigPreviewData(clientId) {
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
     migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
     migBilanSel = new Set(gasBilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).map(b => b.ligneTitre));
-    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, gasSaisiesMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
   } catch(e) {
     migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [], gasDietes: [], gasFeuilles: [], supaClientDietes: [], supaClientProgs: [] };
@@ -4932,22 +4934,43 @@ async function migrerSelectionMensu() {
   document.querySelectorAll('#migPreviewContent .btn.primary').forEach(b => b.disabled = true);
   try {
     const gasRows = migPreviewData.gasMensurations || [];
-    const rows = gasRows
+    const saisies = migPreviewData.gasSaisiesMensurations || [];
+    // Index saisies par date FR pour retrouver la ligne GAS
+    const saisieByDate = {};
+    saisies.forEach(s => { if (s.date) saisieByDate[s.date] = s; });
+
+    const selected = gasRows
       .map(r => ({ isoDate: _parseDateFr(r.date), raw: r }))
-      .filter(({ isoDate }) => isoDate && migPreviewSel.has(isoDate))
-      .map(({ isoDate, raw }) => ({
+      .filter(({ isoDate }) => isoDate && migPreviewSel.has(isoDate));
+
+    // Charger le détail complet pour chaque entrée sélectionnée (fessiers, cuisses, etc.)
+    const detailResults = await Promise.all(selected.map(async ({ raw }) => {
+      const saisie = saisieByDate[raw.date];
+      if (saisie && saisie.ligne != null) {
+        try {
+          const detail = await apiGasProd('chargerSaisieMensuration', migPreviewClientId, { ligne: saisie.ligne });
+          return typeof detail === 'string' ? JSON.parse(detail) : detail;
+        } catch(e) { return null; }
+      }
+      return null;
+    }));
+
+    const rows = selected.map(({ isoDate, raw }, i) => {
+      const d = detailResults[i] || {};
+      return {
         client_id: migPreviewClientId,
         date: isoDate,
-        phase: raw.phase || null,
-        poids: raw.poids != null ? raw.poids : null,
-        mesure: raw.taille != null ? raw.taille : null,
-        fessiers: raw.fessiers != null ? raw.fessiers : null,
-        cuisses: raw.cuisses != null ? raw.cuisses : null,
-        mollets: raw.mollets != null ? raw.mollets : null,
-        poitrine: raw.poitrine != null ? raw.poitrine : null,
-        epaules: raw.epaules != null ? raw.epaules : null,
-        bras: raw.bras != null ? raw.bras : null,
-      }));
+        phase: raw.phase || d.phase || null,
+        poids: raw.poids != null ? raw.poids : (d.poids != null ? d.poids : null),
+        mesure: raw.taille != null ? raw.taille : (d.taille != null ? d.taille : null),
+        fessiers: d.fessiers != null ? d.fessiers : (raw.fessiers != null ? raw.fessiers : null),
+        cuisses:  d.cuisses  != null ? d.cuisses  : (raw.cuisses  != null ? raw.cuisses  : null),
+        mollets:  d.mollets  != null ? d.mollets  : (raw.mollets  != null ? raw.mollets  : null),
+        poitrine: d.poitrine != null ? d.poitrine : (raw.poitrine != null ? raw.poitrine : null),
+        epaules:  d.epaules  != null ? d.epaules  : (raw.epaules  != null ? raw.epaules  : null),
+        bras:     d.bras     != null ? d.bras     : (raw.bras     != null ? raw.bras     : null),
+      };
+    });
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
