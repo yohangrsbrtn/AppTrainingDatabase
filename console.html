@@ -5701,6 +5701,7 @@ async function migrerProgressionGAS(clientId) {
       titre_actif: gas.titreActif ?? gas.titre_actif ?? null,
       seen_titres: gas.seenTitres ?? gas.seen_titres ?? 0,
       pas_total: gas.pasTotal ?? gas.pas_total ?? 0,
+      xp_total: gas.xpTotal ?? gas.xp_total ?? 0,
       updated_at: new Date().toISOString()
     };
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {

@@ -40,11 +40,12 @@ async function chargerProgressionSupabase() {
   });
   historiqueXP.splice(5);
 
-  // pas_total stocké dans client_progression sert de plancher (GAS a pu tracker des pas
-  // non présents dans les bilans migrés)
+  // pas_total et xp_total stockés dans client_progression servent de plancher
+  // (GAS a pu tracker des données non présentes dans les bilans migrés)
   const pasTotal = Math.max(pasTotalBilans, progRow.pas_total || 0);
 
-  const xpTotal = bilansValidies * 100 + seancesValidees * 50;
+  const xpFromBilans = bilansValidies * 100 + seancesValidees * 50;
+  const xpTotal = Math.max(xpFromBilans, progRow.xp_total || 0);
   const XP_PAR_NIVEAU = 200;
   const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
   const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
