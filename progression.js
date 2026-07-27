@@ -14,29 +14,35 @@ function getTierColors(tier) {
 
 async function chargerProgressionSupabase() {
   const clientId = getClient();
-  const [profilRes, bilansRes] = await Promise.all([
+  const [profilRes, bilansRes, progRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() })
   ]);
-  const [profils, bilans] = await Promise.all([profilRes.json(), bilansRes.json()]);
-  const profil = profils[0] || {};
+  const [profils, bilans, progRows] = await Promise.all([profilRes.json(), bilansRes.json(), progRes.ok ? progRes.json() : Promise.resolve([])]);
+  const profil  = profils[0]  || {};
+  const progRow = progRows[0] || {};
 
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
-  let seancesValidees = 0, pasTotal = 0;
+  let seancesValidees = 0, pasTotalBilans = 0;
   const historiqueXP = [];
 
   bilans.forEach(b => {
     const jours = b.jours || [];
-    pasTotal += jours.reduce((s, j) => s + (j.steps || 0), 0);
+    pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
     const seancesWeek = jours.filter(j => j.training).length;
     seancesValidees += seancesWeek;
     if (b.envoye_coach && b.date_validation) {
-      const stepsMoy = jours.length ? Math.round(pasTotal / jours.length) : 0;
+      const stepsMoy = jours.length ? Math.round(pasTotalBilans / jours.length) : 0;
       const bonusPas = stepsMoy >= 10000 ? 25 : 0;
       historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: 100 + bonusPas, ts: b.date_validation || '' });
     }
   });
   historiqueXP.splice(5);
+
+  // pas_total stocké dans client_progression sert de plancher (GAS a pu tracker des pas
+  // non présents dans les bilans migrés)
+  const pasTotal = Math.max(pasTotalBilans, progRow.pas_total || 0);
 
   const xpTotal = bilansValidies * 100 + seancesValidees * 50;
   const XP_PAR_NIVEAU = 200;
@@ -51,10 +57,8 @@ async function chargerProgressionSupabase() {
   const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;
   const assiduiteGlobale = Math.round((pctSeances + pctBilans) / 2);
 
-  let titreActif = null;
-  try { titreActif = localStorage.getItem('titreActif_' + clientId) || null; } catch(e) {}
-  let seenTitres = 0;
-  try { seenTitres = parseInt(localStorage.getItem('seenTitres_' + clientId)) || 0; } catch(e) {}
+  const titreActif = progRow.titre_actif || null;
+  const seenTitres = progRow.seen_titres || 0;
 
   return {
     nom: [profil.prenom, profil.nom].filter(Boolean).join(' ') || clientId,
@@ -64,6 +68,23 @@ async function chargerProgressionSupabase() {
     assiduiteGlobale, pasTotal,
     historiqueXP, titreActif, seenTitres
   };
+}
+
+async function _upsertProgressionSupabase(fields) {
+  const clientId = getClient();
+  await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
+    method: 'POST',
+    headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+    body: JSON.stringify({ client_id: clientId, ...fields, updated_at: new Date().toISOString() })
+  }).catch(() => {});
+}
+
+function sauvegarderTitreActifSupabase(titreId) {
+  return _upsertProgressionSupabase({ titre_actif: titreId || null });
+}
+
+function sauvegarderSeenTitresSupabase(count) {
+  return _upsertProgressionSupabase({ seen_titres: count });
 }
 
 async function loadProgression() {

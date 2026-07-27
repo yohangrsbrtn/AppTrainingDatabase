@@ -240,10 +240,8 @@ function sauverT(ligne, colonne, valeur) {
 }
 
 async function validerSeance() {
+  if (isSupabase()) { await validerSeanceSupabase(); return; }
   try {
-    // verifierEtCocherTraining délègue à chargerJourneeEnCours côté serveur pour
-    // trouver la ligne du jour (etendreBilan) — passe par le même verrou que le
-    // reste (chargerBilan/chargerJourneeEnCours) pour éviter tout conflit.
     const check = await apiEtendreBilan('verifierEtCocherTraining');
     if (check && check.dejaValide) {
       afficherOverlay('⚠️', 'Séance déjà validée', 'Tu as déjà validé une séance aujourd\'hui. Reviens demain !', false);
@@ -253,6 +251,49 @@ async function validerSeance() {
   _effectuerValidation();
 }
 
+async function validerSeanceSupabase() {
+  const clientId = getClient();
+  const joursFr = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  const jourNom = joursFr[new Date().getDay()];
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1`,
+      { headers: supaHeaders() }
+    );
+    const bilans = res.ok ? await res.json() : [];
+
+    if (!bilans.length) {
+      afficherOverlay('⚠️', 'Pas de bilan en cours', 'Aucun bilan ouvert cette semaine. Contacte ton coach.', false);
+      return;
+    }
+
+    const bilan = bilans[0];
+    const jours = Array.isArray(bilan.jours) ? bilan.jours.map(j => ({ ...j })) : [];
+    const jourIdx = jours.findIndex(j => j.nom === jourNom);
+
+    if (jourIdx >= 0 && jours[jourIdx].training) {
+      afficherOverlay('⚠️', 'Séance déjà validée', 'Tu as déjà validé une séance aujourd\'hui. Reviens demain !', false);
+      return;
+    }
+
+    if (jourIdx >= 0) {
+      jours[jourIdx].training = true;
+    } else {
+      jours.push({ nom: jourNom, training: true, diete: false, cardio: false, poids: null, steps: 0, eau: null });
+    }
+
+    await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilan.id}`, {
+      method: 'PATCH',
+      headers: supaHeaders(),
+      body: JSON.stringify({ jours })
+    });
+  } catch(e) {}
+
+  afficherOverlay('🏆', 'Séance validée !', 'Toutes tes données ont été enregistrées. Beau boulot !', true);
+  setTimeout(() => rafraichirProgressionEtDeblocages(), 600);
+}
+
 function _effectuerValidation() {
   const today   = new Date();
   const dateStr = pad(today.getDate())+'/'+pad(today.getMonth()+1)+'/'+today.getFullYear();
@@ -260,8 +301,6 @@ function _effectuerValidation() {
   const colonneDate = parseInt(_tColReps) + 1;
   sauverT(ligneDate, colonneDate, dateStr);
 
-  // XP de la séance (équivalent du logActivite(...,'seance',...) du GAS officiel,
-  // absent jusqu'ici côté PWA — la validation d'une séance ne donnait aucune XP).
   const seanceNav = (_tNavData && _tNavData.seances || []).find(s => s.ligne == _tLigneSeance);
   const nomSeance  = (_tSeanceData && (_tSeanceData.typeSeance || _tSeanceData.nomSeance)) || (seanceNav && seanceNav.nom) || '';
   const programme  = _tFeuilleActive + (nomSeance ? '|' + nomSeance : '');

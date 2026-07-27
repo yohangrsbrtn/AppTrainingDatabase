@@ -4623,7 +4623,7 @@ async function migrerProfils() {
 // ── Migration Preview ──────────────────────────────────────────────────
 let migPreviewClientId = null;
 let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'diete' | 'programme'
-let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasBilans: null, supaBilanLignes: null };
+let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasBilans: null, supaBilanLignes: null, gasProgression: null, supaProgression: null };
 let migPreviewSel = new Set(); // dates ISO sélectionnées pour migration mensu
 let migBilanSel = new Set(); // ligneTitres sélectionnés pour migration bilans
 let migPreviewDieteSel = null;      // {nom, ligne, col} sélectionnée
@@ -4639,7 +4639,7 @@ let migPreviewSeancesLoading = false;
 function openMigrationPreview(clientId) {
   migPreviewClientId = clientId;
   migPreviewTab = 'infos';
-  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
+  migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, gasSaisiesMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasProgression: null, supaProgression: null };
   migPreviewSel = new Set();
   migBilanSel = new Set();
   migPreviewDieteSel = null; migPreviewDieteDetail = null; migPreviewDieteLoading = false;
@@ -4652,7 +4652,7 @@ function openMigrationPreview(clientId) {
 
 async function _chargerMigPreviewData(clientId) {
   try {
-    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasSaisiesRaw, gasDietesRaw, gasFeuilles, gasBilansRaw, supaBilansRes] = await Promise.all([
+    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasSaisiesRaw, gasDietesRaw, gasFeuilles, gasBilansRaw, supaBilansRes, gasProgressionRaw, supaProgRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
@@ -4663,6 +4663,8 @@ async function _chargerMigPreviewData(clientId) {
       apiGasProd('listerFeuilles', clientId).catch(() => []),
       apiGasProd('chargerHistoriqueBilans', clientId).catch(() => []),
       fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&select=gas_ligne_titre`, { headers: supaHeaders() }).catch(() => null),
+      apiGasProd('chargerProgressionClient', clientId).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}&limit=1`, { headers: supaHeaders() }).catch(() => null),
     ]);
     const profRows        = profRes.ok        ? await profRes.json()        : [];
     const supaMensurations = supaMenuRes.ok   ? await supaMenuRes.json()    : [];
@@ -4680,7 +4682,10 @@ async function _chargerMigPreviewData(clientId) {
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
     migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
     migBilanSel = new Set(gasBilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).map(b => b.ligneTitre));
-    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, gasSaisiesMensurations, gasMensurationsDetail: {}, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
+    const gasProgression = gasProgressionRaw ? (typeof gasProgressionRaw === 'string' ? (() => { try { return JSON.parse(gasProgressionRaw); } catch { return null; } })() : gasProgressionRaw) : null;
+    const supaProgRows   = supaProgRes?.ok ? (await supaProgRes.json().catch(() => [])) : [];
+    const supaProgression = supaProgRows[0] || null;
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, gasSaisiesMensurations, gasMensurationsDetail: {}, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes, gasProgression, supaProgression };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
 
     // Charger les détails complets (fessiers, cuisses, etc.) en arrière-plan
@@ -4785,6 +4790,7 @@ function renderMigrationPreviewPage(el) {
       <button class="mig-tab${migPreviewTab==='diete'?' active':''}" data-tab="diete" onclick="setMigPreviewTab('diete')">Diète (${(migPreviewData.gasDietes||[]).length})</button>
       <button class="mig-tab${migPreviewTab==='programme'?' active':''}" data-tab="programme" onclick="setMigPreviewTab('programme')">Programme (${(migPreviewData.gasFeuilles||[]).length})</button>
       <button class="mig-tab${migPreviewTab==='bilans'?' active':''}" data-tab="bilans" onclick="setMigPreviewTab('bilans')">Bilans (${(migPreviewData.gasBilans||[]).length})</button>
+      <button class="mig-tab${migPreviewTab==='progression'?' active':''}" data-tab="progression" onclick="setMigPreviewTab('progression')">Progression</button>
     </div>
 
     <div id="migPreviewContent">${_renderMigPreviewTabContent()}</div>`;
@@ -4796,6 +4802,7 @@ function _renderMigPreviewTabContent() {
   if (migPreviewTab === 'diete')       return _renderMigPreviewDiete();
   if (migPreviewTab === 'programme')   return _renderMigPreviewProgramme();
   if (migPreviewTab === 'bilans')      return _renderMigPreviewBilans();
+  if (migPreviewTab === 'progression') return _renderMigPreviewProgression();
   return '';
 }
 
@@ -5649,6 +5656,64 @@ async function migrerBilansGas(clientId) {
 
   if (content) content.innerHTML = _renderMigPreviewBilans();
   if (errors.length) alert(`${ok} bilans importés, ${errors.length} erreur(s) :\n${errors.slice(0, 5).join('\n')}`);
+}
+
+// ── Migration Progression ──────────────────────────────────────────────
+
+function _renderMigPreviewProgression() {
+  const gas = migPreviewData.gasProgression;
+  const supa = migPreviewData.supaProgression;
+  const dejaImporte = !!supa;
+
+  const row = (label, gasVal, supaVal) =>
+    `<tr><td style="padding:6px 12px;color:var(--text-faint)">${label}</td><td style="padding:6px 12px">${gasVal ?? '—'}</td><td style="padding:6px 12px">${supaVal ?? '—'}</td></tr>`;
+
+  return `<div style="padding:16px">
+    <h3 style="margin:0 0 12px">Progression GAS → Supabase</h3>
+    ${!gas ? `<div style="color:var(--text-faint);padding:12px 0">Données GAS non disponibles pour ce client.</div>` : `
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:6px 12px;color:var(--text-faint)">Champ</th>
+        <th style="padding:6px 12px">GAS</th>
+        <th style="padding:6px 12px">Supabase actuel</th>
+      </tr></thead>
+      <tbody>
+        ${row('XP total', gas.xpTotal ?? gas.xp, supa?.xp_total ?? '—')}
+        ${row('Niveau', gas.niveau, supa?.niveau ?? '—')}
+        ${row('Titre actif', gas.titreActif ?? gas.titre_actif, supa?.titre_actif ?? '—')}
+        ${row('Titres vus', gas.seenTitres ?? gas.seen_titres, supa?.seen_titres ?? '—')}
+        ${row('Pas total', gas.pasTotal ?? gas.pas_total, supa?.pas_total ?? '—')}
+      </tbody>
+    </table>
+    ${dejaImporte ? `<div style="color:var(--success);margin-bottom:12px">✓ Données déjà présentes dans Supabase</div>` : ''}
+    <button class="btn-primary" onclick="migrerProgressionGAS('${migPreviewClientId}')">
+      ${dejaImporte ? '↻ Ré-importer la progression' : '⬇ Importer la progression'}
+    </button>`}
+  </div>`;
+}
+
+async function migrerProgressionGAS(clientId) {
+  const gas = migPreviewData.gasProgression;
+  if (!gas) return;
+  try {
+    const body = {
+      client_id: clientId,
+      titre_actif: gas.titreActif ?? gas.titre_actif ?? null,
+      seen_titres: gas.seenTitres ?? gas.seen_titres ?? 0,
+      pas_total: gas.pasTotal ?? gas.pas_total ?? 0,
+      updated_at: new Date().toISOString()
+    };
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) { alert('Erreur : ' + await res.text()); return; }
+    const rows = await res.json();
+    migPreviewData.supaProgression = rows[0] || body;
+    const content = document.getElementById('migPreviewContent');
+    if (content) content.innerHTML = _renderMigPreviewProgression();
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 // ── Créer diète / programme depuis fiche client ────────────────────────

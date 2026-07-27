@@ -118,7 +118,8 @@ async function loadCollection() {
     const totalDebloques = TITRES_DEF.filter(b => (b.cat==='pas'?pt:b.cat==='bilan'?nb:b.cat==='seance'?(p.seancesValidees||0):(p.niveau||0)) >= b.seuil).length;
     try { localStorage.setItem('seenTitres_' + S.client, totalDebloques); } catch(e) {}
     p.seenTitres = totalDebloques;
-    api('sauvegarderSeenTitres', { count: totalDebloques }).catch(() => {});
+    if (isSupabase()) sauvegarderSeenTitresSupabase(totalDebloques);
+    else api('sauvegarderSeenTitres', { count: totalDebloques }).catch(() => {});
   } catch(e) { hideLoadingOverlay(); setPage('home'); }
 }
 
@@ -136,7 +137,8 @@ function activerTitre(id) {
   if (!def || _colVal(def.cat) < def.seuil) return;
   _colTitreActif = (_colTitreActif === id) ? null : id;
   try { localStorage.setItem('titreActif_' + S.client, _colTitreActif || ''); } catch(e) {}
-  api('sauvegarderTitreActif', { titreId: _colTitreActif || '' }).catch(() => {});
+  if (isSupabase()) sauvegarderTitreActifSupabase(_colTitreActif);
+  else api('sauvegarderTitreActif', { titreId: _colTitreActif || '' }).catch(() => {});
   setPage('collection');
 }
 
