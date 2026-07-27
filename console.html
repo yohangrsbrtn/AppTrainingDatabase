@@ -4605,6 +4605,9 @@ let migPreviewDieteLoading = false;
 let migPreviewFeuilleSelected = null; // nom de la feuille programme sélectionnée
 let migPreviewFeuilleData = null;     // { seances, semaines }
 let migPreviewFeuilleLoading = false;
+let migPreviewSemaineIdx = 0;
+let migPreviewSeancesCache = {};  // { sem: [seanceData0, seanceData1, ...] }
+let migPreviewSeancesLoading = false;
 
 function openMigrationPreview(clientId) {
   migPreviewClientId = clientId;
@@ -5164,28 +5167,68 @@ function _renderProgGASDetail(feuilleData, supaProgs) {
   const nom = migPreviewFeuilleSelected || '';
   const seances = feuilleData.seances || [];
   const semaines = feuilleData.semaines || [];
-  const dejaMigre = supaProgs.some(p => p.nom === nom);
+  const dejaMigre = (supaProgs||[]).some(p => p.nom === nom);
+  const sem = semaines[migPreviewSemaineIdx] ?? semaines[0];
+  const seancesData = migPreviewSeancesCache[sem]; // null si pas encore chargé
 
-  const seancesHtml = seances.map(s =>
-    `<div style="padding:8px 0;border-bottom:1px solid var(--hairline);">
-      <div style="font-size:13px;font-weight:600;">${esc(s.nom)}</div>
-      ${s.type ? `<div style="font-size:11px;color:var(--text-faint);">${esc(s.type)}</div>` : ''}
-    </div>`).join('');
+  // Compte total de logs pour cette semaine
+  let totalLogs = 0;
+  if (seancesData) {
+    seancesData.forEach(sd => (sd.exercices||[]).forEach(ex =>
+      (ex.sets||[]).forEach(set => { if (set.charge !== '' || set.reps !== '') totalLogs++; })
+    ));
+  }
+
+  const seancesHtml = seances.map((s, si) => {
+    const sd = seancesData ? seancesData[si] : null;
+    const exercices = sd ? (sd.exercices || []) : null;
+    return `
+      <div style="background:var(--surface-2);border-radius:var(--radius-sm);margin-bottom:10px;overflow:hidden;">
+        <div style="padding:9px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);">
+          ${esc(s.nom)}${s.type ? ` <span style="font-weight:400;color:var(--text-faint);font-size:11px;">— ${esc(s.type)}</span>` : ''}
+        </div>
+        ${exercices === null
+          ? `<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Chargement…</div>`
+          : exercices.length === 0
+            ? `<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`
+            : exercices.map(ex => {
+                const sets = ex.sets || [];
+                const hasLog = sets.some(set => set.charge !== '' || set.reps !== '');
+                return `<div style="padding:8px 14px;border-top:1px solid var(--hairline);">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                    <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+                    <div style="font-size:11px;color:var(--text-faint);">${ex.series||'?'}×${esc(ex.repsCible||ex.reps||'?')}</div>
+                  </div>
+                  ${hasLog ? sets.filter(set=>set.charge!==''||set.reps!=='').map(set=>`
+                    <div style="display:flex;gap:8px;font-size:11.5px;padding:1px 0;color:var(--text-muted);">
+                      <span style="color:var(--text-faint);width:20px;font-family:var(--font-mono);">#${set.serie}</span>
+                      <span style="font-weight:600;color:var(--text);">${[set.charge!==''?set.charge+'kg':'',set.reps!==''?set.reps+' reps':'',set.rir!==''?'RIR '+set.rir:''].filter(Boolean).join(' · ')}</span>
+                    </div>`).join('')
+                  : `<div style="font-size:11px;color:var(--text-faint);font-style:italic;">Pas de log cette semaine</div>`}
+                  ${ex.note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;font-style:italic;">"${esc(ex.note)}"</div>` : ''}
+                </div>`;
+              }).join('')}
+      </div>`;
+  }).join('');
 
   return `
     <div class="table-card" style="padding:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
         <div>
           <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
           <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${seances.length} séances · ${semaines.length} semaines</div>
-          ${dejaMigre ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
+          ${dejaMigre ? `<div style="font-size:11px;color:var(--warning,#f59e0b);margin-top:2px;">⚠ Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
         </div>
         <button class="btn primary" style="flex-shrink:0;" onclick="migrerProgrammeGAS()">⬇ Importer ce programme</button>
       </div>
       <div id="migProgStatus" style="margin-bottom:8px;"></div>
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;">Séances</div>
-      ${seancesHtml || '<div style="color:var(--text-faint);font-size:13px;">Aucune séance détectée.</div>'}
-      <div style="font-size:11px;color:var(--text-faint);margin-top:12px;">Les exercices seront chargés depuis la semaine 1 au moment de l'import.</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+        <button class="btn" style="padding:4px 12px;" onclick="migChangerSemaine(-1)" ${migPreviewSemaineIdx===0?'disabled':''}>‹</button>
+        <span style="font-size:13px;font-weight:700;min-width:100px;text-align:center;">Semaine ${sem ?? '—'} <span style="font-size:11px;font-weight:400;color:var(--text-faint);">(${migPreviewSemaineIdx+1}/${semaines.length})</span></span>
+        <button class="btn" style="padding:4px 12px;" onclick="migChangerSemaine(1)" ${migPreviewSemaineIdx>=semaines.length-1?'disabled':''}>›</button>
+        ${seancesData ? `<span style="font-size:11.5px;color:var(--text-faint);">${totalLogs} log${totalLogs>1?'s':''} renseigné${totalLogs>1?'s':''}</span>` : `<span style="font-size:11.5px;color:var(--text-faint);">Chargement…</span>`}
+      </div>
+      ${seancesHtml || '<div style="color:var(--text-faint);font-size:13px;">Aucune séance.</div>'}
     </div>`;
 }
 
@@ -5193,6 +5236,9 @@ async function migSelectFeuille(nom) {
   migPreviewFeuilleSelected = nom;
   migPreviewFeuilleData = null;
   migPreviewFeuilleLoading = true;
+  migPreviewSemaineIdx = 0;
+  migPreviewSeancesCache = {};
+  migPreviewSeancesLoading = false;
   const content = document.getElementById('migPreviewContent');
   if (content) content.innerHTML = _renderMigPreviewTabContent();
   try {
@@ -5209,6 +5255,42 @@ async function migSelectFeuille(nom) {
   migPreviewFeuilleLoading = false;
   const c2 = document.getElementById('migPreviewContent');
   if (c2) c2.innerHTML = _renderMigPreviewTabContent();
+  // Charger sem1 en arrière-plan pour afficher les exercices
+  if (migPreviewFeuilleData && migPreviewFeuilleData.semaines.length) {
+    const sem0 = migPreviewFeuilleData.semaines[0];
+    await _migLoadSemaineSeances(nom, migPreviewFeuilleData.seances, sem0);
+    const c3 = document.getElementById('migProgDetail');
+    if (c3) c3.innerHTML = _renderProgGASDetail(migPreviewFeuilleData, migPreviewData.supaClientProgs);
+  }
+}
+
+async function _migLoadSemaineSeances(nom, seances, sem) {
+  if (migPreviewSeancesCache[sem]) return;
+  migPreviewSeancesLoading = true;
+  const results = await Promise.all((seances||[]).map(async seance => {
+    try {
+      const raw = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: sem });
+      const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return d || { exercices: [] };
+    } catch(e) { return { exercices: [] }; }
+  }));
+  migPreviewSeancesCache[sem] = results;
+  migPreviewSeancesLoading = false;
+}
+
+async function migChangerSemaine(delta) {
+  if (!migPreviewFeuilleData) return;
+  const semaines = migPreviewFeuilleData.semaines || [];
+  const newIdx = Math.max(0, Math.min(semaines.length - 1, migPreviewSemaineIdx + delta));
+  if (newIdx === migPreviewSemaineIdx) return;
+  migPreviewSemaineIdx = newIdx;
+  const sem = semaines[newIdx];
+  const c = document.getElementById('migProgDetail');
+  if (!migPreviewSeancesCache[sem]) {
+    if (c) c.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;"><div class="spin"></div> Chargement semaine ${sem}…</div>`;
+    await _migLoadSemaineSeances(migPreviewFeuilleSelected, migPreviewFeuilleData.seances, sem);
+  }
+  if (c) c.innerHTML = _renderProgGASDetail(migPreviewFeuilleData, migPreviewData.supaClientProgs);
 }
 
 async function migrerProgrammeGAS() {
