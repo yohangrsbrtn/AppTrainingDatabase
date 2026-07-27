@@ -4004,8 +4004,9 @@ async function migrerProfils() {
 // ── Migration Preview ──────────────────────────────────────────────────
 let migPreviewClientId = null;
 let migPreviewTab = 'infos'; // 'infos' | 'mensurations' | 'diete' | 'programme'
-let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
+let migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null, gasBilans: null, supaBilanLignes: null };
 let migPreviewSel = new Set(); // dates ISO sélectionnées pour migration mensu
+let migBilanSel = new Set(); // ligneTitres sélectionnés pour migration bilans
 let migPreviewDieteSel = null;      // {nom, ligne, col} sélectionnée
 let migPreviewDieteDetail = null;   // données chargées depuis GAS pour cette diète
 let migPreviewDieteLoading = false;
@@ -4018,6 +4019,7 @@ function openMigrationPreview(clientId) {
   migPreviewTab = 'infos';
   migPreviewData = { loaded: false, error: null, supaProfile: null, gasMensurations: null, supaMensurations: null, gasDietes: null, gasFeuilles: null, supaClientDietes: null, supaClientProgs: null };
   migPreviewSel = new Set();
+  migBilanSel = new Set();
   migPreviewDieteSel = null; migPreviewDieteDetail = null; migPreviewDieteLoading = false;
   migPreviewFeuilleSelected = null; migPreviewFeuilleData = null; migPreviewFeuilleLoading = false;
   state.nav = 'migration-preview';
@@ -4028,7 +4030,7 @@ function openMigrationPreview(clientId) {
 
 async function _chargerMigPreviewData(clientId) {
   try {
-    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasDietesRaw, gasFeuilles] = await Promise.all([
+    const [profRes, supaMenuRes, supaCliDietesRes, supaCliProgsRes, gasMenuRaw, gasDietesRaw, gasFeuilles, gasBilansRaw, supaBilansRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() }),
@@ -4036,6 +4038,8 @@ async function _chargerMigPreviewData(clientId) {
       apiGasProd('chargerMensurations', clientId).catch(() => []),
       apiGasProd('listerDietes', clientId).catch(() => []),
       apiGasProd('listerFeuilles', clientId).catch(() => []),
+      apiGasProd('chargerHistoriqueBilans', clientId).catch(() => []),
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&select=gas_ligne_titre`, { headers: supaHeaders() }).catch(() => null),
     ]);
     const profRows        = profRes.ok        ? await profRes.json()        : [];
     const supaMensurations = supaMenuRes.ok   ? await supaMenuRes.json()    : [];
@@ -4043,11 +4047,15 @@ async function _chargerMigPreviewData(clientId) {
     const supaClientProgs  = supaCliProgsRes.ok  ? await supaCliProgsRes.json()  : [];
     const gasMensurations  = (typeof gasMenuRaw === 'string' ? JSON.parse(gasMenuRaw) : gasMenuRaw) || [];
     const gasDietes        = (typeof gasDietesRaw === 'string' ? JSON.parse(gasDietesRaw) : gasDietesRaw) || [];
+    const gasBilans        = (typeof gasBilansRaw === 'string' ? JSON.parse(gasBilansRaw) : gasBilansRaw) || [];
+    const supaBilansRows   = supaBilansRes?.ok ? await supaBilansRes.json() : [];
+    const supaBilanLignes  = new Set(supaBilansRows.map(r => r.gas_ligne_titre));
     const supaProfile = profRows[0] || null;
 
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
     migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
-    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs };
+    migBilanSel = new Set(gasBilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).map(b => b.ligneTitre));
+    migPreviewData = { loaded: true, error: null, supaProfile, gasMensurations, supaMensurations, gasDietes, gasFeuilles, supaClientDietes, supaClientProgs, gasBilans, supaBilanLignes };
     if (state.nav === 'migration-preview' && migPreviewClientId === clientId) renderMain();
   } catch(e) {
     migPreviewData = { loaded: true, error: e.message, supaProfile: null, gasMensurations: [], supaMensurations: [], gasDietes: [], gasFeuilles: [], supaClientDietes: [], supaClientProgs: [] };
@@ -4131,6 +4139,7 @@ function renderMigrationPreviewPage(el) {
       <button class="mig-tab${migPreviewTab==='mensurations'?' active':''}" data-tab="mensurations" onclick="setMigPreviewTab('mensurations')">Mensurations (${gasCount})</button>
       <button class="mig-tab${migPreviewTab==='diete'?' active':''}" data-tab="diete" onclick="setMigPreviewTab('diete')">Diète (${(migPreviewData.gasDietes||[]).length})</button>
       <button class="mig-tab${migPreviewTab==='programme'?' active':''}" data-tab="programme" onclick="setMigPreviewTab('programme')">Programme (${(migPreviewData.gasFeuilles||[]).length})</button>
+      <button class="mig-tab${migPreviewTab==='bilans'?' active':''}" data-tab="bilans" onclick="setMigPreviewTab('bilans')">Bilans (${(migPreviewData.gasBilans||[]).length})</button>
     </div>
 
     <div id="migPreviewContent">${_renderMigPreviewTabContent()}</div>`;
@@ -4141,6 +4150,7 @@ function _renderMigPreviewTabContent() {
   if (migPreviewTab === 'mensurations') return _renderMigPreviewMensurations();
   if (migPreviewTab === 'diete')       return _renderMigPreviewDiete();
   if (migPreviewTab === 'programme')   return _renderMigPreviewProgramme();
+  if (migPreviewTab === 'bilans')      return _renderMigPreviewBilans();
   return '';
 }
 
@@ -4706,6 +4716,165 @@ async function migrerProgrammeGAS() {
     if (statusEl) statusEl.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur : ${esc(e.message)}</div>`;
     document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = false);
   }
+}
+
+// ── Migration Preview : Bilans ──────────────────────────────────────────
+
+function _renderMigPreviewBilans() {
+  const bilans = migPreviewData.gasBilans || [];
+  const supaBilanLignes = migPreviewData.supaBilanLignes || new Set();
+
+  if (!bilans.length) return `<div style="color:var(--text-faint);padding:24px;">Aucun bilan dans GAS pour ce client.</div>`;
+
+  const allLignes = bilans.map(b => b.ligneTitre);
+  const selectables = bilans.filter(b => !supaBilanLignes.has(b.ligneTitre));
+  const allSelected = selectables.length > 0 && selectables.every(b => migBilanSel.has(b.ligneTitre));
+  const migreCount = supaBilanLignes.size;
+  const newCount = migBilanSel.size;
+
+  const rows = bilans.map(b => {
+    const already = supaBilanLignes.has(b.ligneTitre);
+    const checked = migBilanSel.has(b.ligneTitre);
+    return `<tr>
+      <td style="width:36px;text-align:center;">
+        <input type="checkbox" ${checked ? 'checked' : ''} ${already ? 'disabled' : ''}
+          onchange="toggleBilanSel(${b.ligneTitre}, this.checked)">
+      </td>
+      <td style="font-size:12px;font-weight:600;">${esc(b.semaine || '—')}</td>
+      <td style="font-size:12px;color:var(--text-faint);">${esc(b.date || '—')}</td>
+      <td style="font-size:12px;">${b.dejaEnvoye ? '<span style="color:var(--text-faint);">Clôturé</span>' : '<span style="color:var(--accent);">Ouvert</span>'}</td>
+      <td style="font-size:12px;">
+        ${already
+          ? `<span class="chip ok" style="font-size:10px;">✓ Migré</span>`
+          : `<span class="chip off" style="font-size:10px;">À migrer</span>`}
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="table-card" style="flex:1;min-width:110px;padding:12px 16px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">GAS total</div>
+        <div style="font-size:22px;font-weight:700;color:var(--accent);">${bilans.length}</div>
+        <div style="font-size:11px;color:var(--text-faint);">bilans</div>
+      </div>
+      <div class="table-card" style="flex:1;min-width:110px;padding:12px 16px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Déjà migrés</div>
+        <div style="font-size:22px;font-weight:700;color:var(--success);">${migreCount}</div>
+        <div style="font-size:11px;color:var(--text-faint);">dans Supabase</div>
+      </div>
+      <div class="table-card" style="flex:1;min-width:110px;padding:12px 16px;">
+        <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Sélectionnés</div>
+        <div style="font-size:22px;font-weight:700;color:${newCount>0?'var(--accent)':'var(--text-faint)'};">${newCount}</div>
+        <div style="font-size:11px;color:var(--text-faint);">à importer</div>
+      </div>
+    </div>
+
+    <div class="table-card" style="margin-bottom:12px;">
+      <div class="table-toolbar">
+        <div class="title">Historique bilans GAS</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
+            <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllBilanSel(this.checked)">
+            Tout sélectionner
+          </label>
+          <button class="btn primary" style="font-size:12px;" ${newCount === 0 ? 'disabled' : ''}
+            onclick="migrerBilansGas('${migPreviewClientId}')">
+            ⬇ Importer sélection (${newCount})
+          </button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="alim-table" style="width:100%;">
+          <thead><tr>
+            <th style="width:36px;"></th>
+            <th>Semaine</th>
+            <th>Date</th>
+            <th>État GAS</th>
+            <th>Supabase</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="padding:8px 0;font-size:12px;color:var(--text-faint);">
+      ⚠ La table <code>bilans</code> doit exister dans Supabase avant d'importer.
+      Import idempotent : re-migrer un bilan déjà présent l'écrase proprement.
+    </div>`;
+}
+
+function toggleBilanSel(ligneTitre, checked) {
+  if (checked) migBilanSel.add(ligneTitre);
+  else migBilanSel.delete(ligneTitre);
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = _renderMigPreviewBilans();
+}
+
+function toggleAllBilanSel(checked) {
+  const bilans = migPreviewData.gasBilans || [];
+  const supaBilanLignes = migPreviewData.supaBilanLignes || new Set();
+  if (checked) bilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).forEach(b => migBilanSel.add(b.ligneTitre));
+  else bilans.forEach(b => migBilanSel.delete(b.ligneTitre));
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = _renderMigPreviewBilans();
+}
+
+async function migrerBilansGas(clientId) {
+  const sel = [...migBilanSel];
+  if (!sel.length) return;
+  const gasId = _gasId(clientId);
+  const errors = [];
+  let ok = 0;
+
+  const content = document.getElementById('migPreviewContent');
+  if (content) content.innerHTML = `<div style="display:flex;align-items:center;gap:12px;padding:32px;"><div class="spin"></div> Import en cours… (0 / ${sel.length})</div>`;
+
+  for (let i = 0; i < sel.length; i++) {
+    const ligneTitre = sel[i];
+    if (content) content.querySelector('div > div:last-child')?.remove();
+    if (content) {
+      const msg = content.querySelector('div');
+      if (msg) msg.innerHTML = `<div class="spin"></div> Import en cours… (${i} / ${sel.length})`;
+    }
+    try {
+      const raw = await apiGasProd('chargerBilanParLigne', gasId, { ligneTitre });
+      const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const bilanHisto = (migPreviewData.gasBilans || []).find(b => b.ligneTitre === ligneTitre);
+      const dateStr = d.dateValidation || bilanHisto?.date || null;
+      const payload = {
+        client_id: clientId,
+        date_validation: _parseDateFr(dateStr) || null,
+        semaine_label: bilanHisto?.semaine || null,
+        jours: d.jours || [],
+        repas_eval: d.repas || [],
+        commentaire_alim: d.commentaireAlim || null,
+        commentaire_jour: d.commentaireJour || null,
+        commentaire_activite: d.commentaireActivite || null,
+        envoye_coach: true,
+        coach_traite: !!(bilanHisto?.dejaEnvoye),
+        gas_ligne_titre: ligneTitre,
+      };
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bilans?on_conflict=client_id,gas_ligne_titre`,
+        { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }), body: JSON.stringify(payload) }
+      );
+      if (!res.ok) { const t = await res.text(); errors.push(`${bilanHisto?.semaine||ligneTitre}: ${res.status} — ${t}`); }
+      else ok++;
+    } catch(e) { errors.push(`${ligneTitre}: ${e.message}`); }
+  }
+
+  // Reload supaBilans pour mettre à jour l'UI
+  const supaBilansRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&select=gas_ligne_titre`,
+    { headers: supaHeaders() }
+  ).catch(() => null);
+  const supaBilansRows = supaBilansRes?.ok ? await supaBilansRes.json() : [];
+  const supaBilanLignes = new Set(supaBilansRows.map(r => r.gas_ligne_titre));
+  migPreviewData.supaBilanLignes = supaBilanLignes;
+  migBilanSel = new Set((migPreviewData.gasBilans || []).filter(b => !supaBilanLignes.has(b.ligneTitre)).map(b => b.ligneTitre));
+
+  if (content) content.innerHTML = _renderMigPreviewBilans();
+  if (errors.length) alert(`${ok} bilans importés, ${errors.length} erreur(s) :\n${errors.slice(0, 5).join('\n')}`);
 }
 
 // ── Créer diète / programme depuis fiche client ────────────────────────
