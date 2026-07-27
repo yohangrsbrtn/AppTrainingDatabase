@@ -295,12 +295,12 @@ function renderDieteDetail() {
       options.forEach((opt, oIdx) => {
         repasHtml += `<div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
           ${oIdx > 0 ? `<div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(opt.nom)}</div>` : ''}
-          ${rendreCorpsRepas(opt, idx, oIdx)}
+          ${rendreCorpsRepas(opt, isSupabase() ? null : idx, isSupabase() ? null : oIdx)}
         </div>`;
       });
       repasHtml += `</div>`;
     } else {
-      repasHtml += rendreCorpsRepas(options[0], idx, 0);
+      repasHtml += rendreCorpsRepas(options[0], isSupabase() ? null : idx, isSupabase() ? null : 0);
     }
 
     repasHtml += `</div>`;
