@@ -267,6 +267,6 @@ function renderProgressionPage() {
     ${collectionHtml}
     ${historiqueHtml}
 
-    <button class="btn-secondary" onclick="_loginAuthMode==='supabase'?loadHomeSupabase():loadHome()" style="margin-top:10px;">← Accueil</button>
+    <button class="btn-secondary" onclick="goTo('home')" style="margin-top:10px;">← Accueil</button>
   </div>`;
 }
