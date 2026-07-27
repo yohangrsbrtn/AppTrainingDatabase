@@ -548,10 +548,17 @@ async function _completerConnexion(json) {
 // reconstruits côté Supabase, cet accueil n'affiche que ce qui existe déjà.
 async function loadHomeSupabase(){
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom`, { headers: supaHeaders() });
-    const profils = res.ok ? await res.json() : [];
+    const [profils, prog] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      chargerProgressionSupabase().catch(() => null)
+    ]);
     S.data.profil = profils[0] || {};
+    if (prog) {
+      S.data.prog = prog;
+      S.data.prog.nom = [S.data.profil.prenom, S.data.profil.nom].filter(Boolean).join(' ') || S.client;
+    }
   } catch(e) { S.data.profil = {}; }
+  _journeeData = _loadJourneeDataSupabase();
   setPage('home-supabase');
 }
 function renderHomeSupabase(){
@@ -562,6 +569,8 @@ function renderHomeSupabase(){
   return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
 
     ${renderCarteHeader()}
+
+    ${renderCarteJournee(_journeeData)}
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
 
@@ -1322,6 +1331,7 @@ async function envoyerBugReport() {
 
 // ── Journée en cours modal ────────────────────────────────────────────
 function ouvrirJourneeModal() {
+  if (isSupabase()) { if (!_journeeData || _journeeData.aucun || _journeeData.valide) return; _afficherModalJourneeSupabase(); return; }
   if (!_journeeData || _journeeData.aucun) return;
   if (_journeeData.valide) return; // déjà validée, la carte l'affiche
   // La fenêtre s'ouvre tout de suite avec les données déjà connues (celles de
@@ -1374,6 +1384,7 @@ function _afficherModalJournee(refreshing) {
 }
 
 function toggleJourneeField(type) {
+  if (isSupabase()) { toggleJourneeFieldSupabase(type); return; }
   if (!_journeeData) return;
   _journeeData[type] = !_journeeData[type];
   const cols = { diete: 14, training: 18, cardio: 19 };
@@ -1385,6 +1396,7 @@ function toggleJourneeField(type) {
 }
 
 function sauverStepsJournee(val) {
+  if (isSupabase()) { sauverStepsJourneeSupabase(val); return; }
   if (!_journeeData) return;
   const v = parseSteps(val);
   const errEl = document.getElementById('jStepsErr');
@@ -1399,6 +1411,7 @@ function sauverStepsJournee(val) {
 }
 
 async function validerJourneeClient() {
+  if (isSupabase()) { await validerJourneeClientSupabase(); return; }
   if (!_journeeData) return;
   const stepsEl = document.getElementById('jSteps');
   if (stepsEl) sauverStepsJournee(stepsEl.value);
@@ -1427,6 +1440,145 @@ async function validerJourneeClient() {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
     alert('Erreur lors de la validation.');
   }
+}
+
+// ── Journée en cours — mode Supabase ─────────────────────────────────
+function _journeeKeySupabase() {
+  const today = new Date().toISOString().split('T')[0];
+  return `journee_supa_${S.client}_${today}`;
+}
+function _loadJourneeDataSupabase() {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const raw = localStorage.getItem(_journeeKeySupabase());
+    if (raw) return { ...JSON.parse(raw), aucun: false };
+  } catch(e) {}
+  return { diete: false, training: false, cardio: false, steps: '', valide: false, date: today, aucun: false };
+}
+function _saveJourneeDataSupabase() {
+  if (!_journeeData) return;
+  try { localStorage.setItem(_journeeKeySupabase(), JSON.stringify(_journeeData)); } catch(e) {}
+}
+function _afficherModalJourneeSupabase() {
+  const existant = document.getElementById('modalJournee');
+  if (existant) existant.remove();
+  const d = _journeeData;
+  const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  const jourNom = JOURS[new Date(Date.now() - 2*3600*1000).getDay()];
+  const modal = document.createElement('div');
+  modal.id = 'modalJournee';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
+  modal.innerHTML = `
+    <div style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
+      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
+      <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Journée en cours</div>
+      <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:20px;">${jourNom}</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button id="jTogDiete" onclick="toggleJourneeField('diete')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.diete?'#1D9E75':'#2d3142'};">${d.diete?'✓ ':''}Diète</button>
+        <button id="jTogTraining" onclick="toggleJourneeField('training')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.training?'#1D9E75':'#2d3142'};">${d.training?'✓ ':''}Training</button>
+        <button id="jTogCardio" onclick="toggleJourneeField('cardio')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.cardio?'#1D9E75':'#2d3142'};">${d.cardio?'✓ ':''}Cardio</button>
+      </div>
+      <div style="margin-bottom:20px;">
+        <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">STEPS</div>
+        <input id="jSteps" type="text" inputmode="numeric" value="${d.steps||''}" placeholder="ex: 10200"
+          onchange="sauverStepsJournee(this.value)"
+          style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+      </div>
+      <button id="btnValiderJournee" onclick="validerJourneeClient()" style="width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75,#167a5a);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">✅ Valider ma journée</button>
+      <button onclick="document.getElementById('modalJournee').remove()" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+function toggleJourneeFieldSupabase(type) {
+  if (!_journeeData) return;
+  _journeeData[type] = !_journeeData[type];
+  _saveJourneeDataSupabase();
+  const labels = { diete: 'Diète', training: 'Training', cardio: 'Cardio' };
+  const id = { diete: 'jTogDiete', training: 'jTogTraining', cardio: 'jTogCardio' };
+  const btn = document.getElementById(id[type]);
+  if (btn) { btn.style.background = _journeeData[type] ? '#1D9E75' : '#2d3142'; btn.textContent = (_journeeData[type] ? '✓ ' : '') + labels[type]; }
+}
+function sauverStepsJourneeSupabase(val) {
+  if (!_journeeData) return;
+  const v = val ? parseInt(val.replace(/\s/g,'').replace(',','.')) : '';
+  _journeeData.steps = isNaN(v) ? '' : v;
+  _saveJourneeDataSupabase();
+}
+async function validerJourneeClientSupabase() {
+  if (!_journeeData) return;
+  const stepsEl = document.getElementById('jSteps');
+  if (stepsEl) sauverStepsJourneeSupabase(stepsEl.value);
+  const btn = document.getElementById('btnValiderJournee');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
+  try {
+    const progRes = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(S.client)}`, { headers: supaHeaders() });
+    const progRows = progRes.ok ? await progRes.json() : [];
+    const progRow = progRows[0] || {};
+    const xpActuel = progRow.xp_total || 0;
+    const XP_PAR_NIVEAU = 200;
+    const niveauAvant = Math.max(1, Math.floor(xpActuel / XP_PAR_NIVEAU) + 1);
+    const xpBase = 50;
+    const steps = parseInt(_journeeData.steps) || 0;
+    const bonusPas = steps >= 10000 ? 25 : 0;
+    const xpGain = xpBase + bonusPas;
+    const nouvelXP = xpActuel + xpGain;
+    const niveauApres = Math.max(1, Math.floor(nouvelXP / XP_PAR_NIVEAU) + 1);
+    await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, xp_total: nouvelXP, updated_at: new Date().toISOString() })
+    });
+    _journeeData.valide = true;
+    _saveJourneeDataSupabase();
+    const modal = document.getElementById('modalJournee');
+    if (modal) modal.remove();
+    _majCarteJournee();
+    if (S.data.prog) {
+      const pctNew = Math.round((nouvelXP - (niveauApres-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+      S.data.prog.xpTotal = nouvelXP;
+      S.data.prog.niveau = niveauApres;
+      S.data.prog.pct = pctNew;
+      S.data.prog.xpManquant = niveauApres * XP_PAR_NIVEAU - nouvelXP;
+      _majCarteHeader();
+    }
+    _showXPFlashSupabase(xpGain, bonusPas);
+    if (niveauApres > niveauAvant) {
+      setTimeout(() => _showLevelUpModal(niveauApres), 2500);
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
+    alert('Erreur lors de la validation.');
+  }
+}
+function _showXPFlashSupabase(xpGain, bonusPas) {
+  const flash = document.createElement('div');
+  flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:22px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
+  flash.innerHTML = '🎉 +' + xpGain + ' XP'
+    + (bonusPas > 0 ? '<div style="font-size:12px;margin-top:4px;opacity:.85;">🦶 Bonus 10 000 pas !</div>' : '')
+    + '<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>';
+  document.body.appendChild(flash);
+  setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
+}
+function _showLevelUpModal(niveau) {
+  const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
+  const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858',bar:''};
+  const badgeSvg = typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, 80, 'lu') : '🏆';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:linear-gradient(145deg,#131825,${tc.c2}cc);border:2px solid ${tc.c1}55;border-radius:24px;padding:36px 24px;max-width:300px;width:88%;text-align:center;box-shadow:0 0 60px ${tc.c1}44;">
+      <div style="font-size:36px;margin-bottom:14px;">🎊</div>
+      <div style="display:flex;justify-content:center;margin-bottom:16px;">${badgeSvg}</div>
+      <div style="font-size:24px;font-weight:800;color:#f0f2ff;margin-top:4px;">Niveau ${niveau} !</div>
+      <div style="font-size:13px;color:${tc.c1};margin-top:8px;font-weight:600;">Tu viens de monter de niveau 🚀</div>
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="margin-top:24px;padding:13px 36px;background:${tc.c1};border:none;border-radius:12px;color:#000;font-size:15px;font-weight:700;cursor:pointer;">
+        Continuer →
+      </button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
 function deconnexion() {
