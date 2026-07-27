@@ -97,9 +97,6 @@ async function loadDieteSupabase() {
     );
     const clientDietes = cdRes.ok ? await cdRes.json() : [];
     _dDietes = clientDietes.map(d => ({ id: d.id, nom: d.nom, _supabase: true }));
-    if (!_dDietes.length) { _dSubPage = 'list'; setPage('diete'); return; }
-    // Une seule diète → ouvrir directement. Plusieurs → afficher la liste.
-    if (_dDietes.length === 1) { await ouvrirDieteSupabase(_dDietes[0].nom); return; }
     _dSubPage = 'list';
     setPage('diete');
   } catch(e) { setPage('home'); }

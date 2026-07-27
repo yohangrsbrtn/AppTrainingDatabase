@@ -146,24 +146,34 @@ function _pcMusclePanelHtml(seance) {
   </div>`;
 }
 
+function _e1rm(charge, reps, rir) {
+  const c = parseFloat(charge), r = parseInt(reps), ri = parseInt(rir) || 0;
+  if (!c || !r) return null;
+  const effectiveReps = r + ri;
+  return c * (1 + effectiveReps / 30);
+}
+
 function _pcRenderChart(seance) {
   const totalSem = _pcTotalSemaines();
   if (totalSem < 2) return '';
-  const exos   = (seance.client_programme_exercices || []).slice(0, 4);
-  const colors = ['#378ADD', '#1D9E75', '#D85A30', '#a78bfa'];
+  const exos   = seance.client_programme_exercices || [];
+  const colors = ['#378ADD', '#1D9E75', '#D85A30', '#a78bfa', '#f59e0b', '#ec4899', '#06b6d4', '#84cc16'];
   const W = 300, H = 90, PAD = 10;
 
   const series = exos.map((ex, ei) => {
     const data = [];
     for (let sem = 1; sem <= totalSem; sem++) {
-      const charges = [];
+      const vals = [];
       for (let s = 1; s <= (parseInt(ex.series) || 3); s++) {
         const log = _pcLogs[ex.id + '|' + sem + '|' + s];
-        if (log?.charge) charges.push(parseFloat(log.charge));
+        if (log?.charge) {
+          const v = _e1rm(log.charge, log.reps, log.rir);
+          if (v) vals.push(v);
+        }
       }
-      data.push(charges.length ? Math.max(...charges) : null);
+      data.push(vals.length ? Math.max(...vals) : null);
     }
-    return { nom: ex.nom, data, color: colors[ei] };
+    return { nom: ex.nom, data, color: colors[ei % colors.length] };
   });
 
   const allVals = series.flatMap(s => s.data.filter(v => v != null));

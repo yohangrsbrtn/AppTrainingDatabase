@@ -47,10 +47,16 @@ async function loadMensurationsSupabase() {
     );
     const data = res.ok ? await res.json() : [];
     _mReleves = data.map(r => ({
-      date:   r.date,         // ISO YYYY-MM-DD
-      poids:  r.poids,
-      taille: r.mesure,       // mesure = tour de taille
-      phase:  r.phase || ''
+      date:     r.date,
+      poids:    r.poids,
+      taille:   r.mesure,
+      fessiers: r.fessiers,
+      cuisses:  r.cuisses,
+      mollets:  r.mollets,
+      poitrine: r.poitrine,
+      epaules:  r.epaules,
+      bras:     r.bras,
+      phase:    r.phase || ''
     }));
     _mSubPage = 'historique';
     try {
@@ -108,12 +114,18 @@ async function ouvrirSaisieMensuration(ligne) {
 }
 
 function ouvrirSaisieMensurationSupabase(dateISO) {
-  const existant = _mReleves.find(r => r.date === dateISO);
+  const e = _mReleves.find(r => r.date === dateISO);
   _mFormData = {
-    date:   dateISO,
-    poids:  existant ? existant.poids  : null,
-    taille: existant ? existant.taille : null,
-    phase:  existant ? existant.phase  : ''
+    date:     dateISO,
+    poids:    e ? e.poids    : null,
+    taille:   e ? e.taille   : null,
+    fessiers: e ? e.fessiers : null,
+    cuisses:  e ? e.cuisses  : null,
+    mollets:  e ? e.mollets  : null,
+    poitrine: e ? e.poitrine : null,
+    epaules:  e ? e.epaules  : null,
+    bras:     e ? e.bras     : null,
+    phase:    e ? e.phase    : ''
   };
   _mSubPage = 'saisie-form';
   setPage('mensurations');
@@ -171,11 +183,25 @@ function renderHistorique() {
     ${taillePts.length >= 2 ? `<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#D85A30;">Tour de taille</div>${miniGraphe(tailleVals,'#D85A30',' cm')}</div>` : ''}
   ` : '';
 
-  const histRows = releves.length ? releves.slice().reverse().map(r => `
-    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
-      <div style="font-size:13px;color:var(--muted);">${_mAfficherDate(r.date)}${r.phase ? ' · ' + r.phase : ''}</div>
-      <div style="font-size:13px;">${r.poids ? r.poids + ' kg' : '—'}${r.taille ? ' · ' + r.taille + ' cm' : ''}</div>
-    </div>`).join('')
+  const _cm = v => v!=null&&v!==''&&!isNaN(v) ? v+' cm' : null;
+  const histRows = releves.length ? releves.slice().reverse().map(r => {
+    const extras = [
+      r.taille  ? 'Taille ' + _cm(r.taille)   : null,
+      r.fessiers? 'Fess. ' + _cm(r.fessiers)  : null,
+      r.cuisses ? 'Cuiss. '+ _cm(r.cuisses)   : null,
+      r.mollets ? 'Moll. ' + _cm(r.mollets)   : null,
+      r.poitrine? 'Poit. ' + _cm(r.poitrine)  : null,
+      r.epaules ? 'Ép. '   + _cm(r.epaules)   : null,
+      r.bras    ? 'Bras '  + _cm(r.bras)      : null,
+    ].filter(Boolean);
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;">
+        <div style="font-size:13px;color:var(--muted);">${_mAfficherDate(r.date)}${r.phase ? ' · ' + r.phase : ''}</div>
+        <div style="font-size:13px;font-weight:600;">${r.poids ? r.poids + ' kg' : '—'}</div>
+      </div>
+      ${extras.length ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${extras.join(' · ')}</div>` : ''}
+    </div>`;
+  }).join('')
     : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Aucune donnée sur cette période</div>';
 
   const backFn = isSupabase() ? "goTo('home')" : 'loadHome()';
@@ -310,23 +336,32 @@ function renderSaisieForm() {
 function renderSaisieFormSupabase() {
   const d = _mFormData;
   if (!d) return renderSaisieListSupabase();
-  const poidsVal  = d.poids  !== null && d.poids  !== undefined ? d.poids  : '';
-  const tailleVal = d.taille !== null && d.taille !== undefined ? d.taille : '';
+
+  const numInput = (label, field, unit) => {
+    const val = d[field] !== null && d[field] !== undefined ? d[field] : '';
+    return `<div style="margin-bottom:12px;">
+      <div class="field-label">${label} (${unit})</div>
+      <input type="number" inputmode="decimal" step="0.1" value="${val}" placeholder="—"
+        class="bilan-input" style="font-size:16px;"
+        onchange="sauverMensurationSupa('${field}', parseFloat(this.value)||null)">
+    </div>`;
+  };
 
   return `<div id="app">
     ${renderHeader('Mensurations', _mAfficherDate(d.date), false)}
     <div class="page">
       <div class="card">
-        <div class="field-label">POIDS (kg)</div>
-        <input type="number" inputmode="decimal" step="0.1" value="${poidsVal}" placeholder="—"
-          class="bilan-input" style="font-size:16px;"
-          onchange="sauverMensurationSupa('poids', parseFloat(this.value)||null)">
+        ${numInput('POIDS', 'poids', 'kg')}
       </div>
       <div class="card">
-        <div class="field-label">TOUR DE TAILLE (cm)</div>
-        <input type="number" inputmode="decimal" step="0.1" value="${tailleVal}" placeholder="—"
-          class="bilan-input" style="font-size:16px;"
-          onchange="sauverMensurationSupa('taille', parseFloat(this.value)||null)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted);">Mensurations (cm)</div>
+        ${numInput('Tour de taille', 'taille', 'cm')}
+        ${numInput('Fessiers', 'fessiers', 'cm')}
+        ${numInput('Cuisses', 'cuisses', 'cm')}
+        ${numInput('Mollets', 'mollets', 'cm')}
+        ${numInput('Poitrine', 'poitrine', 'cm')}
+        ${numInput('Épaules', 'epaules', 'cm')}
+        ${numInput('Bras', 'bras', 'cm')}
       </div>
       <button class="btn-secondary" onclick="loadSaisieMensurationsSupabase()">← Toutes les saisies</button>
     </div>
@@ -362,11 +397,19 @@ function sauverDateMensuration(ligne, dateStr) {
 async function sauverMensurationSupa(field, value) {
   if (!_mFormData || !_mFormData.date) return;
   _mFormData[field] = value;
+  const f = _mFormData;
+  const nn = v => v !== null && v !== undefined ? v : null;
   const body = {
     client_id: S.client,
-    date:  _mFormData.date,
-    poids: _mFormData.poids !== null && _mFormData.poids !== undefined ? _mFormData.poids : null,
-    mesure: _mFormData.taille !== null && _mFormData.taille !== undefined ? _mFormData.taille : null
+    date:     f.date,
+    poids:    nn(f.poids),
+    mesure:   nn(f.taille),
+    fessiers: nn(f.fessiers),
+    cuisses:  nn(f.cuisses),
+    mollets:  nn(f.mollets),
+    poitrine: nn(f.poitrine),
+    epaules:  nn(f.epaules),
+    bras:     nn(f.bras),
   };
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/mensurations`, {
@@ -374,8 +417,8 @@ async function sauverMensurationSupa(field, value) {
       headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
       body: JSON.stringify(body)
     });
-    const updated = { date: _mFormData.date, poids: _mFormData.poids, taille: _mFormData.taille, phase: _mFormData.phase || '' };
-    const idx = _mReleves.findIndex(r => r.date === _mFormData.date);
+    const updated = { ...body, taille: f.taille, phase: f.phase || '' };
+    const idx = _mReleves.findIndex(r => r.date === f.date);
     if (idx >= 0) _mReleves[idx] = updated;
     else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
   } catch(e) {}

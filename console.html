@@ -822,7 +822,13 @@ async function openBilanDetailFromLog(client, ts, coachTraite) {
       const bMs = new Date(b.date_validation).getTime();
       return tsMs && Math.abs(bMs - tsMs) <= 7*86400000;
     });
-    if (supMatch) { openBilanDetailSupabase(supMatch); return; }
+    if (supMatch) {
+      _bilanNavList = supaBilans;
+      _bilanNavIdx  = supaBilans.indexOf(supMatch);
+      _bilanNavSource = 'bilans';
+      openBilanDetailSupabase(supMatch);
+      return;
+    }
     throw new Error('Bilan introuvable dans GAS et dans Supabase.');
   } catch(e) {
     bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
@@ -831,7 +837,7 @@ async function openBilanDetailFromLog(client, ts, coachTraite) {
 }
 
 function openBilanDetailSupabase(bilan) {
-  const dateIso = bilan.date_validation || '';
+  const dateIso = bilan.date_validation || (bilan.created_at||'').split('T')[0] || '';
   const dateFr  = dateIso ? dateIso.split('-').reverse().join('/') : '';
   bilanDetailState = {
     loaded: true,
@@ -841,6 +847,7 @@ function openBilanDetailSupabase(bilan) {
     coachTraite: !!bilan.coach_traite,
     data: {
       dateValidation: dateFr,
+      semaineLabel: bilan.semaine_label || '',
       jours: bilan.jours || [],
       repas: bilan.repas_eval || [],
       commentaireAlim: bilan.commentaire_alim || '',
@@ -869,7 +876,9 @@ function bilanNavGo(delta) {
   const newIdx = _bilanNavIdx + delta;
   if (newIdx < 0 || newIdx >= _bilanNavList.length) return;
   _bilanNavIdx = newIdx;
-  openBilanDetailSupabase(_bilanNavList[newIdx]);
+  const b = _bilanNavList[newIdx];
+  if (b._supabaseBilan !== false) openBilanDetailSupabase(b);
+  else openBilanDetail(b.client_id, b.gas_ligne_titre, b.ts, b.coach_traite);
 }
 
 function _weekRange(dateFr) {
@@ -1016,9 +1025,9 @@ function renderBilanDetailPage(el) {
 
   const _navDateLabel = (b) => {
     if (!b) return '';
-    const iso = b.date_validation || '';
-    if (!iso) return '';
-    return iso.split('-').reverse().join('/');
+    const iso = b.date_validation || (b.created_at||'').split('T')[0] || '';
+    const dateFr = iso ? iso.split('-').reverse().join('/') : '';
+    return dateFr || b.semaine_label || '';
   };
   const hasPrev = _bilanNavList && _bilanNavIdx < _bilanNavList.length - 1;
   const hasNext = _bilanNavList && _bilanNavIdx > 0;
@@ -1027,9 +1036,9 @@ function renderBilanDetailPage(el) {
 
   const navHtml = (hasPrev || hasNext) ? `
     <div style="display:flex;gap:8px;margin-bottom:4px;">
-      ${hasPrev ? `<button class="btn" onclick="bilanNavGo(${_bilanNavIdx+1})" style="font-size:12px;padding:5px 10px;">${svgBack} ${_navDateLabel(prevBilan)}</button>` : `<div style="flex:1;"></div>`}
+      ${hasPrev ? `<button class="btn" onclick="bilanNavGo(1)" style="font-size:12px;padding:5px 10px;">${svgBack} ${_navDateLabel(prevBilan)}</button>` : `<div style="flex:1;"></div>`}
       <div style="flex:1;"></div>
-      ${hasNext ? `<button class="btn" onclick="bilanNavGo(${_bilanNavIdx-1})" style="font-size:12px;padding:5px 10px;">${_navDateLabel(nextBilan)} ${svgFwd}</button>` : ''}
+      ${hasNext ? `<button class="btn" onclick="bilanNavGo(-1)" style="font-size:12px;padding:5px 10px;">${_navDateLabel(nextBilan)} ${svgFwd}</button>` : ''}
     </div>` : '';
 
   const backHtml = `<button class="fiche-back" onclick="${backAction}">${svgBack} ${backLabel}</button>`;
@@ -1051,7 +1060,8 @@ function renderBilanDetailPage(el) {
   const jours = d.jours || [];
   const repas = d.repas || [];
   const dateValidation = d.dateValidation || '';
-  const weekRange = _weekRange(dateValidation);
+  const semaineLabel = d.semaineLabel || '';
+  const weekRange = _weekRange(dateValidation) || semaineLabel;
 
   const poidsVals = jours.map(j=>parseFloat(j.poids)).filter(v=>!isNaN(v)&&v>0);
   const avgPoids = poidsVals.length ? (poidsVals.reduce((a,b)=>a+b,0)/poidsVals.length).toFixed(1) : null;
@@ -2577,14 +2587,16 @@ function renderFicheBilansTab(c){
     return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
   const rows = _ficheBilans.map((b, idx) => {
-    const dateFr = (b.date_validation||'').split('-').reverse().join('/') || '—';
+    const dateRaw = b.date_validation || (b.created_at||'').split('T')[0] || '';
+    const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
+    const label = b.semaine_label || dateFr;
     const traite = b.coach_traite;
     const chip = traite
       ? `<span class="chip ok"><span class="dot"></span>Traité</span>`
       : `<span class="chip late"><span class="dot"></span>À traiter</span>`;
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td>${dateFr}</td>
-      <td>${esc(b.commentaire_alim||'').slice(0,60)||'—'}</td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(label)}</td>
       <td>${chip}</td>
     </tr>`;
   }).join('');
@@ -2592,7 +2604,7 @@ function renderFicheBilansTab(c){
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
         <th style="text-align:left;padding:6px 8px;">Date</th>
-        <th style="text-align:left;padding:6px 8px;">Commentaire alim.</th>
+        <th style="text-align:left;padding:6px 8px;">Semaine</th>
         <th style="text-align:left;padding:6px 8px;">Statut</th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -2675,20 +2687,28 @@ function renderFicheMensurationsTab(c){
     </div>`;
   }
 
+  const cm = (v) => v!=null ? v+' cm' : '—';
+  const kg = (v) => v!=null ? v+' kg' : '—';
   const tableRows = [...rows].reverse().map(r => {
     const dateFr = (r.date||'').split('-').reverse().join('/');
     return `<tr>
       <td class="mono">${esc(dateFr)}</td>
       <td>${esc(r.phase||'—')}</td>
-      <td>${r.poids!=null?r.poids+' kg':'—'}</td>
-      <td>${r.mesure!=null?r.mesure+' cm':'—'}</td>
+      <td>${kg(r.poids)}</td>
+      <td>${cm(r.mesure)}</td>
+      <td>${cm(r.fessiers)}</td>
+      <td>${cm(r.cuisses)}</td>
+      <td>${cm(r.mollets)}</td>
+      <td>${cm(r.poitrine)}</td>
+      <td>${cm(r.epaules)}</td>
+      <td>${cm(r.bras)}</td>
     </tr>`;
   }).join('');
 
   return `<div class="fiche-card">
     ${chartSvg}
     <div class="table-scroll"><table class="alim-table">
-      <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th></tr></thead>
+      <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table></div>
   </div>`;
@@ -4491,6 +4511,12 @@ async function migrerMensurations(clientId, rafraichirPage) {
         phase: r.phase || null,
         poids: r.poids != null ? r.poids : null,
         mesure: r.taille != null ? r.taille : null,
+        fessiers: r.fessiers != null ? r.fessiers : null,
+        cuisses: r.cuisses != null ? r.cuisses : null,
+        mollets: r.mollets != null ? r.mollets : null,
+        poitrine: r.poitrine != null ? r.poitrine : null,
+        epaules: r.epaules != null ? r.epaules : null,
+        bras: r.bras != null ? r.bras : null,
       }))
       .filter(r => r.date);
 
@@ -4813,6 +4839,7 @@ function _renderMigPreviewMensurations() {
     const checked = isoDate && migPreviewSel.has(isoDate);
     const statusColor = exists ? 'var(--text-faint)' : 'var(--success)';
     const statusLabel = exists ? 'Déjà migré' : 'Nouveau';
+    const _cm = v => v!=null&&v!==''?v+' cm':'—';
     return `<tr style="opacity:${exists&&!checked?'0.5':'1'};">
       <td style="padding:6px 12px;width:36px;">
         ${isoDate ? `<input type="checkbox" ${checked?'checked':''} onchange="toggleMigPreviewSel('${isoDate}',this.checked)" style="accent-color:var(--accent);">` : ''}
@@ -4820,7 +4847,13 @@ function _renderMigPreviewMensurations() {
       <td class="mono" style="font-size:12px;padding:6px 12px;">${esc(r.date||'')}</td>
       <td style="font-size:12px;padding:6px 12px;color:var(--text-faint);">${esc(r.phase||'—')}</td>
       <td style="font-size:12px;padding:6px 12px;">${r.poids!=null?r.poids+' kg':'—'}</td>
-      <td style="font-size:12px;padding:6px 12px;">${r.taille!=null?r.taille+' cm':'—'}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.taille)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.fessiers)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.cuisses)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.mollets)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.poitrine)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.epaules)}</td>
+      <td style="font-size:12px;padding:6px 12px;">${_cm(r.bras)}</td>
       <td style="font-size:11px;padding:6px 12px;color:${statusColor};">${statusLabel}</td>
     </tr>`;
   }).join('');
@@ -4848,7 +4881,13 @@ function _renderMigPreviewMensurations() {
             <th>Date (GAS)</th>
             <th>Phase</th>
             <th>Poids</th>
-            <th>Mesure</th>
+            <th>Tour taille</th>
+            <th>Fessiers</th>
+            <th>Cuisses</th>
+            <th>Mollets</th>
+            <th>Poitrine</th>
+            <th>Épaules</th>
+            <th>Bras</th>
             <th>Statut</th>
           </tr></thead>
           <tbody id="migMenuBody">${rows}</tbody>
@@ -4902,6 +4941,12 @@ async function migrerSelectionMensu() {
         phase: raw.phase || null,
         poids: raw.poids != null ? raw.poids : null,
         mesure: raw.taille != null ? raw.taille : null,
+        fessiers: raw.fessiers != null ? raw.fessiers : null,
+        cuisses: raw.cuisses != null ? raw.cuisses : null,
+        mollets: raw.mollets != null ? raw.mollets : null,
+        poitrine: raw.poitrine != null ? raw.poitrine : null,
+        epaules: raw.epaules != null ? raw.epaules : null,
+        bras: raw.bras != null ? raw.bras : null,
       }));
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
@@ -5021,7 +5066,6 @@ async function migSelectDiete(ligne, col, nom) {
   try {
     const raw = await apiGasProd('chargerDieteParPosition', migPreviewClientId, { ligneTitre: ligne, colTitre: col });
     migPreviewDieteDetail = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    console.log('[migSelectDiete] raw response:', JSON.stringify(migPreviewDieteDetail));
   } catch(e) {
     migPreviewDieteDetail = { repas: [], erreur: e.message };
   }
