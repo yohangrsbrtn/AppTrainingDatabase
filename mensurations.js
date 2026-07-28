@@ -1,6 +1,13 @@
 // ── Mensurations page ─────────────────────────────────────────────────
 
-let _mSubPage  = 'historique'; // 'historique' | 'saisie-list' | 'saisie-form'
+window._mensCharts = window._mensCharts || {};
+
+const _M_COLS   = ['fessiers','cuisses','mollets','poitrine','epaules','bras'];
+const _M_COLORS = ['#f59e0b','#a78bfa','#3ecf8e','#f97316','#4f8ef7','#e05c5c'];
+const _M_LABELS = ['Fessiers','Cuisses','Mollets','Poitrine','Épaules','Bras'];
+let _mChart2Key = 'fessiers';
+
+let _mSubPage  = 'historique'; // 'historique' | 'autres-mens' | 'saisie-list' | 'saisie-form'
 let _mReleves  = [];
 let _mEntrees  = [];
 let _mFormData = null;
@@ -137,6 +144,7 @@ function renderMensurationsPage() {
   if (S.page === 'mens-loading') {
     return `<div id="app">${renderHeader('Mes Mensurations','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('mensurations')}</div>`;
   }
+  if (_mSubPage === 'autres-mens') return renderAutresMens();
   if (_mSubPage === 'saisie-list') return renderSaisieList();
   if (_mSubPage === 'saisie-form') return renderSaisieForm();
   return renderHistorique();
@@ -179,8 +187,7 @@ function renderHistorique() {
         <div style="font-size:13px;color:${varTaille <= 0 ? 'var(--green)' : '#D85A30'};">${varTaille >= 0 ? '+' : ''}${varTaille} cm</div>
       </div>` : ''}
     </div>
-    ${poidsPts.length >= 2 ? `<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#378ADD;">Évolution du poids</div>${miniGraphe(poidsVals,'#378ADD',' kg')}</div>` : ''}
-    ${taillePts.length >= 2 ? `<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#D85A30;">Tour de taille</div>${miniGraphe(tailleVals,'#D85A30',' cm')}</div>` : ''}
+    ${(poidsPts.length >= 2 || taillePts.length >= 2) ? `<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Poids &amp; Tour de taille</div>${_buildMensChart('m_c1', releves, ['poids','taille'], ['#378ADD','#D85A30'], ['Poids (kg)','Tour de taille (cm)'], '')}</div>` : ''}
   ` : '';
 
   const _cm = v => v!=null&&v!==''&&!isNaN(v) ? v+' cm' : null;
@@ -205,6 +212,7 @@ function renderHistorique() {
     : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Aucune donnée sur cette période</div>';
 
   const backFn = isSupabase() ? "goTo('home')" : 'loadHome()';
+  const hasAutres = releves.some(r => _M_COLS.some(k => parseFloat(r[k]) > 0));
 
   return `<div id="app">
     ${renderHeader('Mes Mensurations', 'Ma progression', false)}
@@ -213,6 +221,7 @@ function renderHistorique() {
         <button onclick="${backFn}" style="flex:1;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">← Accueil</button>
         <button onclick="loadSaisieMensurations()" style="flex:1;background:linear-gradient(135deg,#378ADD,#2260a8);color:#fff;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">Saisir mensurations</button>
       </div>
+      ${hasAutres ? `<button onclick="_mSubPage='autres-mens';setPage('mensurations');" style="width:100%;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:12px;">📏 Autres mensurations →</button>` : ''}
 
       <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;">
         <div style="flex:1;min-width:0;overflow:hidden;">
@@ -459,6 +468,112 @@ function parseDateFR(str) {
 
 function isoDate(d) {
   return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+}
+
+function renderAutresMens() {
+  const releves = _mReleves;
+  const ki = Math.max(0, _M_COLS.indexOf(_mChart2Key));
+  const pills = _M_COLS.map((k, i) => `<button onclick="_setMChart2('${k}')"
+    style="padding:3px 11px;border-radius:99px;border:1px solid ${_mChart2Key===k?_M_COLORS[i]:'var(--border)'};background:${_mChart2Key===k?_M_COLORS[i]+'22':'transparent'};color:${_mChart2Key===k?_M_COLORS[i]:'var(--muted)'};font-size:11px;font-weight:${_mChart2Key===k?'700':'400'};cursor:pointer;transition:all .15s;">${_M_LABELS[i]}</button>`).join('');
+  const chart = releves.length >= 2 ? _buildMensChart('m_c2_' + _mChart2Key, releves, [_mChart2Key], [_M_COLORS[ki]], [_M_LABELS[ki]], ' cm') : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données</div>';
+
+  return `<div id="app">
+    ${renderHeader('Autres mensurations', 'Mensurations', false)}
+    <div class="page">
+      <button onclick="_mSubPage='historique';setPage('mensurations');" style="width:100%;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:12px;">← Retour</button>
+      <div class="card">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>
+        <div id="mensChart2">${chart}</div>
+      </div>
+    </div>
+    ${renderNavBar('mensurations')}
+  </div>`;
+}
+
+function _setMChart2(key) {
+  _mChart2Key = key;
+  const el = document.getElementById('mensChart2');
+  if (el) {
+    const ki = _M_COLS.indexOf(key);
+    el.innerHTML = _buildMensChart('m_c2_' + key, _mReleves, [key], [_M_COLORS[ki]], [_M_LABELS[ki]], ' cm');
+  }
+}
+
+function _buildMensChart(id, rows, keys, colors, labels, unit) {
+  const W=560,H=180,PL=44,PR=14,PT=16,PB=34,cw=W-PL-PR,ch=H-PT-PB;
+  const allVals=keys.flatMap(k=>rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v)&&v>0));
+  if(allVals.length<2) return '';
+  const rng=Math.max(...allVals)-Math.min(...allVals), pad=rng<2?1:Math.ceil(rng*0.1);
+  const yMin=Math.floor(Math.min(...allVals)-pad), yMax=Math.ceil(Math.max(...allVals)+pad);
+  const n=rows.length;
+  const xS=i=>+(PL+(i/(n-1||1))*cw).toFixed(2);
+  const yS=v=>+(PT+ch-((v-yMin)/((yMax-yMin)||1))*ch).toFixed(2);
+  const xs=rows.map((_,i)=>xS(i));
+  window._mensCharts[id]={rows,keys,colors,labels,xs,W,H,PL,PT,ch,unit:unit||''};
+  const defs=keys.map((k,ki)=>`<linearGradient id="${id}_g${ki}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${colors[ki]}" stop-opacity="0.18"/>
+    <stop offset="100%" stop-color="${colors[ki]}" stop-opacity="0"/>
+  </linearGradient>`).join('');
+  const yGrid=[0.25,0.5,0.75].map(f=>{const v=yMin+f*(yMax-yMin);
+    return `<line x1="${PL}" y1="${yS(v)}" x2="${PL+cw}" y2="${yS(v)}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3"/>
+      <text x="${PL-5}" y="${+(yS(v)+3.5).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${Math.round(v)}</text>`;
+  }).join('');
+  const maxL=Math.min(6,n), stepL=Math.floor((n-1)/(maxL-1||1));
+  const xLabels=Array.from({length:maxL},(_,i)=>{
+    const idx=i===maxL-1?n-1:i*stepL, d=(rows[idx].date||'').split('-');
+    return `<text x="${xs[idx]}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.length===3?d[2]+'/'+d[1]:''}</text>`;
+  }).join('');
+  const areas=keys.map((k,ki)=>{
+    const pts=rows.map((r,i)=>{const v=parseFloat(r[k]);return isNaN(v)||v<=0?null:[xs[i],yS(v)];}).filter(Boolean);
+    if(pts.length<2) return '';
+    return `<path d="${pts.map((p,i)=>(i===0?'M':'L')+p[0]+','+p[1]).join(' ')} L${pts[pts.length-1][0]},${PT+ch} L${pts[0][0]},${PT+ch} Z" fill="url(#${id}_g${ki})"/>`;
+  }).join('');
+  const lines=keys.map((k,ki)=>{
+    const pts=rows.map((r,i)=>{const v=parseFloat(r[k]);return isNaN(v)||v<=0?null:xs[i]+','+yS(v);}).filter(Boolean);
+    return pts.length>=2?`<polyline points="${pts.join(' ')}" fill="none" stroke="${colors[ki]}" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/>`:'';
+  }).join('');
+  const dots=keys.map((k,ki)=>rows.map((r,i)=>{const v=parseFloat(r[k]);
+    return isNaN(v)||v<=0?'':`<circle id="${id}_d${ki}_${i}" cx="${xs[i]}" cy="${yS(v)}" r="1.8" fill="${colors[ki]}" stroke="var(--bg2)" stroke-width="1.2"/>`;
+  }).join('')).join('');
+  const axes=`<line x1="${PL}" y1="${PT}" x2="${PL}" y2="${PT+ch}" stroke="var(--border)" stroke-width="1"/>
+    <line x1="${PL}" y1="${PT+ch}" x2="${PL+cw}" y2="${PT+ch}" stroke="var(--border)" stroke-width="1"/>`;
+  const vline=`<line id="${id}_vl" x1="${xs[0]}" y1="${PT}" x2="${xs[0]}" y2="${PT+ch}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5" display="none"/>`;
+  const ov=`<rect x="${PL}" y="${PT}" width="${cw}" height="${ch}" fill="transparent" onmousemove="_mensHover(event,'${id}')" onmouseleave="_mensHoverOut('${id}')"/>`;
+  const tip=`<div id="${id}_tip" style="display:none;position:absolute;top:10px;left:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text);pointer-events:none;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;"></div>`;
+  const legend=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:8px;margin-bottom:4px;">
+    ${keys.map((k,i)=>`<span><span style="color:${colors[i]};margin-right:3px;">●</span>${labels[i]}</span>`).join('')}
+  </div>`;
+  return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${areas}${lines}${dots}${vline}${ov}</svg></div>${legend}`;
+}
+
+function _mensHover(evt, cid) {
+  const d=window._mensCharts[cid]; if(!d) return;
+  const svg=evt.currentTarget.closest('svg');
+  const rect=svg.getBoundingClientRect();
+  const mx=(evt.clientX-rect.left)*(d.W/rect.width);
+  let ni=0, minDist=Infinity;
+  d.xs.forEach((x,i)=>{const dist=Math.abs(x-mx);if(dist<minDist){minDist=dist;ni=i;}});
+  const vl=document.getElementById(cid+'_vl');
+  if(vl){vl.setAttribute('x1',d.xs[ni]);vl.setAttribute('x2',d.xs[ni]);vl.removeAttribute('display');}
+  const row=d.rows[ni];
+  const dateStr=(row.date||'').split('-').reverse().join('/');
+  const vals=d.keys.map((k,ki)=>{
+    const v=parseFloat(row[k]); if(isNaN(v)||v<=0) return '';
+    return `<div style="margin-top:3px;"><span style="color:${d.colors[ki]};margin-right:4px;">●</span>${d.labels[ki]} : <strong>${v}</strong>${d.unit}</div>`;
+  }).filter(Boolean).join('');
+  const tip=document.getElementById(cid+'_tip');
+  if(tip){
+    tip.innerHTML=`<div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">${dateStr}</div>${vals}`;
+    const xRatio=rect.width/d.W;
+    let lx=d.xs[ni]*xRatio+14;
+    if(lx+160>rect.width) lx=d.xs[ni]*xRatio-170;
+    tip.style.left=lx+'px'; tip.style.display='block';
+  }
+}
+
+function _mensHoverOut(cid) {
+  const vl=document.getElementById(cid+'_vl'); if(vl) vl.setAttribute('display','none');
+  const tip=document.getElementById(cid+'_tip'); if(tip) tip.style.display='none';
 }
 
 function miniGraphe(valeurs, couleur, unite) {

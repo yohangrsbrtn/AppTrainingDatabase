@@ -302,6 +302,17 @@ function renderBilanPage() {
 
 // ── Render Supabase ───────────────────────────────────────────────────
 
+function _bilanWeekRange(dateStr) {
+  if (!dateStr) return 'Bilan';
+  const mois = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+  const d = new Date(dateStr);
+  if (isNaN(d)) return dateStr;
+  const daysFromMon = (d.getDay() + 6) % 7;
+  const lundi = new Date(d); lundi.setDate(d.getDate() - daysFromMon);
+  const dim   = new Date(lundi); dim.setDate(lundi.getDate() + 6);
+  return `${lundi.getDate()} ${mois[lundi.getMonth()]} → ${dim.getDate()} ${mois[dim.getMonth()]}`;
+}
+
 function _renderHistoriqueListSupa() {
   const hist = S.data.historiqueBilans || [];
   const rows = hist.length === 0
@@ -310,8 +321,7 @@ function _renderHistoriqueListSupa() {
       <div class="list-item" onclick="_supaLoadBilanHistoriqueById(${b.id})">
         <div class="list-icon">📋</div>
         <div class="list-text" style="flex:1;min-width:0;">
-          <div class="list-title">${b.semaine || 'Bilan'}</div>
-          <div class="list-sub">Envoyé le ${formatDateBilanFR(b.date)}</div>
+          <div class="list-title">${_bilanWeekRange(b.date)}</div>
         </div>
         <span style="font-size:11px;color:#1D9E75;font-weight:600;white-space:nowrap;flex-shrink:0;">✅ Envoyé</span>
         <div class="list-arrow">›</div>
@@ -574,8 +584,7 @@ function renderHistoriqueList() {
       <div class="list-item" onclick="loadBilanHistorique(${b.ligneTitre})">
         <div class="list-icon">📋</div>
         <div class="list-text" style="flex:1;min-width:0;">
-          <div class="list-title">${b.semaine || 'Bilan'}</div>
-          <div class="list-sub">Validé le ${formatDateBilanFR(b.date)}</div>
+          <div class="list-title">${_bilanWeekRange(b.date)}</div>
         </div>
         ${btnEnvoyer}
         <div class="list-arrow">›</div>
