@@ -5850,7 +5850,7 @@ async function migrerBilansGas(clientId) {
 function _renderMigPreviewProgression() {
   const gas = migPreviewData.gasProgression;
   const supa = migPreviewData.supaProgression;
-  const dejaImporte = !!supa;
+  const dejaImporte = !!(supa && (supa.titre_actif || supa.seen_titres));
 
   const row = (label, gasVal, supaVal) =>
     `<tr><td style="padding:6px 12px;color:var(--text-faint)">${label}</td><td style="padding:6px 12px">${gasVal ?? '—'}</td><td style="padding:6px 12px">${supaVal ?? '—'}</td></tr>`;
@@ -5858,23 +5858,26 @@ function _renderMigPreviewProgression() {
   return `<div style="padding:16px">
     <h3 style="margin:0 0 12px">Progression GAS → Supabase</h3>
     ${!gas ? `<div style="color:var(--text-faint);padding:12px 0">Données GAS non disponibles pour ce client.</div>` : `
+    <div style="background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:var(--text-muted);">
+      XP, niveau et pas cumulés ne se migrent plus manuellement — ils sont recalculés automatiquement à chaque affichage à partir des <strong>bilans importés</strong> (onglet Bilans). Importez les bilans historiques du client pour que ces valeurs soient correctes, ce tableau n'est là que pour comparer/diagnostiquer. Seuls le titre actif et les titres déjà vus restent à importer ci-dessous.
+    </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
         <th style="padding:6px 12px;color:var(--text-faint)">Champ</th>
         <th style="padding:6px 12px">GAS</th>
-        <th style="padding:6px 12px">Supabase actuel</th>
+        <th style="padding:6px 12px">Supabase (recalculé)</th>
       </tr></thead>
       <tbody>
         ${row('XP total', gas.xpTotal ?? gas.xp, supa?.xp_total ?? '—')}
         ${row('Niveau', gas.niveau, supa?.niveau ?? '—')}
+        ${row('Pas total', gas.pasTotal ?? gas.pas_total, supa?.pas_total ?? '—')}
         ${row('Titre actif', gas.titreActif ?? gas.titre_actif, supa?.titre_actif ?? '—')}
         ${row('Titres vus', gas.seenTitres ?? gas.seen_titres, supa?.seen_titres ?? '—')}
-        ${row('Pas total', gas.pasTotal ?? gas.pas_total, supa?.pas_total ?? '—')}
       </tbody>
     </table>
-    ${dejaImporte ? `<div style="color:var(--success);margin-bottom:12px">✓ Données déjà présentes dans Supabase</div>` : ''}
+    ${dejaImporte ? `<div style="color:var(--success);margin-bottom:12px">✓ Titre/titres vus déjà présents dans Supabase</div>` : ''}
     <button class="btn-primary" onclick="migrerProgressionGAS('${migPreviewClientId}')">
-      ${dejaImporte ? '↻ Ré-importer la progression' : '⬇ Importer la progression'}
+      ${dejaImporte ? '↻ Ré-importer titre actif / titres vus' : '⬇ Importer titre actif / titres vus'}
     </button>`}
   </div>`;
 }
@@ -5883,12 +5886,14 @@ async function migrerProgressionGAS(clientId) {
   const gas = migPreviewData.gasProgression;
   if (!gas) return;
   try {
+    // XP/niveau/pas_total ne sont plus migrés : ils sont toujours recalculés
+    // depuis les vrais bilans Supabase (voir chargerProgressionSupabase dans
+    // progression.js) — les migrer ici écrirait une valeur qui serait de
+    // toute façon écrasée au prochain chargement de la progression du client.
     const body = {
       client_id: clientId,
       titre_actif: gas.titreActif ?? gas.titre_actif ?? null,
       seen_titres: gas.seenTitres ?? gas.seen_titres ?? 0,
-      pas_total: gas.pasTotal ?? gas.pas_total ?? 0,
-      xp_total: gas.xpTotal ?? gas.xp_total ?? 0,
       updated_at: new Date().toISOString()
     };
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
