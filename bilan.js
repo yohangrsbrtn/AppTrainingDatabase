@@ -350,6 +350,8 @@ function renderBilanPage() {
     if (_bilanMode === 'history-list')   return _renderHistoriqueListSupa();
     if (_bilanMode === 'history-detail') return _renderBilanDetailSupa(_bilanData, true);
     if (_bilanMode === 'previous')       return _renderBilanDetailSupa(_bilanData, false, true);
+    if (_bilanMode === 'attente-list')   return _renderBilansEnAttenteListSupa();
+    if (_bilanMode === 'attente-detail') return _renderBilanDetailSupa(_bilanData, false, false, true);
     if (!_bilanData) return `<div id="app">${renderHeader('Bilan','',false)}<div class="page"><div class="empty"><div class="empty-icon">📊</div><div class="empty-text">Aucun bilan disponible</div></div></div>${renderNavBar('bilan')}</div>`;
     return _renderBilanDetailSupa(_bilanData, false, false);
   }
@@ -402,7 +404,69 @@ function _renderHistoriqueListSupa() {
   </div>`;
 }
 
-function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente) {
+// ── Bilans en attente : anciens bilans non-envoyés remplacés par un rollover
+// automatique (cf. _supaGetOrCreateBilanCourant) — restent modifiables/envoyables
+// depuis cette vue dédiée, sinon ils seraient orphelins pour le client.
+async function chargerBilansEnAttente() {
+  setPage('bilan-loading');
+  try {
+    const clientId = getClient();
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.false&order=created_at.desc`,
+      { headers: supaHeaders() }
+    );
+    const arr = res.ok ? await res.json() : [];
+    S.data.bilansEnAttente = arr.filter(b => b.id !== _bilanId).map(row => ({ id: row.id, semaine: row.semaine_label, date: row.created_at }));
+    _bilanMode = 'attente-list';
+    setPage('bilan');
+  } catch(e) { setPage('bilan'); }
+}
+
+async function _ouvrirBilanEnAttente(id) {
+  setPage('bilan-loading');
+  try {
+    const clientId = getClient();
+    const [res, profilRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${id}`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() }),
+    ]);
+    const arr = await res.json();
+    const profilArr = profilRes.ok ? await profilRes.json() : [];
+    if (arr && arr.length > 0) {
+      _bilanData = _normaliserBilanSupa(arr[0]);
+      _bilanId   = arr[0].id;
+      _bilanJourBilanNom = (profilArr[0] && profilArr[0].jour_bilan) || null;
+      _bilanMode = 'attente-detail';
+    }
+    setPage('bilan');
+  } catch(e) { setPage('bilan'); }
+}
+
+function _renderBilansEnAttenteListSupa() {
+  const list = S.data.bilansEnAttente || [];
+  const rows = list.length === 0
+    ? `<div class="empty"><div class="empty-text">Aucun bilan en attente.</div></div>`
+    : list.map(b => `
+      <div class="list-item" onclick="_ouvrirBilanEnAttente(${b.id})">
+        <div class="list-icon">⏳</div>
+        <div class="list-text" style="flex:1;min-width:0;">
+          <div class="list-title">${esc(b.semaine || 'Bilan')}</div>
+        </div>
+        <span style="font-size:11px;color:#f0a500;font-weight:600;white-space:nowrap;flex-shrink:0;">⏳ Non envoyé</span>
+        <div class="list-arrow">›</div>
+      </div>`).join('');
+
+  return `<div id="app">
+    ${renderHeader('Bilans en attente', '', false)}
+    <div class="page">
+      <div class="card">${rows}</div>
+      <button class="btn-secondary" onclick="loadBilan()">← Bilan en cours</button>
+    </div>
+    ${renderNavBar('bilan')}
+  </div>`;
+}
+
+function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, attenteMode) {
   _bilanData  = data;
   _bilanNotes = {};
   (data.repas || []).forEach((r, idx) => {
@@ -411,13 +475,17 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente) {
     if (r.appetit > 0)  _bilanNotes['r'+idx+'_app'] = r.appetit;
   });
 
-  const subtitle = isSemainePrecedente ? 'Semaine précédente' : (data.semaineLabel || 'Semaine en cours');
+  const subtitle = attenteMode ? 'Bilan en attente' : isSemainePrecedente ? 'Semaine précédente' : (data.semaineLabel || 'Semaine en cours');
   let html = '';
 
   if (data.dejaEnvoye) {
     html += `<div class="bilan-banner">Bilan envoyé au coach — toujours modifiable</div>`;
+  } else if (attenteMode) {
+    html += `<div class="bilan-banner">Bilan resté non-envoyé — une semaine plus récente est maintenant en cours</div>`;
   }
-  if (isSemainePrecedente) {
+  if (attenteMode) {
+    html += `<button class="btn-secondary" onclick="chargerBilansEnAttente()">← Bilans en attente</button>`;
+  } else if (isSemainePrecedente) {
     html += `<button class="btn-secondary" onclick="loadBilan()">← Semaine en cours</button>`;
   } else if (!modeHistorique) {
     html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()">📅 Historique des bilans</button>`;
@@ -496,9 +564,14 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente) {
       class="${deja ? 'btn-disabled' : 'btn-blue'}" style="width:100%;margin-top:4px;">
       ${deja ? '✅ Envoyé au coach' : '📤 Envoyer au coach'}
     </button>`;
-    html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()" style="margin-top:8px;">📅 Historique des bilans</button>`;
-    if (isSemainePrecedente) {
-      html += `<button class="btn-secondary" onclick="loadBilan()" style="margin-top:8px;">← Semaine en cours</button>`;
+    if (attenteMode) {
+      html += `<button class="btn-secondary" onclick="chargerBilansEnAttente()" style="margin-top:8px;">← Bilans en attente</button>`;
+    } else {
+      html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()" style="margin-top:8px;">📅 Historique des bilans</button>`;
+      html += `<button class="btn-secondary" onclick="chargerBilansEnAttente()" style="margin-top:8px;">⏳ Bilans en attente</button>`;
+      if (isSemainePrecedente) {
+        html += `<button class="btn-secondary" onclick="loadBilan()" style="margin-top:8px;">← Semaine en cours</button>`;
+      }
     }
   }
 
