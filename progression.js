@@ -1,5 +1,17 @@
 // ── Progression page ──────────────────────────────────────────────────
 
+// Nombre de semaines écoulées depuis le début du coaching (client_profils
+// .date_debut) — sert de dénominateur aux jauges séances/bilans, à la
+// place du nombre de bilans qui existent en base (incomplet si des
+// semaines n'ont pas de bilan créé, par ex. pendant la migration).
+function _semainesDepuisDebut(dateDebutStr) {
+  if (!dateDebutStr) return 0;
+  const debut = new Date(dateDebutStr);
+  if (isNaN(debut)) return 0;
+  const jours = Math.floor((new Date() - debut) / 86400000);
+  return Math.max(1, Math.ceil((jours + 1) / 7));
+}
+
 function getTierColors(tier) {
   switch(tier) {
     case 'bronze':     return {c1:'#d08040', c2:'#6a3010', bar:'linear-gradient(90deg,#6a3010,#d08040,#e8b060)'};
@@ -62,8 +74,11 @@ async function chargerProgressionSupabase() {
   const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
   const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
 
-  const nbSemaines = bilans.length;
-  const seancesAttendues = nbSemaines * 4;
+  // 4 = ancien comportement par défaut tant que le coach n'a pas encore
+  // assigné d'objectif séances/semaine (client_profils.seances_cible).
+  const nbSemaines = _semainesDepuisDebut(profil.date_debut) || bilans.length || 1;
+  const seancesCible = profil.seances_cible || 4;
+  const seancesAttendues = nbSemaines * seancesCible;
   const bilansAttendus = nbSemaines;
   const pctSeances = seancesAttendues > 0 ? Math.min(100, Math.round(seancesValidees / seancesAttendues * 100)) : 0;
   const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;

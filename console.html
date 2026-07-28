@@ -426,6 +426,16 @@ function getTierColors(tier) {
     default:           return {c1:'#a8b0c8', c2:'#404858', bar:'linear-gradient(90deg,#808898,#c0c8d8,#a8b0c8)'};
   }
 }
+// Semaines écoulées depuis le début du coaching — sert de dénominateur aux
+// jauges séances/bilans dans chargerClientProgressionXP (voir progression.js
+// pour la version client, identique).
+function _semainesDepuisDebut(dateDebutStr) {
+  if (!dateDebutStr) return 0;
+  const debut = new Date(dateDebutStr);
+  if (isNaN(debut)) return 0;
+  const jours = Math.floor((new Date() - debut) / 86400000);
+  return Math.max(1, Math.ceil((jours + 1) / 7));
+}
 </script>
 <script>
 // ── Garde d'authentification ────────────────────────────────────────────
@@ -3612,16 +3622,19 @@ async function ajouterXpClient(clientId) {
 }
 
 async function chargerClientProgressionXP(clientId){
-  const [progRes, bilansRes, seancesRes] = await Promise.all([
+  const [progRes, bilansRes, profilRes, seancesRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=date_debut,seances_cible`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?select=client_programme_exercice_id,semaine&client_programme_exercice_id=in.(select+id+from+client_programme_exercices+where+client_programme_id+in+(select+id+from+client_programmes+where+client_id%3Deq.${encodeURIComponent(clientId)}))`, { headers: supaHeaders() }).catch(()=>({ ok:false }))
   ]);
-  const [progRows, bilans] = await Promise.all([
+  const [progRows, bilans, profils] = await Promise.all([
     progRes.ok ? progRes.json() : Promise.resolve([]),
-    bilansRes.ok ? bilansRes.json() : Promise.resolve([])
+    bilansRes.ok ? bilansRes.json() : Promise.resolve([]),
+    profilRes.ok ? profilRes.json() : Promise.resolve([])
   ]);
   const progRow = progRows[0] || {};
+  const profil  = profils[0]  || {};
   // xp_total est un compteur stocké, incrémenté uniquement côté serveur à
   // l'envoi d'un bilan (bilan.js, _crediterXpBilanEnvoye), dédoublonné via
   // bilans.xp_credite — jamais recalculé ici. Voir progression.js.
@@ -3638,8 +3651,11 @@ async function chargerClientProgressionXP(clientId){
   const niveauMaxAtteint = niveau >= NIVEAU_MAX;
   const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
   const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
-  const nbSemaines = bilans.length;
-  const seancesAttendues = nbSemaines * 4;
+  // 4 = ancien comportement par défaut tant que le coach n'a pas encore
+  // assigné d'objectif séances/semaine (client_profils.seances_cible).
+  const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut) : 0) || bilans.length || 1;
+  const seancesCible = profil.seances_cible || 4;
+  const seancesAttendues = nbSemaines * seancesCible;
   const bilansAttendus = nbSemaines;
   const pctSeances = seancesAttendues > 0 ? Math.min(100, Math.round(seancesValidees / seancesAttendues * 100)) : 0;
   const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;
