@@ -51,7 +51,11 @@ async function chargerProgressionSupabase() {
   });
   historiqueXP.splice(5);
 
-  const pasTotal = pasTotalBilans;
+  // Le Raccourci iOS (HealthKit) POST directement pas_total sur
+  // client_progression — indépendant des bilans, jamais un compteur
+  // incrémenté par un bouton buggé. Math.max reste donc légitime ici (la
+  // plus grande source gagne), contrairement à xp_total.
+  const pasTotal = Math.max(pasTotalBilans, progRow.pas_total || 0);
 
   const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
   const niveauMaxAtteint = niveau >= NIVEAU_MAX;
