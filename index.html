@@ -548,17 +548,18 @@ async function _completerConnexion(json) {
 // reconstruits côté Supabase, cet accueil n'affiche que ce qui existe déjà.
 async function loadHomeSupabase(){
   try {
-    const [profils, prog] = await Promise.all([
+    const [profils, prog, journee] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
-      chargerProgressionSupabase().catch(() => null)
+      chargerProgressionSupabase().catch(() => null),
+      _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
     S.data.profil = profils[0] || {};
     if (prog) {
       S.data.prog = prog;
       S.data.prog.nom = [S.data.profil.prenom, S.data.profil.nom].filter(Boolean).join(' ') || S.client;
     }
-  } catch(e) { S.data.profil = {}; }
-  _journeeData = _loadJourneeDataSupabase();
+    _journeeData = journee;
+  } catch(e) { S.data.profil = {}; _journeeData = { aucun: true }; }
   setPage('home-supabase');
 }
 function renderHomeSupabase(){
@@ -867,7 +868,7 @@ function renderCarteHeader() {
             ${simplifie ? '' : `<div style="font-size:12px;color:#8892a4;margin-top:2px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
             <div style="margin-top:8px;display:flex;justify-content:space-between;">
               <span style="font-size:10px;color:#8892a4;">Niv. ${niveau}</span>
-              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${xpManquant.toLocaleString('fr')} XP → Niv. ${niveau+1}</span>
+              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${p.niveauMaxAtteint ? '👑 Niveau max' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
             </div>
             <div style="height:4px;background:#1e2235;border-radius:2px;overflow:hidden;margin-top:6px;">
               <div style="height:4px;border-radius:2px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
@@ -1443,21 +1444,46 @@ async function validerJourneeClient() {
 }
 
 // ── Journée en cours — mode Supabase ─────────────────────────────────
-function _journeeKeySupabase() {
-  const today = new Date().toISOString().split('T')[0];
-  return `journee_supa_${S.client}_${today}`;
+// La carte "Journée en cours" écrit directement dans jours[jourIdx] du
+// bilan hebdo Supabase en cours (même source de vérité que la page Bilan
+// complète, cf. sauverJourBilanSupa dans bilan.js) — jamais de compteur XP
+// incrémenté séparément. Réécriture idempotente : cliquer plusieurs fois ne
+// change rien de plus qu'un seul clic. Voir le plan de refonte XP.
+function _jourIdxAujourdhui() {
+  // Lundi=0 ... Dimanche=6, décalage -2h pour qu'une saisie après minuit
+  // compte encore pour la veille (comme le reste de l'app).
+  const jsDay = new Date(Date.now() - 2*3600*1000).getDay(); // 0=dim...6=sam
+  return (jsDay + 6) % 7;
 }
-function _loadJourneeDataSupabase() {
-  const today = new Date().toISOString().split('T')[0];
-  try {
-    const raw = localStorage.getItem(_journeeKeySupabase());
-    if (raw) return { ...JSON.parse(raw), aucun: false };
-  } catch(e) {}
-  return { diete: false, training: false, cardio: false, steps: '', valide: false, date: today, aucun: false };
+async function _loadJourneeDataSupabase() {
+  const clientId = getClient ? getClient() : S.client;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=id,jours`,
+    { headers: supaHeaders() }
+  );
+  const arr = res.ok ? await res.json() : [];
+  let id, jours;
+  if (arr.length > 0) {
+    id = arr[0].id;
+    jours = arr[0].jours || [];
+  } else {
+    const created = await _supaCreerNouveauBilan(clientId);
+    id = created.id;
+    jours = created.jours;
+  }
+  const idx = _jourIdxAujourdhui();
+  const j = jours[idx] || {};
+  return { bilanId: id, jourIdx: idx, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, steps: j.steps ?? '', valide: !!j.valide, aucun: false };
 }
-function _saveJourneeDataSupabase() {
-  if (!_journeeData) return;
-  try { localStorage.setItem(_journeeKeySupabase(), JSON.stringify(_journeeData)); } catch(e) {}
+async function _sauverJourneeSupabase(field, value) {
+  if (!_journeeData || !_journeeData.bilanId) return;
+  _journeeData[field] = value;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${_journeeData.bilanId}&select=jours`, { headers: supaHeaders() });
+  const arr = res.ok ? await res.json() : [];
+  const jours = (arr[0] && arr[0].jours) || [];
+  const idx = _journeeData.jourIdx;
+  jours[idx] = { ...(jours[idx] || {}), diete: _journeeData.diete, training: _journeeData.training, cardio: _journeeData.cardio, steps: _journeeData.steps || null, valide: !!_journeeData.valide };
+  await _supaPatchJoursBilan(_journeeData.bilanId, jours);
 }
 function _afficherModalJourneeSupabase() {
   const existant = document.getElementById('modalJournee');
@@ -1493,70 +1519,53 @@ function _afficherModalJourneeSupabase() {
 function toggleJourneeFieldSupabase(type) {
   if (!_journeeData) return;
   _journeeData[type] = !_journeeData[type];
-  _saveJourneeDataSupabase();
   const labels = { diete: 'Diète', training: 'Training', cardio: 'Cardio' };
   const id = { diete: 'jTogDiete', training: 'jTogTraining', cardio: 'jTogCardio' };
   const btn = document.getElementById(id[type]);
   if (btn) { btn.style.background = _journeeData[type] ? '#1D9E75' : '#2d3142'; btn.textContent = (_journeeData[type] ? '✓ ' : '') + labels[type]; }
+  _sauverJourneeSupabase(type, _journeeData[type])
+    .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
+    .catch(() => {});
 }
 function sauverStepsJourneeSupabase(val) {
   if (!_journeeData) return;
   const v = val ? parseInt(val.replace(/\s/g,'').replace(',','.')) : '';
-  _journeeData.steps = isNaN(v) ? '' : v;
-  _saveJourneeDataSupabase();
+  const steps = isNaN(v) ? '' : v;
+  // pasTotal (chargerProgressionSupabase) compte les steps de la semaine en
+  // cours même non envoyée — un titre "pas cumulés" peut donc se débloquer
+  // dès la saisie, sans attendre "Valider ma journée".
+  _sauverJourneeSupabase('steps', steps)
+    .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
+    .catch(() => {});
 }
 async function validerJourneeClientSupabase() {
   if (!_journeeData) return;
   const stepsEl = document.getElementById('jSteps');
-  if (stepsEl) sauverStepsJourneeSupabase(stepsEl.value);
+  if (stepsEl) {
+    const v = stepsEl.value ? parseInt(stepsEl.value.replace(/\s/g,'').replace(',','.')) : '';
+    _journeeData.steps = isNaN(v) ? '' : v;
+  }
   const btn = document.getElementById('btnValiderJournee');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
   try {
-    const progRes = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(S.client)}`, { headers: supaHeaders() });
-    const progRows = progRes.ok ? await progRes.json() : [];
-    const progRow = progRows[0] || {};
-    const xpActuel = progRow.xp_total || 0;
-    const XP_PAR_NIVEAU = 50;
-    const niveauAvant = Math.max(1, Math.floor(xpActuel / XP_PAR_NIVEAU) + 1);
-    const xpBase = 50;
-    const steps = parseInt(_journeeData.steps) || 0;
-    const bonusPas = steps >= 10000 ? 25 : 0;
-    const xpGain = xpBase + bonusPas;
-    const nouvelXP = xpActuel + xpGain;
-    const niveauApres = Math.max(1, Math.floor(nouvelXP / XP_PAR_NIVEAU) + 1);
-    await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
-      method: 'POST',
-      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
-      body: JSON.stringify({ client_id: S.client, xp_total: nouvelXP, updated_at: new Date().toISOString() })
-    });
-    _journeeData.valide = true;
-    _saveJourneeDataSupabase();
+    // "Valider" ne fait que marquer le jour comme coché — l'XP se gagne
+    // exclusivement à l'envoi du bilan hebdo (page Bilan), jamais ici.
+    await _sauverJourneeSupabase('valide', true);
     const modal = document.getElementById('modalJournee');
     if (modal) modal.remove();
     _majCarteJournee();
-    if (S.data.prog) {
-      const pctNew = Math.round((nouvelXP - (niveauApres-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
-      S.data.prog.xpTotal = nouvelXP;
-      S.data.prog.niveau = niveauApres;
-      S.data.prog.pct = pctNew;
-      S.data.prog.xpManquant = niveauApres * XP_PAR_NIVEAU - nouvelXP;
-      _majCarteHeader();
-    }
-    _showXPFlashSupabase(xpGain, bonusPas);
-    if (niveauApres > niveauAvant) {
-      setTimeout(() => _showLevelUpModal(niveauApres), 2500);
-    }
+    _showJourneeEnregistreeSupabase();
+    if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
   } catch(e) {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
     alert('Erreur lors de la validation.');
   }
 }
-function _showXPFlashSupabase(xpGain, bonusPas) {
+function _showJourneeEnregistreeSupabase() {
   const flash = document.createElement('div');
-  flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:22px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
-  flash.innerHTML = '🎉 +' + xpGain + ' XP'
-    + (bonusPas > 0 ? '<div style="font-size:12px;margin-top:4px;opacity:.85;">🦶 Bonus 10 000 pas !</div>' : '')
-    + '<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>';
+  flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:20px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
+  flash.innerHTML = '✓ Journée enregistrée !'
+    + '<div style="font-size:12px;margin-top:6px;font-weight:400;opacity:.85;">L\'XP se gagne à l\'envoi du bilan de la semaine</div>';
   document.body.appendChild(flash);
   setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
 }

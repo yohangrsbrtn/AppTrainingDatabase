@@ -2922,7 +2922,7 @@ function renderFicheProgressionTab(){
             <span style="font-size:11px;color:${xp.tc.c1};font-weight:600;background:${xp.tc.c2}33;border:1px solid ${xp.tc.c1}55;border-radius:6px;padding:2px 8px;">${xp.tier.charAt(0).toUpperCase()+xp.tier.slice(1)}</span>
             ${titrePill}
           </div>
-          <div style="font-size:12px;color:var(--text-faint);margin-top:4px;">${(xp.xpTotal||0).toLocaleString('fr')} XP · encore ${(xp.xpManquant||0).toLocaleString('fr')} XP → niv. ${xp.niveau+1}</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-top:4px;">${(xp.xpTotal||0).toLocaleString('fr')} XP · ${xp.niveauMaxAtteint ? '👑 niveau max atteint' : 'encore ' + (xp.xpManquant||0).toLocaleString('fr') + ' XP → niv. ' + (xp.niveau+1)}</div>
           <div style="height:5px;background:#1e2235;border-radius:3px;overflow:hidden;margin-top:7px;">
             <div style="height:5px;border-radius:3px;width:${xp.pct}%;background:${xp.tc.bar||xp.tc.c1};transition:width .6s ease;"></div>
           </div>
@@ -3575,15 +3575,27 @@ async function chargerClientProgressionXP(clientId){
     bilansRes.ok ? bilansRes.json() : Promise.resolve([])
   ]);
   const progRow = progRows[0] || {};
+  const XP_PAR_BILAN_ENVOYE  = 45;
+  const XP_PAR_JOUR_TRAINING = 6;
+  const BONUS_PAS_10000      = 15;
+  const XP_PAR_NIVEAU        = 65;
+  const NIVEAU_MAX           = 50;
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
-  let seancesValidees = 0;
-  bilans.forEach(b => { if (b.envoye_coach && b.date_validation) seancesValidees += (b.jours||[]).filter(j=>j.training).length; });
-  const xpFromBilans = bilansValidies * 100 + seancesValidees * 50;
-  const xpTotal = Math.max(xpFromBilans, progRow.xp_total || 0);
-  const XP_PAR_NIVEAU = 50;
-  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
-  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
-  const pct = Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+  let seancesValidees = 0, xpTotal = 0;
+  bilans.forEach(b => {
+    if (!b.envoye_coach || !b.date_validation) return;
+    const jours = b.jours || [];
+    const joursTraining = jours.filter(j=>j.training).length;
+    seancesValidees += joursTraining;
+    const totalSteps = jours.reduce((s,j)=>s+(j.steps||0),0);
+    const stepsMoy = jours.length ? Math.round(totalSteps/jours.length) : 0;
+    const bonusPas = stepsMoy >= 10000 ? BONUS_PAS_10000 : 0;
+    xpTotal += XP_PAR_BILAN_ENVOYE + joursTraining*XP_PAR_JOUR_TRAINING + bonusPas;
+  });
+  const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
+  const niveauMaxAtteint = niveau >= NIVEAU_MAX;
+  const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
+  const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
   const nbSemaines = bilans.length;
   const seancesAttendues = nbSemaines * 4;
   const bilansAttendus = nbSemaines;
@@ -3594,7 +3606,7 @@ async function chargerClientProgressionXP(clientId){
   const titreDef = titreActif && typeof TITRES_DEF !== 'undefined' ? TITRES_DEF.find(t=>t.id===titreActif) : null;
   const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
   const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858',bar:''};
-  return { xpTotal, niveau, pct, xpManquant, tier, tc, titreDef,
+  return { xpTotal, niveau, pct, xpManquant, niveauMaxAtteint, tier, tc, titreDef,
            seancesValidees, seancesAttendues, pctSeances,
            bilansValidies, bilansAttendus, pctBilans, assiduiteGlobale };
 }

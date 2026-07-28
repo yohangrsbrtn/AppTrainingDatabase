@@ -159,7 +159,7 @@ const _JOURS_NOMS = ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIM
 function _normaliserBilanSupa(row) {
   const jours = _JOURS_NOMS.map((nom, idx) => {
     const j = (row.jours || [])[idx] || {};
-    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio };
+    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide };
   });
   const repas = (row.repas_eval || []).map((r, idx) => ({
     idx, num: r.num || (idx + 1), adhesion: r.adhesion || 0, digestion: r.digestion || 0, appetit: r.appetit || 0,
@@ -199,7 +199,7 @@ async function _supaCreerNouveauBilan(clientId) {
     }
   } catch(e) {}
 
-  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false }));
+  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false, valide: false }));
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
   const body = {
     client_id:    clientId,
@@ -241,10 +241,22 @@ async function _supaUpdateBilan(patch) {
   });
 }
 
+// Réécriture idempotente du tableau jours[] d'un bilan donné — réutilisable
+// hors du contexte de la page Bilan (ex: carte "Journée en cours" de l'accueil).
+// Cliquer plusieurs fois de suite ne fait que réécrire les mêmes valeurs.
+async function _supaPatchJoursBilan(bilanId, jours) {
+  if (!bilanId) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+    method: 'PATCH',
+    headers: supaHeaders({ Prefer: 'return=minimal' }),
+    body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide })) }),
+  });
+}
+
 function sauverJourBilanSupa(jourIdx, field, value) {
   if (!_bilanData) return;
   _bilanData.jours[jourIdx][field] = value;
-  _supaUpdateBilan({ jours: _bilanData.jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: j.diete, training: j.training, cardio: j.cardio })) }).catch(() => {});
+  _supaUpdateBilan({ jours: _bilanData.jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: j.diete, training: j.training, cardio: j.cardio, valide: !!j.valide })) }).catch(() => {});
 }
 
 function toggleJourBilanSupa(jourIdx, field, elemId) {

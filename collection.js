@@ -1,13 +1,14 @@
 // ── Collection page ───────────────────────────────────────────────────
 
+// Niveau max = 50 (voir /Users/yohangrosbertin/.claude/plans/floating-petting-pumpkin.md)
 const BADGES_NIVEAU = [
   {seuil:1,  tier:'debutant',   nom:'Débutant',  desc:'Premier pas dans l\'aventure'},
-  {seuil:10, tier:'bronze',     nom:'Bronze',     desc:'Les bases sont posées'},
-  {seuil:20, tier:'argent',     nom:'Argent',     desc:'La régularité commence à payer'},
-  {seuil:30, tier:'or',         nom:'Or',         desc:'Une vraie machine de guerre'},
-  {seuil:40, tier:'platine',    nom:'Platine',    desc:'L\'élite du coaching'},
-  {seuil:50, tier:'diamant',    nom:'Diamant',    desc:'Au-delà des limites'},
-  {seuil:60, tier:'legendaire', nom:'Légendaire', desc:'Statut mythique'}
+  {seuil:8,  tier:'bronze',     nom:'Bronze',     desc:'Les bases sont posées'},
+  {seuil:16, tier:'argent',     nom:'Argent',     desc:'La régularité commence à payer'},
+  {seuil:25, tier:'or',         nom:'Or',         desc:'Une vraie machine de guerre'},
+  {seuil:34, tier:'platine',    nom:'Platine',    desc:'L\'élite du coaching'},
+  {seuil:42, tier:'diamant',    nom:'Diamant',    desc:'Au-delà des limites'},
+  {seuil:50, tier:'legendaire', nom:'Légendaire', desc:'Statut mythique'}
 ];
 
 function getBadgeSVG(tier, sz, sfx) {
@@ -31,7 +32,7 @@ function getBadgeSVG(tier, sz, sfx) {
 }
 
 function niveauToTier(n) {
-  return n>=60?'legendaire':n>=50?'diamant':n>=40?'platine':n>=30?'or':n>=20?'argent':n>=10?'bronze':'debutant';
+  return n>=50?'legendaire':n>=42?'diamant':n>=34?'platine':n>=25?'or':n>=16?'argent':n>=8?'bronze':'debutant';
 }
 
 // Pill du titre actif (médaillon + halo + reflets) — un seul point de vérité
@@ -293,7 +294,7 @@ function detecterDeblocagesNiveau(niveau) {
   if (stored === null) return [];
   const ancien = parseInt(stored) || 0;
   if (niveau <= ancien) return [];
-  const TIERS = {10:'bronze',20:'argent',30:'or',40:'platine',50:'diamant',60:'legendaire'};
+  const TIERS = {8:'bronze',16:'argent',25:'or',34:'platine',42:'diamant',50:'legendaire'};
   const TIERS_DESC = {bronze:'Les bases sont posées, la machine tourne',argent:'La régularité commence à payer',or:'Une vraie machine de guerre',platine:"L'élite du coaching",diamant:'Au-delà des limites — niveau rare',legendaire:'Statut mythique — légende vivante'};
   const TIERS_NOM = {bronze:'Bronze',argent:'Argent',or:'Or',platine:'Platine',diamant:'Diamant',legendaire:'Légendaire'};
   const LEVEL_DESCS = ['Continue comme ça — tu cartonnes !','Chaque séance te rapproche du sommet.','La régularité paie, toujours.','Tu ne lâches rien !','Impressionnant, continue ainsi.','Le travail paye — niveau après niveau.','Tu es sur la bonne voie.'];

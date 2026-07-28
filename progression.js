@@ -23,33 +23,45 @@ async function chargerProgressionSupabase() {
   const profil  = profils[0]  || {};
   const progRow = progRows[0] || {};
 
+  // ── Économie XP : toujours recalculée depuis les vraies données des bilans
+  // (jamais d'incrément stocké côté serveur) — auto-réparant par construction.
+  // Voir /Users/yohangrosbertin/.claude/plans/floating-petting-pumpkin.md
+  const XP_PAR_BILAN_ENVOYE  = 45;
+  const XP_PAR_JOUR_TRAINING = 6;
+  const BONUS_PAS_10000      = 15;
+  const XP_PAR_NIVEAU        = 65;
+  const NIVEAU_MAX           = 50;
+
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
-  let seancesValidees = 0, pasTotalBilans = 0;
+  let seancesValidees = 0, pasTotalBilans = 0, xpTotal = 0;
   const historiqueXP = [];
 
   bilans.forEach(b => {
     const jours = b.jours || [];
     pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
     if (b.envoye_coach && b.date_validation) {
-      const seancesWeek = jours.filter(j => j.training).length;
-      seancesValidees += seancesWeek;
-      const stepsMoy = jours.length ? Math.round(pasTotalBilans / jours.length) : 0;
-      const bonusPas = stepsMoy >= 10000 ? 25 : 0;
-      historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: 100 + bonusPas, ts: b.date_validation || '' });
+      const joursTraining = jours.filter(j => j.training).length;
+      seancesValidees += joursTraining;
+      const totalStepsSemaine = jours.reduce((s, j) => s + (j.steps || 0), 0);
+      const stepsMoy = jours.length ? Math.round(totalStepsSemaine / jours.length) : 0;
+      const bonusPas = stepsMoy >= 10000 ? BONUS_PAS_10000 : 0;
+      const xpSemaine = XP_PAR_BILAN_ENVOYE + joursTraining * XP_PAR_JOUR_TRAINING + bonusPas;
+      xpTotal += xpSemaine;
+      historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: xpSemaine, ts: b.date_validation || '' });
     }
   });
   historiqueXP.splice(5);
 
-  // pas_total et xp_total stockés dans client_progression servent de plancher
-  // (GAS a pu tracker des données non présentes dans les bilans migrés)
-  const pasTotal = Math.max(pasTotalBilans, progRow.pas_total || 0);
+  const pasTotal = pasTotalBilans;
 
-  const xpFromBilans = bilansValidies * 100 + seancesValidees * 50;
-  const xpTotal = Math.max(xpFromBilans, progRow.xp_total || 0);
-  const XP_PAR_NIVEAU = 50;
-  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
-  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
-  const pct = Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+  const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
+  const niveauMaxAtteint = niveau >= NIVEAU_MAX;
+  const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
+  const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+
+  // Cache best-effort côté serveur (jamais relu comme source de vérité —
+  // seulement recalculé et écrasé, ne peut donc plus jamais dériver).
+  _upsertProgressionSupabase({ xp_total: xpTotal, pas_total: pasTotal }).catch(() => {});
 
   const nbSemaines = bilans.length;
   const seancesAttendues = nbSemaines * 4;
@@ -63,7 +75,7 @@ async function chargerProgressionSupabase() {
 
   return {
     nom: [profil.prenom, profil.nom].filter(Boolean).join(' ') || clientId,
-    niveau, pct, xpTotal, xpManquant,
+    niveau, pct, xpTotal, xpManquant, niveauMaxAtteint,
     seancesValidees, seancesAttendues, pctSeances,
     bilansValidies, bilansAttendus, pctBilans,
     assiduiteGlobale, pasTotal,
@@ -249,7 +261,7 @@ function renderProgressionPage() {
             <div style="font-size:12px;color:#8892a4;margin-top:2px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
             <div style="margin-top:8px;display:flex;justify-content:space-between;">
               <span style="font-size:10px;color:#8892a4;">Niv. ${niveau}</span>
-              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${xpManquant.toLocaleString('fr')} XP → Niv. ${niveau+1}</span>
+              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${p.niveauMaxAtteint ? '👑 Niveau max atteint' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
             </div>
             <div style="height:4px;background:#1e2235;border-radius:2px;overflow:hidden;margin-top:6px;">
               <div style="height:4px;border-radius:2px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
