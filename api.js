@@ -52,3 +52,38 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 function supaHeaders(extra) {
   return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
 }
+
+// ── Semaine de bilan — source unique partagée client (bilan.js) + coach
+// (console.html). Une semaine de bilan se termine le jour assigné au client
+// (client_profils.jour_bilan) et non un calendaire lundi-dimanche : un
+// jour_bilan='Mercredi' donne des semaines jeudi→mercredi. Sans jour_bilan
+// renseigné, on retombe sur dimanche (comportement calendaire précédent).
+const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
+
+function _bilanWeekBounds(jourBilanNom, refDate) {
+  refDate = refDate || new Date();
+  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const curIdx   = (refDate.getDay() + 6) % 7; // Lundi=0...Dimanche=6
+  const delta    = (cibleIdx - curIdx + 7) % 7; // jours jusqu'à la prochaine occurrence (0 = aujourd'hui)
+  const fin = new Date(refDate);
+  fin.setDate(refDate.getDate() + delta);
+  fin.setHours(23, 59, 59, 999);
+  const debut = new Date(fin);
+  debut.setDate(fin.getDate() - 6);
+  debut.setHours(0, 0, 0, 0);
+  return { debut, fin };
+}
+
+// Ponctuel = envoyé au plus tard le jour de bilan assigné (client_profils.jour_bilan),
+// avant midi — envoyer plus tôt dans la semaine est toujours ponctuel, envoyer ce
+// jour-là après midi ou un jour plus tard ne l'est pas. Sans jour assigné, toujours
+// ponctuel (pas de pénalité pour un réglage non fait). Les bilans migrés depuis GAS
+// n'ont pas d'heure exacte (envoye_at) — on retombe sur la date à midi pile, ni
+// pénalisé ni avantagé.
+function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
+  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !envoyeAtStr) return true;
+  const { fin } = _bilanWeekBounds(jourBilanNom, new Date(bilanCreatedAt));
+  const limite = new Date(fin);
+  limite.setHours(12, 0, 0, 0);
+  return new Date(envoyeAtStr) <= limite;
+}

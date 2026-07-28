@@ -197,6 +197,14 @@ function _normaliserBilanSupa(row) {
 
 async function _supaCreerNouveauBilan(clientId) {
   let nbRepas = 4;
+  let jourBilanNom = null;
+  try {
+    const profil = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${clientId}&select=jour_bilan`,
+      { headers: supaHeaders() }
+    ).then(r => r.json());
+    jourBilanNom = (profil && profil[0] && profil[0].jour_bilan) || null;
+  } catch(e) {}
   try {
     const dietes = await fetch(
       `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${clientId}&actif=eq.true&limit=1`,
@@ -219,7 +227,7 @@ async function _supaCreerNouveauBilan(clientId) {
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
   const body = {
     client_id:    clientId,
-    semaine_label: _supaGetSemaineLabel(),
+    semaine_label: _supaGetSemaineLabel(jourBilanNom),
     jours,
     repas_eval:   repasEval,
     envoye_coach: false,
@@ -235,12 +243,10 @@ async function _supaCreerNouveauBilan(clientId) {
   return _normaliserBilanSupa(row);
 }
 
-function _supaGetSemaineLabel() {
-  const now  = new Date();
-  const day  = now.getDay();
-  const diff = (day === 0) ? -6 : 1 - day;
-  const lun  = new Date(now); lun.setDate(now.getDate() + diff);
-  const dim  = new Date(lun); dim.setDate(lun.getDate() + 6);
+// La semaine du bilan se termine le jour_bilan assigné au client (ou
+// dimanche par défaut) — voir _bilanWeekBounds (api.js).
+function _supaGetSemaineLabel(jourBilanNom) {
+  const { debut: lun, fin: dim } = _bilanWeekBounds(jourBilanNom, new Date());
   const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
   const fmt  = d => d.getDate() + ' ' + MOIS[d.getMonth()];
   return 'Du ' + fmt(lun) + ' au ' + fmt(dim);
@@ -269,10 +275,19 @@ async function _supaPatchJoursBilan(bilanId, jours) {
   });
 }
 
-function sauverJourBilanSupa(jourIdx, field, value) {
-  if (!_bilanData) return;
-  _bilanData.jours[jourIdx][field] = value;
-  _supaUpdateBilan({ jours: _bilanData.jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: j.diete, training: j.training, cardio: j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }).catch(() => {});
+// Refetch + merge juste avant patch (jamais un PATCH du tableau jours[] tel
+// que gardé en mémoire) — sinon un changement fait entretemps depuis un
+// autre point d'entrée (accueil, Mon programme) serait écrasé silencieusement.
+async function sauverJourBilanSupa(jourIdx, field, value) {
+  if (!_bilanData || !_bilanId) return;
+  _bilanData.jours[jourIdx][field] = value; // réactivité UI immédiate
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${_bilanId}&select=jours`, { headers: supaHeaders() });
+    const arr = res.ok ? await res.json() : [];
+    const jours = (arr[0] && arr[0].jours) || _bilanData.jours;
+    jours[jourIdx] = { ...(jours[jourIdx] || {}), nom: _bilanData.jours[jourIdx].nom, [field]: value };
+    await _supaPatchJoursBilan(_bilanId, jours);
+  } catch(e) {}
 }
 
 function toggleJourBilanSupa(jourIdx, field, elemId) {
@@ -330,6 +345,9 @@ function renderBilanPage() {
 
 // ── Render Supabase ───────────────────────────────────────────────────
 
+// Utilisé par le rendu historique GAS (renderHistoriqueList) — le mode
+// Supabase affiche directement semaine_label (déjà calculé avec la bonne
+// ancre jour_bilan à la création du bilan, cf. _supaGetSemaineLabel).
 function _bilanWeekRange(dateStr) {
   if (!dateStr) return 'Bilan';
   const mois = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
@@ -349,7 +367,7 @@ function _renderHistoriqueListSupa() {
       <div class="list-item" onclick="_supaLoadBilanHistoriqueById(${b.id})">
         <div class="list-icon">📋</div>
         <div class="list-text" style="flex:1;min-width:0;">
-          <div class="list-title">${_bilanWeekRange(b.date)}</div>
+          <div class="list-title">${esc(b.semaine || 'Bilan')}</div>
         </div>
         <span style="font-size:11px;color:#1D9E75;font-weight:600;white-space:nowrap;flex-shrink:0;">✅ Envoyé</span>
         <div class="list-arrow">›</div>
@@ -593,32 +611,8 @@ const BONUS_PAS_HEBDO_OBJECTIF = 20; // moyenne semaine >= objectif du coach (cl
 const BONUS_PONCTUALITE        = 20; // bilan envoyé au plus tard le jour de bilan assigné, avant midi
 const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
 
-const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
-
-function _mondayOfWeek(d) {
-  const jsDay = d.getDay(); // 0=dim...6=sam
-  const diff  = (jsDay === 0) ? -6 : 1 - jsDay;
-  const lundi = new Date(d);
-  lundi.setDate(d.getDate() + diff);
-  lundi.setHours(0, 0, 0, 0);
-  return lundi;
-}
-
-// Ponctuel = envoyé au plus tard le jour de bilan assigné par le coach
-// (client_profils.jour_bilan), avant midi — envoyer plus tôt dans la
-// semaine est toujours ponctuel, envoyer ce jour-là après midi ou un jour
-// plus tard ne l'est pas. Sans jour assigné, toujours considéré ponctuel
-// (pas de pénalité pour un réglage non fait). Les bilans migrés depuis
-// GAS n'ont pas d'heure exacte (envoye_at) — on retombe sur la date à
-// midi pile, ni pénalisé ni avantagé.
-function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
-  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !envoyeAtStr) return true;
-  const lundi = _mondayOfWeek(new Date(bilanCreatedAt));
-  const limite = new Date(lundi);
-  limite.setDate(lundi.getDate() + _JOURS_IDX_FR[jourBilanNom]);
-  limite.setHours(12, 0, 0, 0);
-  return new Date(envoyeAtStr) <= limite;
-}
+// _JOURS_IDX_FR, _bilanWeekBounds, _bilanEstPonctuel sont partagés avec le
+// coach (console.html) — définis une seule fois dans api.js.
 
 // Compte les bilans envoyés consécutifs (les plus récents d'abord) tant
 // qu'ils sont ponctuels ET que les semaines se suivent sans trou — une
@@ -636,10 +630,10 @@ async function _calculerStreakBilans(clientId, jourBilanNom) {
     if (!b.date_validation) break;
     const envoyeAt = b.envoye_at || (b.date_validation + 'T12:00:00');
     if (!_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom)) break;
-    const lundi = _mondayOfWeek(new Date(b.created_at));
-    if (semaineAttendue && lundi.getTime() !== semaineAttendue.getTime()) break; // semaine manquée
+    const { fin } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
+    if (semaineAttendue && fin.getTime() !== semaineAttendue.getTime()) break; // semaine manquée
     streak++;
-    semaineAttendue = new Date(lundi);
+    semaineAttendue = new Date(fin);
     semaineAttendue.setDate(semaineAttendue.getDate() - 7);
   }
   return streak;

@@ -411,7 +411,7 @@
 <div class="overlay" id="overlay" onclick="closePanel()"></div>
 <div class="panel" id="panel"></div>
 
-<script src="api.js?v=2"></script>
+<script src="api.js?v=3"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -716,7 +716,31 @@ async function chargerDonnees(){
     }
   });
 
+  // Pour les clients supabase_only, le retard GAS (verifierRetardBilan) n'a pas de sens —
+  // on le recalcule directement sur les données Supabase, avec la même logique de
+  // ponctualité que côté client (_bilanEstPonctuel, api.js) plutôt qu'un badge figé à false.
+  const clientsSupaOnly = profils.filter(p => p.supabase_only);
+  const retardsSupa = await Promise.all(clientsSupaOnly.map(p => _supaCalculerRetard(p.client_id)));
+  clientsSupaOnly.forEach((p, i) => {
+    const c = clients.find(cl => cl.id === p.client_id);
+    if (c) c.enRetard = retardsSupa[i];
+  });
+
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
+}
+
+// Même sémantique que _bilanEstPonctuel côté client : "si le bilan en cours était
+// envoyé maintenant, serait-ce en retard ?" — pas de bilan en cours = rien à envoyer.
+async function _supaCalculerRetard(clientId) {
+  try {
+    const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
+    const profilArr = profilRes.ok ? await profilRes.json() : [];
+    const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
+    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=created_at`, { headers: supaHeaders() });
+    const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
+    if (!bilanArr.length) return false;
+    return !_bilanEstPonctuel(bilanArr[0].created_at, new Date().toISOString(), jourBilan);
+  } catch(e) { return false; }
 }
 
 async function rafraichir(){
