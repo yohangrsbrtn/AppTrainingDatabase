@@ -2668,10 +2668,10 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   }).join('');
   const lines=keys.map((k,ki)=>{
     const pts=rows.map((r,i)=>{const v=parseFloat(r[k]);return isNaN(v)||v<=0?null:xs[i]+','+yS(v);}).filter(Boolean);
-    return pts.length>=2?`<polyline points="${pts.join(' ')}" fill="none" stroke="${colors[ki]}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`:'';
+    return pts.length>=2?`<polyline points="${pts.join(' ')}" fill="none" stroke="${colors[ki]}" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/>`:'';
   }).join('');
   const dots=keys.map((k,ki)=>rows.map((r,i)=>{const v=parseFloat(r[k]);
-    return isNaN(v)||v<=0?'':`<circle id="${id}_d${ki}_${i}" cx="${xs[i]}" cy="${yS(v)}" r="2.5" fill="${colors[ki]}" stroke="var(--surface-1)" stroke-width="1.5"/>`;
+    return isNaN(v)||v<=0?'':`<circle id="${id}_d${ki}_${i}" cx="${xs[i]}" cy="${yS(v)}" r="1.8" fill="${colors[ki]}" stroke="var(--surface-1)" stroke-width="1.2"/>`;
   }).join('')).join('');
   const axes=`<line x1="${PL}" y1="${PT}" x2="${PL}" y2="${PT+ch}" stroke="var(--hairline)" stroke-width="1"/>
     <line x1="${PL}" y1="${PT+ch}" x2="${PL+cw}" y2="${PT+ch}" stroke="var(--hairline)" stroke-width="1"/>`;
