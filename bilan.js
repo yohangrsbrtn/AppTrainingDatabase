@@ -539,22 +539,67 @@ async function _validerEtEnvoyerSupa() {
     const today = new Date().toISOString().split('T')[0];
     await _supaUpdateBilan({ envoye_coach: true, date_validation: today });
     if (_bilanData) { _bilanData.dejaEnvoye = true; _bilanData.dateValidation = today; }
+    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient());
     // Afficher overlay XP simplifié
     await loadBilan();
-    _afficherXPValidationSupa();
+    _afficherXPValidationSupa(xpGagne);
   } catch(e) {
     showToast('Erreur : ' + e.message, '#c0392b');
     setPage('bilan');
   }
 }
 
-function _afficherXPValidationSupa() {
+// Crédite l'XP d'un bilan envoyé — une seule fois par bilan (dédoublonné
+// côté serveur via bilans.xp_credite, jamais via un flag localStorage).
+// Appeler cette fonction plusieurs fois sur le même bilan est sans danger :
+// le crédit n'est accordé qu'à la première fois où xp_credite vaut 0.
+const XP_PAR_BILAN_ENVOYE  = 40;
+const XP_PAR_JOUR_TRAINING = 5;
+const BONUS_PAS_OBJECTIF   = 12;
+const BONUS_DIETE_6SUR7    = 8;
+const BONUS_DIETE_7SUR7    = 12;
+
+async function _crediterXpBilanEnvoye(bilanId, jours, clientId) {
+  if (!bilanId) return 0;
+  const chkRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&select=xp_credite`, { headers: supaHeaders() });
+  const chkArr = chkRes.ok ? await chkRes.json() : [];
+  if (chkArr[0] && chkArr[0].xp_credite > 0) return 0; // déjà crédité, on ne recrédite jamais
+
+  const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=steps_cible`, { headers: supaHeaders() });
+  const profilArr = profilRes.ok ? await profilRes.json() : [];
+  const stepsCible = profilArr[0] && profilArr[0].steps_cible;
+
+  const joursTraining = jours.filter(j => j.training).length;
+  const joursDiete    = jours.filter(j => j.diete).length;
+  const totalSteps    = jours.reduce((s, j) => s + (j.steps || 0), 0);
+  const stepsMoy       = jours.length ? Math.round(totalSteps / jours.length) : 0;
+  const bonusPas   = (stepsCible && stepsMoy >= stepsCible) ? BONUS_PAS_OBJECTIF : 0;
+  const bonusDiete = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
+  const xpSemaine = XP_PAR_BILAN_ENVOYE + joursTraining * XP_PAR_JOUR_TRAINING + bonusPas + bonusDiete;
+
+  await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine })
+  });
+
+  const progRes = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}&select=xp_total`, { headers: supaHeaders() });
+  const progArr = progRes.ok ? await progRes.json() : [];
+  const xpActuel = (progArr[0] && progArr[0].xp_total) || 0;
+  await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
+    method: 'POST',
+    headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+    body: JSON.stringify({ client_id: clientId, xp_total: xpActuel + xpSemaine, updated_at: new Date().toISOString() })
+  });
+  return xpSemaine;
+}
+
+function _afficherXPValidationSupa(xpGagne) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;transition:opacity 0.3s;';
   overlay.innerHTML = `<div style="background:#1a1d29;border-radius:20px;padding:36px 28px;text-align:center;max-width:300px;width:85%;box-shadow:0 20px 60px rgba(0,0,0,0.5);transform:scale(0.85);transition:transform 0.3s;">
     <div style="font-size:52px;margin-bottom:10px;">🏆</div>
     <div style="font-size:22px;font-weight:700;color:#e8eaf0;margin-bottom:4px;">Bilan envoyé !</div>
-    <div style="font-size:13px;color:#8892a4;margin-bottom:24px;">Bravo pour cette semaine !</div>
+    <div style="font-size:13px;color:#8892a4;margin-bottom:${xpGagne ? '4px' : '24px'};">Bravo pour cette semaine !</div>
+    ${xpGagne ? `<div style="font-size:15px;font-weight:700;color:#1D9E75;margin-bottom:24px;">🎉 +${xpGagne} XP</div>` : ''}
     <button id="_xpOverlayBtn" style="background:linear-gradient(135deg,#1D9E75,#167a5a);width:100%;margin:0;padding:14px;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Retour à l'accueil</button>
   </div>`;
   document.body.appendChild(overlay);

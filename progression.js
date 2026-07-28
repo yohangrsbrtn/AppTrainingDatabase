@@ -23,31 +23,30 @@ async function chargerProgressionSupabase() {
   const profil  = profils[0]  || {};
   const progRow = progRows[0] || {};
 
-  // ── Économie XP : toujours recalculée depuis les vraies données des bilans
-  // (jamais d'incrément stocké côté serveur) — auto-réparant par construction.
-  // Voir /Users/yohangrosbertin/.claude/plans/floating-petting-pumpkin.md
-  const XP_PAR_BILAN_ENVOYE  = 45;
-  const XP_PAR_JOUR_TRAINING = 6;
-  const BONUS_PAS_10000      = 15;
-  const XP_PAR_NIVEAU        = 65;
-  const NIVEAU_MAX           = 50;
+  // ── Économie XP : xp_total est un compteur stocké (client_progression),
+  // incrémenté UNIQUEMENT côté serveur au moment de l'envoi d'un bilan
+  // (voir _crediterXpBilanEnvoye dans bilan.js), avec dédoublonnage via
+  // bilans.xp_credite — jamais recalculé/écrasé ici. C'est la seule source
+  // de vérité pour l'XP et le niveau. Les stats ci-dessous (séances,
+  // assiduité, historique) restent en revanche recalculées en live depuis
+  // les bilans, ce sont de simples agrégats d'affichage, pas des compteurs.
+  const XP_PAR_NIVEAU = 65;
+  const NIVEAU_MAX    = 50;
+
+  const xpTotal = progRow.xp_total || 0;
 
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
-  let seancesValidees = 0, pasTotalBilans = 0, xpTotal = 0;
+  let seancesValidees = 0, pasTotalBilans = 0;
   const historiqueXP = [];
 
   bilans.forEach(b => {
     const jours = b.jours || [];
     pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
     if (b.envoye_coach && b.date_validation) {
-      const joursTraining = jours.filter(j => j.training).length;
-      seancesValidees += joursTraining;
-      const totalStepsSemaine = jours.reduce((s, j) => s + (j.steps || 0), 0);
-      const stepsMoy = jours.length ? Math.round(totalStepsSemaine / jours.length) : 0;
-      const bonusPas = stepsMoy >= 10000 ? BONUS_PAS_10000 : 0;
-      const xpSemaine = XP_PAR_BILAN_ENVOYE + joursTraining * XP_PAR_JOUR_TRAINING + bonusPas;
-      xpTotal += xpSemaine;
-      historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: xpSemaine, ts: b.date_validation || '' });
+      seancesValidees += jours.filter(j => j.training).length;
+      if (b.xp_credite > 0) {
+        historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: b.xp_credite, ts: b.date_validation || '' });
+      }
     }
   });
   historiqueXP.splice(5);
@@ -58,10 +57,6 @@ async function chargerProgressionSupabase() {
   const niveauMaxAtteint = niveau >= NIVEAU_MAX;
   const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
   const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
-
-  // Cache best-effort côté serveur (jamais relu comme source de vérité —
-  // seulement recalculé et écrasé, ne peut donc plus jamais dériver).
-  _upsertProgressionSupabase({ xp_total: xpTotal, pas_total: pasTotal }).catch(() => {});
 
   const nbSemaines = bilans.length;
   const seancesAttendues = nbSemaines * 4;

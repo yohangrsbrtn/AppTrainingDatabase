@@ -9,17 +9,32 @@ let _pcSeanceId        = null; // id de la séance sélectionnée
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
+let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_assigne, cardio_duree_min } assignés par le coach
 
 // ── Chargement ─────────────────────────────────────────────────────────
+
+async function _chargerObjectifsClient() {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=steps_cible,seances_cible,cardio_assigne,cardio_duree_min`,
+      { headers: supaHeaders() }
+    );
+    const arr = res.ok ? await res.json() : [];
+    _pcObjectifs = arr[0] || null;
+  } catch(e) { _pcObjectifs = null; }
+}
 
 async function loadProgrammeClient() {
   _pcSubPage = 'selector';
   setPage('programme-client-loading');
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&order=created_at.desc&limit=1`,
-      { headers: supaHeaders() }
-    );
+    const [, res] = await Promise.all([
+      _chargerObjectifsClient(),
+      fetch(
+        `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&order=created_at.desc&limit=1`,
+        { headers: supaHeaders() }
+      )
+    ]);
     if (!res.ok) throw new Error('supabase_' + res.status);
     const rows = await res.json();
     if (!rows.length) { _pcClientProgramme = null; setPage('programme-client'); return; }
@@ -93,6 +108,19 @@ function renderProgrammeClientPage() {
   return renderPcSelectorPage();
 }
 
+function _renderPcObjectifsBand() {
+  const o = _pcObjectifs;
+  if (!o) return '';
+  const items = [];
+  if (o.seances_cible) items.push({ v: o.seances_cible, l: 'séances/sem' });
+  if (o.steps_cible) items.push({ v: (o.steps_cible >= 1000 ? Math.round(o.steps_cible/100)/10 + 'k' : o.steps_cible), l: 'pas/jour' });
+  if (o.cardio_assigne) items.push({ v: o.cardio_duree_min ? o.cardio_duree_min + 'min' : '✓', l: 'cardio' });
+  if (!items.length) return '';
+  return `<div class="card" style="display:flex;justify-content:space-around;padding:12px 8px;margin-bottom:12px;">
+    ${items.map(it => `<div style="text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--accent);">${it.v}</div><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">${it.l}</div></div>`).join('')}
+  </div>`;
+}
+
 function renderPcSelectorPage() {
   const cp = _pcClientProgramme;
   const allSeances  = _pcAllSeances();
@@ -111,6 +139,7 @@ function renderPcSelectorPage() {
   return `<div id="app">
     ${renderHeader('Programme', '', false)}
     <div class="page">
+      ${_renderPcObjectifsBand()}
       <div class="card">
         <div class="field-label">PROGRAMME</div>
         <div style="font-size:15px;font-weight:600;color:var(--accent);padding:6px 0;">${esc(cp.nom)}</div>

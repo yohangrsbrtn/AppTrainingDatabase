@@ -2819,6 +2819,18 @@ function renderFicheProfilTab(c){
       </div>
       <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
       <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
+      <h3 style="margin-top:16px;">Objectifs assignés</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="fiche-field"><label>Pas / jour demandés</label><input id="fStepsCible" type="number" min="0" step="500" placeholder="ex: 8000" value="${esc(p.steps_cible||'')}"></div>
+        <div class="fiche-field"><label>Séances / semaine</label><input id="fSeancesCible" type="number" min="0" max="14" value="${esc(p.seances_cible||'')}"></div>
+      </div>
+      <div class="fiche-field" style="display:flex;align-items:center;gap:8px;">
+        <input id="fCardioAssigne" type="checkbox" style="width:auto;" ${p.cardio_assigne?'checked':''} onchange="document.getElementById('fCardioDureeWrap').style.display=this.checked?'block':'none'">
+        <label style="margin:0;">Cardio assigné</label>
+      </div>
+      <div id="fCardioDureeWrap" class="fiche-field" style="display:${p.cardio_assigne?'block':'none'};">
+        <label>Durée cardio / séance (min)</label><input id="fCardioDureeMin" type="number" min="0" step="5" placeholder="ex: 20" value="${esc(p.cardio_duree_min||'')}">
+      </div>
       <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
     </div>`;
 }
@@ -2932,6 +2944,10 @@ function renderFicheProgressionTab(){
         ${gauge(xp.pctSeances,'#3ecf8e','Séances',xp.seancesValidees,xp.seancesAttendues)}
         ${gauge(xp.pctBilans,'#a78bfa','Bilans',xp.bilansValidies,xp.bilansAttendus)}
         ${gauge(xp.assiduiteGlobale,'#f59e0b','Assiduité',xp.assiduiteGlobale+'%','')}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--hairline);padding-top:14px;margin-top:14px;">
+        <input id="xpAjoutInput" type="number" step="1" placeholder="ex: 20 ou -10" style="flex:1;padding:8px 10px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;color:var(--text);font-size:13px;">
+        <button class="btn" id="xpAjoutBtn" onclick="ajouterXpClient('${esc(ficheData.profil.client_id || '')}')">+ Ajouter XP</button>
       </div>
     </div>`;
   })() : (ficheData.loaded ? `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Pas encore de données XP (aucun bilan validé).</p></div>` : `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Chargement XP…</p></div>`);
@@ -3458,6 +3474,10 @@ async function sauvegarderFicheSandbox(clientId){
     jour_bilan: document.getElementById('fJourBilan').value || null,
     taille_cm: parseInt(document.getElementById('fTaille').value)||null,
     objectif: document.getElementById('fObjectif').value.trim() || null,
+    steps_cible: parseInt(document.getElementById('fStepsCible').value)||null,
+    seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
+    cardio_assigne: !!document.getElementById('fCardioAssigne').checked,
+    cardio_duree_min: parseInt(document.getElementById('fCardioDureeMin').value)||null,
     updated_at: new Date().toISOString(),
   };
   try {
@@ -3564,6 +3584,33 @@ async function chargerProgression(clientId){
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
+// Ajout/retrait manuel d'XP par le coach — action délibérée à chaque clic,
+// pas besoin de dédoublonnage (contrairement au crédit automatique à
+// l'envoi d'un bilan, voir bilan.js _crediterXpBilanEnvoye).
+async function ajouterXpClient(clientId) {
+  const input = document.getElementById('xpAjoutInput');
+  const delta = parseInt(input && input.value);
+  if (!clientId || isNaN(delta) || delta === 0) return;
+  const btn = document.getElementById('xpAjoutBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const progRes = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}&select=xp_total`, { headers: supaHeaders() });
+    const progArr = progRes.ok ? await progRes.json() : [];
+    const xpActuel = (progArr[0] && progArr[0].xp_total) || 0;
+    const nouveauXp = Math.max(0, xpActuel + delta);
+    await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: clientId, xp_total: nouveauXp, updated_at: new Date().toISOString() })
+    });
+    ficheData.xpData = await chargerClientProgressionXP(clientId);
+    if (state.nav === 'fiche-client' && state.selected === clientId) renderMain();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '+ Ajouter XP'; }
+  }
+}
+
 async function chargerClientProgressionXP(clientId){
   const [progRes, bilansRes, seancesRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
@@ -3575,22 +3622,17 @@ async function chargerClientProgressionXP(clientId){
     bilansRes.ok ? bilansRes.json() : Promise.resolve([])
   ]);
   const progRow = progRows[0] || {};
-  const XP_PAR_BILAN_ENVOYE  = 45;
-  const XP_PAR_JOUR_TRAINING = 6;
-  const BONUS_PAS_10000      = 15;
-  const XP_PAR_NIVEAU        = 65;
-  const NIVEAU_MAX           = 50;
+  // xp_total est un compteur stocké, incrémenté uniquement côté serveur à
+  // l'envoi d'un bilan (bilan.js, _crediterXpBilanEnvoye), dédoublonné via
+  // bilans.xp_credite — jamais recalculé ici. Voir progression.js.
+  const XP_PAR_NIVEAU = 65;
+  const NIVEAU_MAX    = 50;
+  const xpTotal = progRow.xp_total || 0;
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
-  let seancesValidees = 0, xpTotal = 0;
+  let seancesValidees = 0;
   bilans.forEach(b => {
     if (!b.envoye_coach || !b.date_validation) return;
-    const jours = b.jours || [];
-    const joursTraining = jours.filter(j=>j.training).length;
-    seancesValidees += joursTraining;
-    const totalSteps = jours.reduce((s,j)=>s+(j.steps||0),0);
-    const stepsMoy = jours.length ? Math.round(totalSteps/jours.length) : 0;
-    const bonusPas = stepsMoy >= 10000 ? BONUS_PAS_10000 : 0;
-    xpTotal += XP_PAR_BILAN_ENVOYE + joursTraining*XP_PAR_JOUR_TRAINING + bonusPas;
+    seancesValidees += (b.jours || []).filter(j=>j.training).length;
   });
   const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
   const niveauMaxAtteint = niveau >= NIVEAU_MAX;
@@ -5850,7 +5892,7 @@ async function migrerBilansGas(clientId) {
 function _renderMigPreviewProgression() {
   const gas = migPreviewData.gasProgression;
   const supa = migPreviewData.supaProgression;
-  const dejaImporte = !!(supa && (supa.titre_actif || supa.seen_titres));
+  const dejaImporte = !!supa;
 
   const row = (label, gasVal, supaVal) =>
     `<tr><td style="padding:6px 12px;color:var(--text-faint)">${label}</td><td style="padding:6px 12px">${gasVal ?? '—'}</td><td style="padding:6px 12px">${supaVal ?? '—'}</td></tr>`;
@@ -5859,25 +5901,23 @@ function _renderMigPreviewProgression() {
     <h3 style="margin:0 0 12px">Progression GAS → Supabase</h3>
     ${!gas ? `<div style="color:var(--text-faint);padding:12px 0">Données GAS non disponibles pour ce client.</div>` : `
     <div style="background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:var(--text-muted);">
-      XP, niveau et pas cumulés ne se migrent plus manuellement — ils sont recalculés automatiquement à chaque affichage à partir des <strong>bilans importés</strong> (onglet Bilans). Importez les bilans historiques du client pour que ces valeurs soient correctes, ce tableau n'est là que pour comparer/diagnostiquer. Seuls le titre actif et les titres déjà vus restent à importer ci-dessous.
+      L'XP total GAS est importé comme <strong>point de départ</strong> — l'activité future (bilans envoyés dans Supabase) s'ajoute par-dessus normalement, plus rien ne l'écrase ensuite. Niveau/pas cumulés restent recalculés automatiquement à partir de ce total et des bilans importés.
     </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
         <th style="padding:6px 12px;color:var(--text-faint)">Champ</th>
         <th style="padding:6px 12px">GAS</th>
-        <th style="padding:6px 12px">Supabase (recalculé)</th>
+        <th style="padding:6px 12px">Supabase actuel</th>
       </tr></thead>
       <tbody>
         ${row('XP total', gas.xpTotal ?? gas.xp, supa?.xp_total ?? '—')}
-        ${row('Niveau', gas.niveau, supa?.niveau ?? '—')}
-        ${row('Pas total', gas.pasTotal ?? gas.pas_total, supa?.pas_total ?? '—')}
         ${row('Titre actif', gas.titreActif ?? gas.titre_actif, supa?.titre_actif ?? '—')}
         ${row('Titres vus', gas.seenTitres ?? gas.seen_titres, supa?.seen_titres ?? '—')}
       </tbody>
     </table>
-    ${dejaImporte ? `<div style="color:var(--success);margin-bottom:12px">✓ Titre/titres vus déjà présents dans Supabase</div>` : ''}
+    ${dejaImporte ? `<div style="color:var(--success);margin-bottom:12px">✓ Données déjà présentes dans Supabase</div>` : ''}
     <button class="btn-primary" onclick="migrerProgressionGAS('${migPreviewClientId}')">
-      ${dejaImporte ? '↻ Ré-importer titre actif / titres vus' : '⬇ Importer titre actif / titres vus'}
+      ${dejaImporte ? '↻ Ré-importer la progression' : '⬇ Importer la progression'}
     </button>`}
   </div>`;
 }
@@ -5886,12 +5926,12 @@ async function migrerProgressionGAS(clientId) {
   const gas = migPreviewData.gasProgression;
   if (!gas) return;
   try {
-    // XP/niveau/pas_total ne sont plus migrés : ils sont toujours recalculés
-    // depuis les vrais bilans Supabase (voir chargerProgressionSupabase dans
-    // progression.js) — les migrer ici écrirait une valeur qui serait de
-    // toute façon écrasée au prochain chargement de la progression du client.
+    // xp_total est importé une fois comme point de départ — ensuite,
+    // seul _crediterXpBilanEnvoye (bilan.js) l'incrémente, jamais recalculé
+    // ni écrasé ici. Le niveau/pas cumulés restent dérivés automatiquement.
     const body = {
       client_id: clientId,
+      xp_total: gas.xpTotal ?? gas.xp_total ?? 0,
       titre_actif: gas.titreActif ?? gas.titre_actif ?? null,
       seen_titres: gas.seenTitres ?? gas.seen_titres ?? 0,
       updated_at: new Date().toISOString()
