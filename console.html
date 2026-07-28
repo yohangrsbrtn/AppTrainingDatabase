@@ -729,17 +729,21 @@ async function chargerDonnees(){
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
 }
 
-// Même sémantique que _bilanEstPonctuel côté client : "si le bilan en cours était
-// envoyé maintenant, serait-ce en retard ?" — pas de bilan en cours = rien à envoyer.
+// Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
+// maintenant, serait-ce en retard ?" — vérifie TOUS les bilans non-envoyés (pas
+// seulement le plus récent) : un client qui a sauté une semaine peut avoir un
+// vieux bilan resté ouvert et non-envoyé pendant qu'un nouveau a démarré pour
+// la semaine en cours (cf. _supaGetOrCreateBilanCourant, bilan.js) — le plus
+// récent n'est alors pas encore en retard, mais l'ancien l'est toujours.
 async function _supaCalculerRetard(clientId) {
   try {
     const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
     const profilArr = profilRes.ok ? await profilRes.json() : [];
     const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
-    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=created_at`, { headers: supaHeaders() });
+    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&select=created_at`, { headers: supaHeaders() });
     const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
     if (!bilanArr.length) return false;
-    return !_bilanEstPonctuel(bilanArr[0].created_at, new Date().toISOString(), jourBilan);
+    return bilanArr.some(b => !_bilanEstPonctuel(b.created_at, new Date().toISOString(), jourBilan));
   } catch(e) { return false; }
 }
 

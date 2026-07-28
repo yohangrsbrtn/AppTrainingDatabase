@@ -5,6 +5,7 @@ let _bilanNotes = {};
 let _prevMeta   = null;
 let _bilanMode  = 'current'; // 'current' | 'previous' | 'history-list' | 'history-detail'
 let _bilanId    = null; // Supabase only
+let _bilanJourBilanNom = null; // Supabase only — client_profils.jour_bilan du bilan courant
 
 // ── Chargement ────────────────────────────────────────────────────────
 
@@ -73,37 +74,54 @@ async function loadBilanHistorique(ligneTitre) {
 
 // ── Supabase : chargement ─────────────────────────────────────────────
 
-// Récupère (ou crée) le bilan non-envoyé le plus récent d'un client —
-// utilisé par la page Bilan complète, la carte "Journée en cours" (accueil)
-// et la validation de séance (Mon programme), pour qu'ils écrivent tous
-// dans la même donnée réelle plutôt que des états locaux déconnectés.
-async function _supaBilanNonEnvoye(clientId) {
+// Récupère (ou crée) le bilan courant d'un client — utilisé par la page
+// Bilan complète, la carte "Journée en cours" (accueil) et la validation de
+// séance (Mon programme), pour qu'ils écrivent tous dans la même donnée
+// réelle plutôt que des états locaux déconnectés.
+//
+// Si le bilan non-envoyé le plus récent couvrait une semaine déjà terminée
+// (sa propre fin de période, calculée sur jour_bilan, est passée), on n'y
+// touche plus et on démarre un nouveau bilan pour la semaine en cours —
+// sinon les saisies du jour (steps, séance validée...) s'écriraient dans le
+// mauvais jour d'une semaine périmée (jours[] est indexé par nom de jour,
+// pas par position réelle dans le temps). L'ancien bilan reste tel quel,
+// non-envoyé, toujours visible du coach comme en retard — mais il n'est
+// plus accessible pour édition/envoi depuis l'app cliente (pas de vue
+// listant les bilans non-envoyés autre que le plus récent).
+async function _supaGetOrCreateBilanCourant(clientId) {
+  const profilRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`,
+    { headers: supaHeaders() }
+  );
+  const profilArr = profilRes.ok ? await profilRes.json() : [];
+  const jourBilanNom = (profilArr[0] && profilArr[0].jour_bilan) || null;
+
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=id,jours`,
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1`,
     { headers: supaHeaders() }
   );
   const arr = res.ok ? await res.json() : [];
-  if (arr.length > 0) return { id: arr[0].id, jours: arr[0].jours || [] };
-  const created = await _supaCreerNouveauBilan(clientId);
-  return { id: created.id, jours: created.jours };
+  if (arr.length > 0) {
+    const { fin } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
+    if (new Date() <= fin) return { row: arr[0], jourBilanNom };
+  }
+  const row = await _supaCreerNouveauBilan(clientId, jourBilanNom);
+  return { row, jourBilanNom };
+}
+
+async function _supaBilanNonEnvoye(clientId) {
+  const { row } = await _supaGetOrCreateBilanCourant(clientId);
+  return { id: row.id, jours: row.jours || [] };
 }
 
 async function _supaLoadBilan() {
   setPage('bilan-loading');
   try {
     const clientId = getClient();
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.false&order=created_at.desc&limit=1`,
-      { headers: supaHeaders() }
-    );
-    const arr = await res.json();
-    if (arr && arr.length > 0) {
-      _bilanData = _normaliserBilanSupa(arr[0]);
-      _bilanId   = arr[0].id;
-    } else {
-      _bilanData = await _supaCreerNouveauBilan(clientId);
-      _bilanId   = _bilanData.id;
-    }
+    const { row, jourBilanNom } = await _supaGetOrCreateBilanCourant(clientId);
+    _bilanData = _normaliserBilanSupa(row);
+    _bilanId   = row.id;
+    _bilanJourBilanNom = jourBilanNom;
     // Chercher le bilan précédent (dernier envoyé)
     const prevRes = await fetch(
       `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.true&order=created_at.desc&limit=1`,
@@ -195,16 +213,18 @@ function _normaliserBilanSupa(row) {
   };
 }
 
-async function _supaCreerNouveauBilan(clientId) {
+async function _supaCreerNouveauBilan(clientId, jourBilanNom) {
   let nbRepas = 4;
-  let jourBilanNom = null;
-  try {
-    const profil = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${clientId}&select=jour_bilan`,
-      { headers: supaHeaders() }
-    ).then(r => r.json());
-    jourBilanNom = (profil && profil[0] && profil[0].jour_bilan) || null;
-  } catch(e) {}
+  if (jourBilanNom === undefined) {
+    jourBilanNom = null;
+    try {
+      const profil = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${clientId}&select=jour_bilan`,
+        { headers: supaHeaders() }
+      ).then(r => r.json());
+      jourBilanNom = (profil && profil[0] && profil[0].jour_bilan) || null;
+    } catch(e) {}
+  }
   try {
     const dietes = await fetch(
       `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${clientId}&actif=eq.true&limit=1`,
@@ -239,8 +259,7 @@ async function _supaCreerNouveauBilan(clientId) {
     body: JSON.stringify(body),
   });
   const arr = await res.json();
-  const row = Array.isArray(arr) ? arr[0] : arr;
-  return _normaliserBilanSupa(row);
+  return Array.isArray(arr) ? arr[0] : arr; // ligne brute — l'appelant normalise si besoin
 }
 
 // La semaine du bilan se termine le jour_bilan assigné au client (ou
@@ -546,6 +565,12 @@ function _ouvrirRecapBilanSupa() {
   const noteWarn = !hasNote
     ? `<div style="background:#332200;border:1px solid #f0a500;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#f0c040;text-align:left;">⚠️ Aucune note repas renseignée. Tu as oublié de noter adhésion, digestion et appétit ?</div>`
     : '';
+  // Avertir le client AVANT l'envoi s'il est hors délai — avant, seul le
+  // coach le découvrait après coup (bonus ponctualité perdu en silence).
+  const enRetard = !_bilanEstPonctuel(data.createdAt, new Date().toISOString(), _bilanJourBilanNom);
+  const retardWarn = enRetard
+    ? `<div style="background:#3a1414;border:1px solid #e05555;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#ff8a8a;text-align:left;">⏰ Bilan envoyé après le jour assigné (${esc(_bilanJourBilanNom || '')}) — le bonus ponctualité ne sera pas accordé cette semaine.</div>`
+    : '';
 
   const modal = document.createElement('div');
   modal.id = 'recap-bilan-modal';
@@ -554,6 +579,7 @@ function _ouvrirRecapBilanSupa() {
     <div style="font-size:19px;font-weight:700;color:#e8eaf0;margin-bottom:3px;">Récap de ta semaine</div>
     <div style="font-size:12px;color:#8892a4;margin-bottom:16px;">${esc(data.semaineLabel || '')}</div>
     <div style="background:#0f1117;border-radius:12px;padding:4px 14px;margin-bottom:10px;">${statsHtml}</div>
+    ${retardWarn}
     ${noteWarn}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:#2d3142;margin:0;padding:12px;font-size:14px;border:none;border-radius:10px;color:#e8eaf0;cursor:pointer;">Modifier</button>
