@@ -73,6 +73,21 @@ async function loadBilanHistorique(ligneTitre) {
 
 // ── Supabase : chargement ─────────────────────────────────────────────
 
+// Récupère (ou crée) le bilan non-envoyé le plus récent d'un client —
+// utilisé par la page Bilan complète, la carte "Journée en cours" (accueil)
+// et la validation de séance (Mon programme), pour qu'ils écrivent tous
+// dans la même donnée réelle plutôt que des états locaux déconnectés.
+async function _supaBilanNonEnvoye(clientId) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=id,jours`,
+    { headers: supaHeaders() }
+  );
+  const arr = res.ok ? await res.json() : [];
+  if (arr.length > 0) return { id: arr[0].id, jours: arr[0].jours || [] };
+  const created = await _supaCreerNouveauBilan(clientId);
+  return { id: created.id, jours: created.jours };
+}
+
 async function _supaLoadBilan() {
   setPage('bilan-loading');
   try {
@@ -159,13 +174,14 @@ const _JOURS_NOMS = ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIM
 function _normaliserBilanSupa(row) {
   const jours = _JOURS_NOMS.map((nom, idx) => {
     const j = (row.jours || [])[idx] || {};
-    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide };
+    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee };
   });
   const repas = (row.repas_eval || []).map((r, idx) => ({
     idx, num: r.num || (idx + 1), adhesion: r.adhesion || 0, digestion: r.digestion || 0, appetit: r.appetit || 0,
   }));
   return {
     id:                 row.id,
+    createdAt:          row.created_at,
     semaineLabel:       row.semaine_label || 'Semaine en cours',
     jours,
     repas,
@@ -199,7 +215,7 @@ async function _supaCreerNouveauBilan(clientId) {
     }
   } catch(e) {}
 
-  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false, valide: false }));
+  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false, valide: false, seance_validee: false }));
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
   const body = {
     client_id:    clientId,
@@ -249,14 +265,14 @@ async function _supaPatchJoursBilan(bilanId, jours) {
   await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
     method: 'PATCH',
     headers: supaHeaders({ Prefer: 'return=minimal' }),
-    body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide })) }),
+    body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }),
   });
 }
 
 function sauverJourBilanSupa(jourIdx, field, value) {
   if (!_bilanData) return;
   _bilanData.jours[jourIdx][field] = value;
-  _supaUpdateBilan({ jours: _bilanData.jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: j.diete, training: j.training, cardio: j.cardio, valide: !!j.valide })) }).catch(() => {});
+  _supaUpdateBilan({ jours: _bilanData.jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: j.diete, training: j.training, cardio: j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }).catch(() => {});
 }
 
 function toggleJourBilanSupa(jourIdx, field, elemId) {
@@ -539,7 +555,7 @@ async function _validerEtEnvoyerSupa() {
     const today = new Date().toISOString().split('T')[0];
     await _supaUpdateBilan({ envoye_coach: true, date_validation: today });
     if (_bilanData) { _bilanData.dejaEnvoye = true; _bilanData.dateValidation = today; }
-    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient());
+    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, today);
     // Afficher overlay XP simplifié
     await loadBilan();
     _afficherXPValidationSupa(xpGagne);
@@ -549,46 +565,104 @@ async function _validerEtEnvoyerSupa() {
   }
 }
 
-// Crédite l'XP d'un bilan envoyé — une seule fois par bilan (dédoublonné
-// côté serveur via bilans.xp_credite, jamais via un flag localStorage).
-// Appeler cette fonction plusieurs fois sur le même bilan est sans danger :
-// le crédit n'est accordé qu'à la première fois où xp_credite vaut 0.
-const XP_PAR_BILAN_ENVOYE  = 40;
-const XP_PAR_JOUR_TRAINING = 5;
-const BONUS_PAS_OBJECTIF   = 12;
-const BONUS_DIETE_6SUR7    = 8;
-const BONUS_DIETE_7SUR7    = 12;
-
-async function _crediterXpBilanEnvoye(bilanId, jours, clientId) {
-  if (!bilanId) return 0;
-  const chkRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&select=xp_credite`, { headers: supaHeaders() });
-  const chkArr = chkRes.ok ? await chkRes.json() : [];
-  if (chkArr[0] && chkArr[0].xp_credite > 0) return 0; // déjà crédité, on ne recrédite jamais
-
-  const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=steps_cible`, { headers: supaHeaders() });
-  const profilArr = profilRes.ok ? await profilRes.json() : [];
-  const stepsCible = profilArr[0] && profilArr[0].steps_cible;
-
-  const joursTraining = jours.filter(j => j.training).length;
-  const joursDiete    = jours.filter(j => j.diete).length;
-  const totalSteps    = jours.reduce((s, j) => s + (j.steps || 0), 0);
-  const stepsMoy       = jours.length ? Math.round(totalSteps / jours.length) : 0;
-  const bonusPas   = (stepsCible && stepsMoy >= stepsCible) ? BONUS_PAS_OBJECTIF : 0;
-  const bonusDiete = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
-  const xpSemaine = XP_PAR_BILAN_ENVOYE + joursTraining * XP_PAR_JOUR_TRAINING + bonusPas + bonusDiete;
-
-  await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
-    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine })
-  });
-
+// Incrémente client_progression.xp_total — action déjà dédoublonnée par
+// l'appelant (bilans.xp_credite, jours[idx].valide/seance_validee) : ici on
+// se contente d'additionner, jamais de recalculer/écraser.
+async function _supaIncrementerXpTotal(clientId, delta) {
+  if (!delta) return 0;
   const progRes = await fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}&select=xp_total`, { headers: supaHeaders() });
   const progArr = progRes.ok ? await progRes.json() : [];
   const xpActuel = (progArr[0] && progArr[0].xp_total) || 0;
   await fetch(`${SUPABASE_URL}/rest/v1/client_progression?on_conflict=client_id`, {
     method: 'POST',
     headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
-    body: JSON.stringify({ client_id: clientId, xp_total: xpActuel + xpSemaine, updated_at: new Date().toISOString() })
+    body: JSON.stringify({ client_id: clientId, xp_total: xpActuel + delta, updated_at: new Date().toISOString() })
   });
+  return delta;
+}
+
+// ── Économie XP — répartition alignée sur la PWA (GAS) de référence ─────
+const XP_BILAN_BASE            = 50;
+const BONUS_DIETE_6SUR7        = 15;
+const BONUS_DIETE_7SUR7        = 30; // remplace le bonus 6/7, pas cumulatif
+const BONUS_SEANCES_100PCT     = 25; // 100% de l'objectif séances/semaine (client_profils.seances_cible)
+const XP_PAR_500_PAS           = 1;  // moyenne de pas/jour de la semaine, arrondie
+const BONUS_PAS_HEBDO_OBJECTIF = 20; // moyenne semaine >= objectif du coach (client_profils.steps_cible)
+const BONUS_PONCTUALITE        = 20; // bilan envoyé le jour de bilan assigné ou le lendemain
+const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
+
+const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
+
+function _mondayOfWeek(d) {
+  const jsDay = d.getDay(); // 0=dim...6=sam
+  const diff  = (jsDay === 0) ? -6 : 1 - jsDay;
+  const lundi = new Date(d);
+  lundi.setDate(d.getDate() + diff);
+  lundi.setHours(0, 0, 0, 0);
+  return lundi;
+}
+
+// Ponctuel = envoyé le jour de bilan assigné par le coach (client_profils
+// .jour_bilan) ou le lendemain, avant minuit. Sans jour assigné, toujours
+// considéré ponctuel (pas de pénalité pour un réglage non fait).
+function _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, jourBilanNom) {
+  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !dateValidationStr) return true;
+  const lundi = _mondayOfWeek(new Date(bilanCreatedAt));
+  const limite = new Date(lundi);
+  limite.setDate(lundi.getDate() + _JOURS_IDX_FR[jourBilanNom] + 1);
+  limite.setHours(23, 59, 59, 999);
+  return new Date(dateValidationStr) <= limite;
+}
+
+// Compte les bilans envoyés consécutifs (les plus récents d'abord) tant
+// qu'ils sont ponctuels — un bilan en retard casse la série.
+async function _calculerStreakBilans(clientId, jourBilanNom) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc&limit=15&select=created_at,date_validation`,
+    { headers: supaHeaders() }
+  );
+  const arr = res.ok ? await res.json() : [];
+  let streak = 0;
+  for (const b of arr) {
+    if (!b.date_validation || !_bilanEstPonctuel(b.created_at, b.date_validation, jourBilanNom)) break;
+    streak++;
+  }
+  return streak;
+}
+
+// Crédite l'XP d'un bilan envoyé — une seule fois par bilan (dédoublonné
+// côté serveur via bilans.xp_credite, jamais via un flag localStorage).
+// Appeler cette fonction plusieurs fois sur le même bilan est sans danger :
+// le crédit n'est accordé qu'à la première fois où xp_credite vaut 0.
+async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, dateValidationStr) {
+  if (!bilanId) return 0;
+  const chkRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&select=xp_credite`, { headers: supaHeaders() });
+  const chkArr = chkRes.ok ? await chkRes.json() : [];
+  if (chkArr[0] && chkArr[0].xp_credite > 0) return 0; // déjà crédité, on ne recrédite jamais
+
+  const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=steps_cible,seances_cible,jour_bilan`, { headers: supaHeaders() });
+  const profilArr = profilRes.ok ? await profilRes.json() : [];
+  const profil = profilArr[0] || {};
+
+  const joursTraining = jours.filter(j => j.training).length;
+  const joursDiete    = jours.filter(j => j.diete).length;
+  const totalSteps    = jours.reduce((s, j) => s + (j.steps || 0), 0);
+  const stepsMoy       = jours.length ? Math.round(totalSteps / jours.length) : 0;
+
+  const bonusDiete       = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
+  const bonusSeances100  = (profil.seances_cible && joursTraining >= profil.seances_cible) ? BONUS_SEANCES_100PCT : 0;
+  const xpPasContinu     = Math.round(stepsMoy / 500) * XP_PAR_500_PAS;
+  const bonusPasHebdo    = (profil.steps_cible && stepsMoy >= profil.steps_cible) ? BONUS_PAS_HEBDO_OBJECTIF : 0;
+  const ponctuel         = _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, profil.jour_bilan);
+  const bonusPonctualite = ponctuel ? BONUS_PONCTUALITE : 0;
+  const bonusStreak      = ponctuel ? (STREAK_BONUS[await _calculerStreakBilans(clientId, profil.jour_bilan)] || 0) : 0;
+
+  const xpSemaine = XP_BILAN_BASE + bonusDiete + bonusSeances100 + xpPasContinu + bonusPasHebdo + bonusPonctualite + bonusStreak;
+
+  await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine })
+  });
+  await _supaIncrementerXpTotal(clientId, xpSemaine);
   return xpSemaine;
 }
 

@@ -1457,20 +1457,7 @@ function _jourIdxAujourdhui() {
 }
 async function _loadJourneeDataSupabase() {
   const clientId = getClient ? getClient() : S.client;
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1&select=id,jours`,
-    { headers: supaHeaders() }
-  );
-  const arr = res.ok ? await res.json() : [];
-  let id, jours;
-  if (arr.length > 0) {
-    id = arr[0].id;
-    jours = arr[0].jours || [];
-  } else {
-    const created = await _supaCreerNouveauBilan(clientId);
-    id = created.id;
-    jours = created.jours;
-  }
+  const { id, jours } = await _supaBilanNonEnvoye(clientId);
   const idx = _jourIdxAujourdhui();
   const j = jours[idx] || {};
   return { bilanId: id, jourIdx: idx, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, steps: j.steps ?? '', valide: !!j.valide, aucun: false };
@@ -1538,6 +1525,25 @@ function sauverStepsJourneeSupabase(val) {
     .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
     .catch(() => {});
 }
+const XP_JOURNEE_VALIDEE  = 5;
+const BONUS_PAS_JOUR      = 10;
+
+// Crédite l'XP de la journée — dédoublonné via jours[idx].valide (pas un
+// flag localStorage) : si la journée était déjà validée avant cet appel,
+// aucun XP n'est recrédité, même en cas de double-clic/relance.
+async function _crediterXpJournee(dejaValideAvant, steps, clientId) {
+  if (dejaValideAvant) return 0;
+  let xp = XP_JOURNEE_VALIDEE;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=steps_cible`, { headers: supaHeaders() });
+    const arr = res.ok ? await res.json() : [];
+    const stepsCible = arr[0] && arr[0].steps_cible;
+    if (stepsCible && steps && Number(steps) >= stepsCible) xp += BONUS_PAS_JOUR;
+  } catch(e) {}
+  await _supaIncrementerXpTotal(clientId, xp);
+  return xp;
+}
+
 async function validerJourneeClientSupabase() {
   if (!_journeeData) return;
   const stepsEl = document.getElementById('jSteps');
@@ -1548,24 +1554,25 @@ async function validerJourneeClientSupabase() {
   const btn = document.getElementById('btnValiderJournee');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
   try {
-    // "Valider" ne fait que marquer le jour comme coché — l'XP se gagne
-    // exclusivement à l'envoi du bilan hebdo (page Bilan), jamais ici.
+    const dejaValideAvant = !!_journeeData.valide;
     await _sauverJourneeSupabase('valide', true);
+    const xpGagne = await _crediterXpJournee(dejaValideAvant, _journeeData.steps, getClient());
     const modal = document.getElementById('modalJournee');
     if (modal) modal.remove();
     _majCarteJournee();
-    _showJourneeEnregistreeSupabase();
+    _showJourneeEnregistreeSupabase(xpGagne);
     if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
   } catch(e) {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
     alert('Erreur lors de la validation.');
   }
 }
-function _showJourneeEnregistreeSupabase() {
+function _showJourneeEnregistreeSupabase(xpGagne) {
   const flash = document.createElement('div');
   flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:20px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
-  flash.innerHTML = '✓ Journée enregistrée !'
-    + '<div style="font-size:12px;margin-top:6px;font-weight:400;opacity:.85;">L\'XP se gagne à l\'envoi du bilan de la semaine</div>';
+  flash.innerHTML = xpGagne
+    ? '🎉 +' + xpGagne + ' XP<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>'
+    : '✓ Journée enregistrée !';
   document.body.appendChild(flash);
   setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
 }

@@ -2834,13 +2834,7 @@ function renderFicheProfilTab(c){
         <div class="fiche-field"><label>Pas / jour demandés</label><input id="fStepsCible" type="number" min="0" step="500" placeholder="ex: 8000" value="${esc(p.steps_cible||'')}"></div>
         <div class="fiche-field"><label>Séances / semaine</label><input id="fSeancesCible" type="number" min="0" max="14" value="${esc(p.seances_cible||'')}"></div>
       </div>
-      <div class="fiche-field" style="display:flex;align-items:center;gap:8px;">
-        <input id="fCardioAssigne" type="checkbox" style="width:auto;" ${p.cardio_assigne?'checked':''} onchange="document.getElementById('fCardioDureeWrap').style.display=this.checked?'block':'none'">
-        <label style="margin:0;">Cardio assigné</label>
-      </div>
-      <div id="fCardioDureeWrap" class="fiche-field" style="display:${p.cardio_assigne?'block':'none'};">
-        <label>Durée cardio / séance (min)</label><input id="fCardioDureeMin" type="number" min="0" step="5" placeholder="ex: 20" value="${esc(p.cardio_duree_min||'')}">
-      </div>
+      <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
       <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
     </div>`;
 }
@@ -3486,8 +3480,7 @@ async function sauvegarderFicheSandbox(clientId){
     objectif: document.getElementById('fObjectif').value.trim() || null,
     steps_cible: parseInt(document.getElementById('fStepsCible').value)||null,
     seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
-    cardio_assigne: !!document.getElementById('fCardioAssigne').checked,
-    cardio_duree_min: parseInt(document.getElementById('fCardioDureeMin').value)||null,
+    cardio_consigne: document.getElementById('fCardioConsigne').value.trim() || null,
     updated_at: new Date().toISOString(),
   };
   try {
@@ -3638,8 +3631,9 @@ async function chargerClientProgressionXP(clientId){
   // xp_total est un compteur stocké, incrémenté uniquement côté serveur à
   // l'envoi d'un bilan (bilan.js, _crediterXpBilanEnvoye), dédoublonné via
   // bilans.xp_credite — jamais recalculé ici. Voir progression.js.
-  const XP_PAR_NIVEAU = 65;
-  const NIVEAU_MAX    = 50;
+  // XP_PAR_NIVEAU=50, pas de plafond : aligné sur le système GAS réel
+  // (confirmé via Perrine, xp_total=747 → niveau 15 = floor(747/50)+1).
+  const XP_PAR_NIVEAU = 50;
   const xpTotal = progRow.xp_total || 0;
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
   let seancesValidees = 0;
@@ -3647,10 +3641,10 @@ async function chargerClientProgressionXP(clientId){
     if (!b.envoye_coach || !b.date_validation) return;
     seancesValidees += (b.jours || []).filter(j=>j.training).length;
   });
-  const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
-  const niveauMaxAtteint = niveau >= NIVEAU_MAX;
-  const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
-  const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
+  const niveauMaxAtteint = false;
+  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
+  const pct = Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
   // 4 = ancien comportement par défaut tant que le coach n'a pas encore
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
   const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut) : 0) || bilans.length || 1;

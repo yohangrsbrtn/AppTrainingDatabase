@@ -9,14 +9,14 @@ let _pcSeanceId        = null; // id de la séance sélectionnée
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
-let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_assigne, cardio_duree_min } assignés par le coach
+let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_consigne } assignés par le coach
 
 // ── Chargement ─────────────────────────────────────────────────────────
 
 async function _chargerObjectifsClient() {
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=steps_cible,seances_cible,cardio_assigne,cardio_duree_min`,
+      `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=steps_cible,seances_cible,cardio_consigne`,
       { headers: supaHeaders() }
     );
     const arr = res.ok ? await res.json() : [];
@@ -114,10 +114,12 @@ function _renderPcObjectifsBand() {
   const items = [];
   if (o.seances_cible) items.push({ v: o.seances_cible, l: 'séances/sem' });
   if (o.steps_cible) items.push({ v: (o.steps_cible >= 1000 ? Math.round(o.steps_cible/100)/10 + 'k' : o.steps_cible), l: 'pas/jour' });
-  if (o.cardio_assigne) items.push({ v: o.cardio_duree_min ? o.cardio_duree_min + 'min' : '✓', l: 'cardio' });
-  if (!items.length) return '';
-  return `<div class="card" style="display:flex;justify-content:space-around;padding:12px 8px;margin-bottom:12px;">
-    ${items.map(it => `<div style="text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--accent);">${it.v}</div><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">${it.l}</div></div>`).join('')}
+  if (!items.length && !o.cardio_consigne) return '';
+  return `<div class="card" style="padding:12px 8px;margin-bottom:12px;">
+    ${items.length ? `<div style="display:flex;justify-content:space-around;">
+      ${items.map(it => `<div style="text-align:center;"><div style="font-size:16px;font-weight:700;color:var(--accent);">${it.v}</div><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;">${it.l}</div></div>`).join('')}
+    </div>` : ''}
+    ${o.cardio_consigne ? `<div style="text-align:center;font-size:12px;color:#8892a4;${items.length?'margin-top:8px;padding-top:8px;border-top:1px solid var(--border);':''}">🏃 ${esc(o.cardio_consigne)}</div>` : ''}
   </div>`;
 }
 
@@ -323,6 +325,7 @@ function renderPcSeancePage() {
       </div>
       ${rightPanel ? `<div style="margin-bottom:12px;">${rightPanel}</div>` : ''}
       ${exosHtml}
+      <button id="pcValiderSeanceBtn" class="btn-primary" onclick="pcValiderSeance()" style="margin-top:8px;width:100%;">✅ Valider la séance</button>
       <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
     </div>
     <div id="pcChronoOverlay" style="display:none;"></div>
@@ -354,6 +357,45 @@ function pcChangerSemaineNav(val) {
 function pcChangerSeanceNav(val) {
   _pcSeanceId = parseInt(val) || val;
   setPage('programme-client');
+}
+
+const XP_SEANCE_VALIDEE = 10;
+
+// Valide la séance du jour : coche training=true dans le vrai bilan de la
+// semaine en cours (comme verifierEtCocherTraining côté PWA) et crédite
+// l'XP séance — une seule fois par jour, dédoublonné via
+// jours[idx].seance_validee (pas un flag localStorage).
+async function pcValiderSeance() {
+  const btn = document.getElementById('pcValiderSeanceBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const clientId = getClient();
+    const { id, jours } = await _supaBilanNonEnvoye(clientId);
+    const idx = _jourIdxAujourdhui();
+    const jourAuj = jours[idx] || {};
+    if (jourAuj.seance_validee) {
+      showToast('Tu as déjà validé une séance aujourd\'hui. Reviens demain !', '#f0a500');
+      if (btn) { btn.disabled = false; btn.textContent = '✅ Valider la séance'; }
+      return;
+    }
+    jours[idx] = { ...jourAuj, training: true, seance_validee: true };
+    await _supaPatchJoursBilan(id, jours);
+    const xpGagne = await _supaIncrementerXpTotal(clientId, XP_SEANCE_VALIDEE);
+    _pcFlashSeanceValidee(xpGagne);
+    if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, '#c0392b');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Valider la séance'; }
+  }
+}
+
+function _pcFlashSeanceValidee(xpGagne) {
+  const flash = document.createElement('div');
+  flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:20px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
+  flash.innerHTML = '🏆 Séance validée !' + (xpGagne ? `<div style="font-size:15px;margin-top:6px;">🎉 +${xpGagne} XP</div>` : '');
+  document.body.appendChild(flash);
+  setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
 }
 
 async function pcSauverLog(exerciceId, serie, field, value) {

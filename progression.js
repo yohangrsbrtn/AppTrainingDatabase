@@ -42,8 +42,9 @@ async function chargerProgressionSupabase() {
   // de vérité pour l'XP et le niveau. Les stats ci-dessous (séances,
   // assiduité, historique) restent en revanche recalculées en live depuis
   // les bilans, ce sont de simples agrégats d'affichage, pas des compteurs.
-  const XP_PAR_NIVEAU = 65;
-  const NIVEAU_MAX    = 50;
+  // XP_PAR_NIVEAU=50, pas de plafond : aligné sur le système GAS réel
+  // (confirmé via Perrine, xp_total=747 → niveau 15 = floor(747/50)+1).
+  const XP_PAR_NIVEAU = 50;
 
   const xpTotal = progRow.xp_total || 0;
 
@@ -69,10 +70,10 @@ async function chargerProgressionSupabase() {
   // plus grande source gagne), contrairement à xp_total.
   const pasTotal = Math.max(pasTotalBilans, progRow.pas_total || 0);
 
-  const niveau = Math.min(NIVEAU_MAX, Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1));
-  const niveauMaxAtteint = niveau >= NIVEAU_MAX;
-  const xpManquant = niveauMaxAtteint ? 0 : niveau * XP_PAR_NIVEAU - xpTotal;
-  const pct = niveauMaxAtteint ? 100 : Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
+  const niveauMaxAtteint = false;
+  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
+  const pct = Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
 
   // 4 = ancien comportement par défaut tant que le coach n'a pas encore
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
