@@ -30,9 +30,9 @@ async function chargerProgressionSupabase() {
   bilans.forEach(b => {
     const jours = b.jours || [];
     pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
-    const seancesWeek = jours.filter(j => j.training).length;
-    seancesValidees += seancesWeek;
     if (b.envoye_coach && b.date_validation) {
+      const seancesWeek = jours.filter(j => j.training).length;
+      seancesValidees += seancesWeek;
       const stepsMoy = jours.length ? Math.round(pasTotalBilans / jours.length) : 0;
       const bonusPas = stepsMoy >= 10000 ? 25 : 0;
       historiqueXP.unshift({ type: 'bilan', semaine: b.semaine_label || '', xp: 100 + bonusPas, ts: b.date_validation || '' });
@@ -46,7 +46,7 @@ async function chargerProgressionSupabase() {
 
   const xpFromBilans = bilansValidies * 100 + seancesValidees * 50;
   const xpTotal = Math.max(xpFromBilans, progRow.xp_total || 0);
-  const XP_PAR_NIVEAU = 200;
+  const XP_PAR_NIVEAU = 50;
   const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
   const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
   const pct = Math.round((xpTotal - (niveau - 1) * XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);

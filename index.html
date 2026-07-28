@@ -1516,7 +1516,7 @@ async function validerJourneeClientSupabase() {
     const progRows = progRes.ok ? await progRes.json() : [];
     const progRow = progRows[0] || {};
     const xpActuel = progRow.xp_total || 0;
-    const XP_PAR_NIVEAU = 200;
+    const XP_PAR_NIVEAU = 50;
     const niveauAvant = Math.max(1, Math.floor(xpActuel / XP_PAR_NIVEAU) + 1);
     const xpBase = 50;
     const steps = parseInt(_journeeData.steps) || 0;

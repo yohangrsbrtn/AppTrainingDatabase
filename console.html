@@ -3507,10 +3507,10 @@ async function chargerClientProgressionXP(clientId){
   const progRow = progRows[0] || {};
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
   let seancesValidees = 0;
-  bilans.forEach(b => { seancesValidees += (b.jours||[]).filter(j=>j.training).length; });
+  bilans.forEach(b => { if (b.envoye_coach && b.date_validation) seancesValidees += (b.jours||[]).filter(j=>j.training).length; });
   const xpFromBilans = bilansValidies * 100 + seancesValidees * 50;
   const xpTotal = Math.max(xpFromBilans, progRow.xp_total || 0);
-  const XP_PAR_NIVEAU = 200;
+  const XP_PAR_NIVEAU = 50;
   const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
   const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
   const pct = Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
