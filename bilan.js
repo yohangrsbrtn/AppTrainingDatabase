@@ -552,10 +552,11 @@ function _ouvrirRecapBilanSupa() {
 async function _validerEtEnvoyerSupa() {
   setPage('bilan-loading');
   try {
-    const today = new Date().toISOString().split('T')[0];
-    await _supaUpdateBilan({ envoye_coach: true, date_validation: today });
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    await _supaUpdateBilan({ envoye_coach: true, date_validation: today, envoye_at: now.toISOString() });
     if (_bilanData) { _bilanData.dejaEnvoye = true; _bilanData.dateValidation = today; }
-    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, today);
+    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, now.toISOString());
     // Afficher overlay XP simplifié
     await loadBilan();
     _afficherXPValidationSupa(xpGagne);
@@ -588,7 +589,7 @@ const BONUS_DIETE_7SUR7        = 30; // remplace le bonus 6/7, pas cumulatif
 const BONUS_SEANCES_100PCT     = 25; // 100% de l'objectif séances/semaine (client_profils.seances_cible)
 const XP_PAR_500_PAS           = 1;  // moyenne de pas/jour de la semaine, arrondie
 const BONUS_PAS_HEBDO_OBJECTIF = 20; // moyenne semaine >= objectif du coach (client_profils.steps_cible)
-const BONUS_PONCTUALITE        = 20; // bilan envoyé le jour de bilan assigné ou le lendemain
+const BONUS_PONCTUALITE        = 20; // bilan envoyé au plus tard le jour de bilan assigné, avant midi
 const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
 
 const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
@@ -602,30 +603,43 @@ function _mondayOfWeek(d) {
   return lundi;
 }
 
-// Ponctuel = envoyé le jour de bilan assigné par le coach (client_profils
-// .jour_bilan) ou le lendemain, avant minuit. Sans jour assigné, toujours
-// considéré ponctuel (pas de pénalité pour un réglage non fait).
-function _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, jourBilanNom) {
-  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !dateValidationStr) return true;
+// Ponctuel = envoyé au plus tard le jour de bilan assigné par le coach
+// (client_profils.jour_bilan), avant midi — envoyer plus tôt dans la
+// semaine est toujours ponctuel, envoyer ce jour-là après midi ou un jour
+// plus tard ne l'est pas. Sans jour assigné, toujours considéré ponctuel
+// (pas de pénalité pour un réglage non fait). Les bilans migrés depuis
+// GAS n'ont pas d'heure exacte (envoye_at) — on retombe sur la date à
+// midi pile, ni pénalisé ni avantagé.
+function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
+  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !envoyeAtStr) return true;
   const lundi = _mondayOfWeek(new Date(bilanCreatedAt));
   const limite = new Date(lundi);
-  limite.setDate(lundi.getDate() + _JOURS_IDX_FR[jourBilanNom] + 1);
-  limite.setHours(23, 59, 59, 999);
-  return new Date(dateValidationStr) <= limite;
+  limite.setDate(lundi.getDate() + _JOURS_IDX_FR[jourBilanNom]);
+  limite.setHours(12, 0, 0, 0);
+  return new Date(envoyeAtStr) <= limite;
 }
 
 // Compte les bilans envoyés consécutifs (les plus récents d'abord) tant
-// qu'ils sont ponctuels — un bilan en retard casse la série.
+// qu'ils sont ponctuels ET que les semaines se suivent sans trou — une
+// semaine sautée (vacances, etc.) casse la série même si les bilans
+// avant/après sont eux-mêmes ponctuels.
 async function _calculerStreakBilans(clientId, jourBilanNom) {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc&limit=15&select=created_at,date_validation`,
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc&limit=15&select=created_at,date_validation,envoye_at`,
     { headers: supaHeaders() }
   );
   const arr = res.ok ? await res.json() : [];
   let streak = 0;
+  let semaineAttendue = null;
   for (const b of arr) {
-    if (!b.date_validation || !_bilanEstPonctuel(b.created_at, b.date_validation, jourBilanNom)) break;
+    if (!b.date_validation) break;
+    const envoyeAt = b.envoye_at || (b.date_validation + 'T12:00:00');
+    if (!_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom)) break;
+    const lundi = _mondayOfWeek(new Date(b.created_at));
+    if (semaineAttendue && lundi.getTime() !== semaineAttendue.getTime()) break; // semaine manquée
     streak++;
+    semaineAttendue = new Date(lundi);
+    semaineAttendue.setDate(semaineAttendue.getDate() - 7);
   }
   return streak;
 }
