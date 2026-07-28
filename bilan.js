@@ -560,6 +560,7 @@ async function _validerEtEnvoyerSupa() {
     // Afficher overlay XP simplifié
     await loadBilan();
     _afficherXPValidationSupa(xpGagne);
+    if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
   } catch(e) {
     showToast('Erreur : ' + e.message, '#c0392b');
     setPage('bilan');
