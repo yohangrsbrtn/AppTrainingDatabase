@@ -1051,7 +1051,8 @@ async function choisirDieteCible(d) {
     const refKey = _refKeyForDiete(d);
     await _resoudreDieteDetail(refKey);
     if (refKey.sb) {
-      await sbDefinirDieteCibleJournal(_dJournalDateOuverte, refKey.id, d.nom);
+      const res = await sbDefinirDieteCibleJournal(_dJournalDateOuverte, refKey.id, d.nom);
+      if (!res || !res.ok) throw new Error('sauvegarde_cible_echouee');
     } else {
       await api('definirDieteCibleJournal', { date: _dJournalDateOuverte, ligneTitre: refKey.ligne, colTitre: refKey.col, nom: d.nom });
     }
