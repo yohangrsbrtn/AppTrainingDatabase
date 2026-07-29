@@ -5218,6 +5218,28 @@ let migPreviewSemaineIdx = 0;
 let migPreviewSeancesCache = {};  // { sem: [seanceData0, seanceData1, ...] }
 let migPreviewSeancesLoading = false;
 
+// Découpe grossièrement "Prénom Nom" (source : nom affiché du dashboard, lui-même
+// issu de la feuille GAS) — premier mot = prénom, reste = nom. Le coach peut corriger
+// depuis la fiche client si un nom composé casse mal.
+async function _autoCreerProfilMinimal(clientId) {
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  const nomComplet = ((c && c.nom) || '').trim();
+  if (!nomComplet) return null;
+  const parts = nomComplet.split(/\s+/);
+  const prenom = parts[0] || null;
+  const nom = parts.slice(1).join(' ') || null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: clientId, prenom, nom }),
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows[0] || null;
+  } catch(e) { return null; }
+}
+
 function openMigrationPreview(clientId) {
   migPreviewClientId = clientId;
   migPreviewTab = 'infos';
@@ -5259,7 +5281,11 @@ async function _chargerMigPreviewData(clientId) {
     const gasBilans        = Array.isArray(_gasBilansUnwrap) ? _gasBilansUnwrap : [];
     const supaBilansRows   = supaBilansRes?.ok ? (await supaBilansRes.json().catch(() => [])) : [];
     const supaBilanLignes  = new Set(supaBilansRows.map(r => r.gas_ligne_titre));
-    const supaProfile = profRows[0] || null;
+    let supaProfile = profRows[0] || null;
+    // Auto-crée une fiche minimale (prénom/nom depuis le nom affiché du dashboard) plutôt
+    // que d'afficher "Aucun profil Supabase" à chaque ouverture pour chaque nouveau client —
+    // le coach peut compléter le reste (email, jour bilan…) depuis la fiche client ensuite.
+    if (!supaProfile) supaProfile = await _autoCreerProfilMinimal(clientId);
 
     const supaDateSet = new Set(supaMensurations.map(r => r.date));
     migPreviewSel = new Set(gasMensurations.map(r => _parseDateFr(r.date)).filter(d => d && !supaDateSet.has(d)));
