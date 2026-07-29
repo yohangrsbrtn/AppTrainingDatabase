@@ -4952,7 +4952,7 @@ const GAS_PROD_URL = 'https://script.google.com/macros/s/AKfycbwQiM6ixf-CTIWwcuN
 
 // Mapping ID Supabase → ID GAS quand ils diffèrent
 // (ex: compte test "yohanp" utilise la feuille réelle "yohan")
-const GAS_ID_MAP = { 'yohanp': 'yohan', 'rarnaud': 'arnaudfouetilloux' };
+const GAS_ID_MAP = { 'yohanp': 'yohan' };
 function _gasId(clientId) { return GAS_ID_MAP[clientId] || clientId; }
 
 async function apiGasProd(action, clientId, params = {}) {
