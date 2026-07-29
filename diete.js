@@ -317,23 +317,31 @@ async function sbSupprimerSlotJournal(ligne) {
 // même logique que ouvrirDieteSupabase(), mais renvoie l'objet au lieu de peupler _dDetail.
 // Ne prend que la variante de base (variante_index=0) de chaque repas : les équivalences
 // n'ont pas de sens pour une cible du journal (une seule valeur de comparaison par repas).
+// Attention : lève une exception sur un échec réseau/HTTP plutôt que de renvoyer
+// silencieusement { repas: [] } — le résultat est mis en cache indéfiniment par
+// _resoudreDieteDetail (jamais invalidé pendant la session), donc masquer une panne
+// réseau en "diète valide à 0 repas" la fige en cache pour tout le reste de la session
+// (bug vécu : "aucun repas trouvé" / "seulement repas 1" alors que les données existent).
 async function sbResoudreDieteDetail(clientDieteId) {
   const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=nom`, { headers: supaHeaders() });
-  const cd = cdRes.ok ? await cdRes.json() : [];
+  if (!cdRes.ok) throw new Error('client_dietes_' + cdRes.status);
+  const cd = await cdRes.json();
   if (!cd.length) return { nom: '', repas: [] };
   const templateNom = cd[0].nom;
   const tmplRes = await fetch(
     `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id`,
     { headers: supaHeaders() }
   );
-  const templates = tmplRes.ok ? await tmplRes.json() : [];
+  if (!tmplRes.ok) throw new Error('diete_templates_' + tmplRes.status);
+  const templates = await tmplRes.json();
   if (!templates.length) return { nom: templateNom, repas: [] };
   const repasRes = await fetch(
     `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templates[0].id}&variante_index=eq.0&order=ordre.asc` +
     `&select=nom,ordre,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
     { headers: supaHeaders() }
   );
-  const repasRaw = repasRes.ok ? await repasRes.json() : [];
+  if (!repasRes.ok) throw new Error('repas_' + repasRes.status);
+  const repasRaw = await repasRes.json();
   const toAliments = r => (r.repas_aliments || []).map(a => {
     const al = a.aliments_coach || {};
     const q = a.quantite_g || 0;
@@ -918,7 +926,11 @@ async function ouvrirJourJournal(dateStr) {
   });
   if (aCharger.length) {
     setPage('diete-loading');
-    await Promise.all(aCharger.map(r => _resoudreDieteDetail(r)));
+    try {
+      await Promise.all(aCharger.map(r => _resoudreDieteDetail(r)));
+    } catch(e) {
+      showToast('Erreur de chargement de la diète — réessaie.', '#c0392b');
+    }
   }
   _dJournalDateOuverte = dateStr;
   _dJournalAjoutEtape = null;
@@ -1044,7 +1056,7 @@ async function choisirDieteCible(d) {
       await api('definirDieteCibleJournal', { date: _dJournalDateOuverte, ligneTitre: refKey.ligne, colTitre: refKey.col, nom: d.nom });
     }
     _dJournal = await _apiListerJournal();
-  } catch(e) {}
+  } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
   _dJournalCibleEtape = null;
   setPage('diete');
 }
@@ -1282,7 +1294,7 @@ async function choisirDieteJournal(d) {
     const detail = await _resoudreDieteDetail(refKey);
     _dJournalDieteChoisie = { refKey, nom: d.nom, repas: detail.repas || [] };
     _dJournalAjoutEtape = 'coach-repas';
-  } catch(e) {}
+  } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
   setPage('diete');
 }
 
