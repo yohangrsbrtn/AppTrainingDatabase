@@ -1682,7 +1682,10 @@ async function rechercherOpenFoodFacts(query){
 // ── Page Protocole ─────────────────────────────────────────────────────
 function renderProtocolePage(el){
   const actifs = data.clients.filter(c=>c.chimieActif);
-  const supaClients = data.clients.filter(c=>c._hasSupaProfil);
+  // Tout client peut recevoir un protocole créé depuis la console, qu'il ait déjà
+  // ou non une fiche client_profils — un client GAS legacy n'en a pas forcément
+  // (la plupart n'en ont pas), ce n'est pas une condition pour créer un protocole.
+  const supaClients = data.clients;
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Protocole</h1></div>
@@ -1705,7 +1708,7 @@ function renderProtocolePage(el){
     <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>
 
     <div class="table-card" style="margin-top:22px;">
-      <div class="table-toolbar"><div class="title">Protocoles chimie (Supabase)</div></div>
+      <div class="table-toolbar"><div class="title">Créer / gérer un protocole (tous clients)</div></div>
       <div class="table-scroll"><table class="clients">
         <thead><tr><th>Client</th><th>Visible côté client</th><th></th></tr></thead>
         <tbody>
@@ -1725,8 +1728,11 @@ function renderProtocolePage(el){
 
 async function toggleChimieActifSupa(clientId, actif){
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
-      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ chimie_actif: !actif }),
+    // Upsert (pas PATCH seul) : la plupart des clients GAS legacy n'ont pas encore
+    // de ligne client_profils — un PATCH matcherait 0 ligne et ne ferait rien.
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: clientId, chimie_actif: !actif }),
     });
     await rafraichir();
     if (state.nav === 'protocole') renderMain();
@@ -1742,10 +1748,12 @@ let protocoleEnEdition = null; // { id, client_id, clientNom, date_debut, duree_
 let _protocolePreview  = null; // résultat de _protocoleCalculer après génération/enregistrement
 
 async function ouvrirEditeurProtocole(clientId, clientNom){
-  setNav('editeur-protocole');
+  // protocoleEnEdition doit être assigné AVANT setNav : setNav déclenche renderMain()
+  // synchronement, et renderEditeurProtocolePage rebondit vers 'protocole' si l'état
+  // est encore vide (garde anti-crash) — l'inverser cassait l'ouverture de l'éditeur.
   protocoleEnEdition = { id: null, client_id: clientId, clientNom: clientNom || clientId, date_debut: new Date().toISOString().slice(0,10), duree_semaines: 12, objectif: '', molecules: [] };
   _protocolePreview = null;
-  renderMain();
+  setNav('editeur-protocole');
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=*,client_protocole_molecules(*)`,
