@@ -270,6 +270,7 @@ function render() {
     case 'loading':       app.innerHTML = renderFullSpinner(); break;
     case 'login':         app.innerHTML = renderLogin();   bindLogin(); break;
     case 'home':          document.body.innerHTML = renderHome(); break;
+    case 'home-erreur':   document.body.innerHTML = renderHomeErreur(); break;
     case 'home-supabase': document.body.innerHTML = renderHomeSupabase(); break;
     case 'training':
     case 'training-loading': document.body.innerHTML = renderTrainingPage(); break;
@@ -824,10 +825,30 @@ async function loadHome() {
     _apresChargementHome();
   } catch(e) {
     hideLoadingOverlay();
-    localStorage.removeItem('at_token');
-    _loginStep = 'identifiant'; _loginClient = '';
-    setPage('login');
+    if (e.message === 'token_invalide') {
+      // Session réellement invalide côté serveur (token expiré/rejeté) — là seulement on déconnecte.
+      localStorage.removeItem('at_token');
+      _loginStep = 'identifiant'; _loginClient = '';
+      setPage('login');
+    } else {
+      // Erreur réseau/API transitoire (GAS lent, coupure...) : on garde la session intacte,
+      // sinon un simple aléa réseau déconnecte silencieusement le client (bug observé après
+      // un retour arrière qui relance le chargement de l'accueil).
+      setPage('home-erreur');
+    }
   }
+}
+
+function renderHomeErreur() {
+  return `
+  <div id="app">
+    <div class="page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;text-align:center;gap:16px;">
+      <div style="font-size:40px;">📡</div>
+      <div style="font-size:15px;color:var(--muted);">Impossible de charger tes données.<br>Vérifie ta connexion.</div>
+      <button class="btn-primary" onclick="loadHome()" style="max-width:220px;">Réessayer</button>
+      <div class="list-item" onclick="deconnexion()" style="color:var(--red);">Se déconnecter</div>
+    </div>
+  </div>`;
 }
 
 function _apresChargementHome() {
