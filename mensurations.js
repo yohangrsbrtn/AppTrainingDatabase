@@ -5,7 +5,7 @@ window._mensCharts = window._mensCharts || {};
 const _M_COLS   = ['fessiers','cuisses','mollets','poitrine','epaules','bras'];
 const _M_COLORS = ['#f59e0b','#a78bfa','#3ecf8e','#f97316','#4f8ef7','#e05c5c'];
 const _M_LABELS = ['Fessiers','Cuisses','Mollets','Poitrine','Épaules','Bras'];
-let _mChart2Key = 'fessiers';
+let _mChart2Keys = new Set(['fessiers']);
 
 let _mSubPage  = 'historique'; // 'historique' | 'autres-mens' | 'saisie-list' | 'saisie-form'
 let _mReleves  = [];
@@ -212,7 +212,6 @@ function renderHistorique() {
     : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Aucune donnée sur cette période</div>';
 
   const backFn = isSupabase() ? "goTo('home')" : 'loadHome()';
-  const hasAutres = releves.some(r => _M_COLS.some(k => parseFloat(r[k]) > 0));
 
   return `<div id="app">
     ${renderHeader('Mes Mensurations', 'Ma progression', false)}
@@ -221,7 +220,7 @@ function renderHistorique() {
         <button onclick="${backFn}" style="flex:1;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">← Accueil</button>
         <button onclick="loadSaisieMensurations()" style="flex:1;background:linear-gradient(135deg,#378ADD,#2260a8);color:#fff;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;">Saisir mensurations</button>
       </div>
-      ${hasAutres ? `<button onclick="_mSubPage='autres-mens';setPage('mensurations');" style="width:100%;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:12px;">📏 Autres mensurations →</button>` : ''}
+      <button onclick="_mSubPage='autres-mens';setPage('mensurations');" style="width:100%;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:12px;">📏 Autres mensurations →</button>
 
       <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;">
         <div style="flex:1;min-width:0;overflow:hidden;">
@@ -470,33 +469,37 @@ function isoDate(d) {
   return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
 }
 
-function renderAutresMens() {
-  const releves = _mReleves;
-  const ki = Math.max(0, _M_COLS.indexOf(_mChart2Key));
-  const pills = _M_COLS.map((k, i) => `<button onclick="_setMChart2('${k}')"
-    style="padding:3px 11px;border-radius:99px;border:1px solid ${_mChart2Key===k?_M_COLORS[i]:'var(--border)'};background:${_mChart2Key===k?_M_COLORS[i]+'22':'transparent'};color:${_mChart2Key===k?_M_COLORS[i]:'var(--muted)'};font-size:11px;font-weight:${_mChart2Key===k?'700':'400'};cursor:pointer;transition:all .15s;">${_M_LABELS[i]}</button>`).join('');
-  const chart = releves.length >= 2 ? _buildMensChart('m_c2_' + _mChart2Key, releves, [_mChart2Key], [_M_COLORS[ki]], [_M_LABELS[ki]], ' cm') : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données</div>';
+// _mChart2Keys : Set des mensurations actives — plusieurs pills peuvent être sélectionnées
+// à la fois pour superposer leurs courbes sur le même graphique (_buildMensChart accepte
+// déjà keys/colors/labels en tableaux).
+function _renderMensChart2Section(releves) {
+  const actives = _M_COLS.filter(k => _mChart2Keys.has(k));
+  const pills = _M_COLS.map((k, i) => `<button onclick="_toggleMChart2('${k}')"
+    style="padding:3px 11px;border-radius:99px;border:1px solid ${_mChart2Keys.has(k)?_M_COLORS[i]:'var(--border)'};background:${_mChart2Keys.has(k)?_M_COLORS[i]+'22':'transparent'};color:${_mChart2Keys.has(k)?_M_COLORS[i]:'var(--muted)'};font-size:11px;font-weight:${_mChart2Keys.has(k)?'700':'400'};cursor:pointer;transition:all .15s;">${_M_LABELS[i]}</button>`).join('');
+  const colors = actives.map(k => _M_COLORS[_M_COLS.indexOf(k)]);
+  const labels = actives.map(k => _M_LABELS[_M_COLS.indexOf(k)]);
+  const chart = (actives.length && releves.length >= 2)
+    ? _buildMensChart('m_c2_' + actives.join('_'), releves, actives, colors, labels, ' cm')
+    : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données</div>';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div><div id="mensChart2">${chart}</div>`;
+}
 
+function renderAutresMens() {
   return `<div id="app">
     ${renderHeader('Autres mensurations', 'Mensurations', false)}
     <div class="page">
       <button onclick="_mSubPage='historique';setPage('mensurations');" style="width:100%;background:#2d3142;color:#e8eaf0;border:none;border-radius:10px;padding:12px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:12px;">← Retour</button>
-      <div class="card">
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>
-        <div id="mensChart2">${chart}</div>
-      </div>
+      <div class="card" id="mensChart2Wrap">${_renderMensChart2Section(_mReleves)}</div>
     </div>
     ${renderNavBar('mensurations')}
   </div>`;
 }
 
-function _setMChart2(key) {
-  _mChart2Key = key;
-  const el = document.getElementById('mensChart2');
-  if (el) {
-    const ki = _M_COLS.indexOf(key);
-    el.innerHTML = _buildMensChart('m_c2_' + key, _mReleves, [key], [_M_COLORS[ki]], [_M_LABELS[ki]], ' cm');
-  }
+function _toggleMChart2(key) {
+  if (_mChart2Keys.has(key)) { if (_mChart2Keys.size > 1) _mChart2Keys.delete(key); }
+  else _mChart2Keys.add(key);
+  const el = document.getElementById('mensChart2Wrap');
+  if (el) el.innerHTML = _renderMensChart2Section(_mReleves);
 }
 
 function _buildMensChart(id, rows, keys, colors, labels, unit) {

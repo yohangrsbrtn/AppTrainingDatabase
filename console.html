@@ -537,8 +537,8 @@ let _bilanNavSource = null; // 'fiche' | 'bilans'
 let _ficheMensurationsClientId = null;
 let _ficheMensurations = null;
 let _ficheMensurationsLoading = false;
-let _ficheMensChart2Key = 'fessiers';
-let _pageMensChart2Key  = 'fessiers';
+let _ficheMensChart2Keys = new Set(['fessiers']);
+let _pageMensChart2Keys  = new Set(['fessiers']);
 let _pageMensurationsRows = [];
 let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
@@ -2201,8 +2201,27 @@ function renderTemplatesSub(){
 let tplEnEdition = null;
 let tplPickerCible = null; // { bi, si }
 const BLOCS_TYPES = [{value:'',label:'Générique'},{value:'metabolique',label:'Métabolique'},{value:'mecanique',label:'Mécanique'},{value:'force',label:'Force'}];
+const RIR_PAR_TYPE = { metabolique:'0-1', mecanique:'1-2', force:'2-3' };
 
 function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ titre: 'Séance 1', exercices: [] }] }; }
+
+// Applique reps/repos (depuis la bibliothèque d'exercices, selon le type) + RIR (défaut par type)
+// à tous les exercices déjà présents dans un bloc — appelé quand on change le type du bloc,
+// pour que le contenu déjà rempli reste cohérent avec Métabolique/Mécanique/Force.
+function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
+  const type = bloc.type;
+  if (!type) return;
+  bloc.seances.forEach(seance => {
+    seance.exercices.forEach(ex => {
+      const lib = ex.exercice_id != null ? (exercicesLib||[]).find(e => e.id === ex.exercice_id) : null;
+      if (lib) {
+        if (lib['reps_'+type])  ex.reps  = lib['reps_'+type];
+        if (lib['repos_'+type]) ex.repos = lib['repos_'+type];
+      }
+      ex.rir = RIR_PAR_TYPE[type] || ex.rir;
+    });
+  });
+}
 
 async function ouvrirEditeurTemplate(id){
   if (exercicesData === null) { try { exercicesData = await chargerExercices(); } catch(e) { exercicesData = []; } }
@@ -2265,7 +2284,7 @@ function renderBlocsTemplate(){
     <div class="day-block" style="margin-bottom:18px;">
       ${simple ? '' : `
       <div class="day-head" style="flex-wrap:wrap;">
-        <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(tplEnEdition.blocs[${bi}],exercicesData);renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o => `<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="tplEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
@@ -2425,7 +2444,7 @@ function ajouterExerciceASeance(exerciceId){
   const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
   tplEnEdition.blocs[bi].seances[si].exercices.push({
     exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
-    series: null, reps, repos, tempo: '', rir: '',
+    series: null, reps, repos, tempo: '', rir: RIR_PAR_TYPE[blocType] || '',
   });
   document.getElementById('modal-picker').remove();
   renderBlocsTemplate();
@@ -2999,25 +3018,33 @@ function _mensHoverOut(cid) {
   const tip=document.getElementById(cid+'_tip'); if(tip) tip.style.display='none';
 }
 
-function _renderMens2Section(rows, idBase, selKey, setterFn) {
+// selKeys : Set des mensurations actives — multi-sélection, chaque pill toggle son
+// appartenance au Set (au moins une reste sélectionnée) pour superposer plusieurs
+// courbes sur le même graphique (_buildMensChart accepte déjà keys/colors/labels en tableau).
+function _renderMens2Section(rows, idBase, selKeys, setterFn) {
   if(!rows||rows.length<2) return '';
-  const ki=MENS_COLS.indexOf(selKey); if(ki<0) return '';
+  const actives=MENS_COLS.filter(k=>selKeys.has(k));
+  if(!actives.length) return '';
   const pills=MENS_COLS.map((k,i)=>`<button onclick="${setterFn}('${k}')"
-    style="padding:3px 11px;border-radius:99px;border:1px solid ${selKey===k?MENS_COLORS[i]:'var(--hairline)'};background:${selKey===k?MENS_COLORS[i]+'22':'transparent'};color:${selKey===k?MENS_COLORS[i]:'var(--text-faint)'};font-size:11px;font-weight:${selKey===k?'700':'400'};cursor:pointer;transition:all .15s;">${MENS_LABELS[i]}</button>`).join('');
-  const chart=_buildMensChart(idBase+'_'+selKey, rows, [selKey], [MENS_COLORS[ki]], [MENS_LABELS[ki]], ' cm');
+    style="padding:3px 11px;border-radius:99px;border:1px solid ${selKeys.has(k)?MENS_COLORS[i]:'var(--hairline)'};background:${selKeys.has(k)?MENS_COLORS[i]+'22':'transparent'};color:${selKeys.has(k)?MENS_COLORS[i]:'var(--text-faint)'};font-size:11px;font-weight:${selKeys.has(k)?'700':'400'};cursor:pointer;transition:all .15s;">${MENS_LABELS[i]}</button>`).join('');
+  const colors=actives.map(k=>MENS_COLORS[MENS_COLS.indexOf(k)]);
+  const labels=actives.map(k=>MENS_LABELS[MENS_COLS.indexOf(k)]);
+  const chart=_buildMensChart(idBase+'_'+actives.join('_'), rows, actives, colors, labels, ' cm');
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>${chart}`;
 }
 
 function _setFicheMensChart2(key) {
-  _ficheMensChart2Key=key;
+  if(_ficheMensChart2Keys.has(key)){ if(_ficheMensChart2Keys.size>1) _ficheMensChart2Keys.delete(key); }
+  else _ficheMensChart2Keys.add(key);
   const el=document.getElementById('ficheMensChart2');
-  if(el&&_ficheMensurations) el.innerHTML=_renderMens2Section(_ficheMensurations,'fiche_c2',_ficheMensChart2Key,'_setFicheMensChart2');
+  if(el&&_ficheMensurations) el.innerHTML=_renderMens2Section(_ficheMensurations,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2');
 }
 
 function _setPageMensChart2(key) {
-  _pageMensChart2Key=key;
+  if(_pageMensChart2Keys.has(key)){ if(_pageMensChart2Keys.size>1) _pageMensChart2Keys.delete(key); }
+  else _pageMensChart2Keys.add(key);
   const el=document.getElementById('pageMensChart2');
-  if(el&&_pageMensurationsRows.length) el.innerHTML=_renderMens2Section(_pageMensurationsRows,'page_c2',_pageMensChart2Key,'_setPageMensChart2');
+  if(el&&_pageMensurationsRows.length) el.innerHTML=_renderMens2Section(_pageMensurationsRows,'page_c2',_pageMensChart2Keys,'_setPageMensChart2');
 }
 
 function renderFicheMensurationsTab(c){
@@ -3052,7 +3079,7 @@ function renderFicheMensurationsTab(c){
 
   const chart1 = rows.length>=2 ? _buildMensChart('fiche_c1', rows, ['poids','mesure'], ['var(--accent)','#4caf50'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
   const hasAutres = rows.some(r=>MENS_COLS.some(k=>parseFloat(r[k])>0));
-  const chart2Section = hasAutres ? _renderMens2Section(rows,'fiche_c2',_ficheMensChart2Key,'_setFicheMensChart2') : '';
+  const chart2Section = hasAutres ? _renderMens2Section(rows,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2') : '';
 
   const tableRows = [...rows].reverse().map(r => {
     const dateFr = (r.date||'').split('-').reverse().join('/');
@@ -3586,7 +3613,7 @@ function renderBlocsClientProg(){
     <div class="day-block" style="margin-bottom:18px;">
       ${simple ? '' : `
       <div class="day-head" style="flex-wrap:wrap;">
-        <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(clientProgEnEdition.blocs[${bi}],exercicesData);renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
@@ -3681,7 +3708,7 @@ function cpAjouterExo(exerciceId){
   clientProgEnEdition.blocs[bi].seances[si].exercices.push({
     id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
     series:null, reps:blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'',
-    repos:blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'', tempo:'', rir:''
+    repos:blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'', tempo:'', rir:RIR_PAR_TYPE[blocType]||''
   });
   document.getElementById('modal-picker-cp').remove();
   renderBlocsClientProg();
@@ -4988,7 +5015,7 @@ async function chargerMensurationsSupabase(clientId) {
     _pageMensurationsRows = rowsAsc;
     const hasAutres = rowsAsc.some(r=>MENS_COLS.some(k=>parseFloat(r[k])>0));
     const chart1 = rowsAsc.length>=2 ? _buildMensChart('page_c1', rowsAsc, ['poids','mesure'], ['var(--accent)','#4caf50'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
-    const chart2Section = hasAutres ? _renderMens2Section(rowsAsc,'page_c2',_pageMensChart2Key,'_setPageMensChart2') : '';
+    const chart2Section = hasAutres ? _renderMens2Section(rowsAsc,'page_c2',_pageMensChart2Keys,'_setPageMensChart2') : '';
     el.innerHTML = `
       ${chart1 ? `<div style="margin-bottom:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);">Poids &amp; Tour de taille</div>${chart1}` : ''}
       ${chart2Section ? `<div style="margin:20px 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);">Autres mensurations</div><div id="pageMensChart2">${chart2Section}</div>` : ''}
@@ -5051,6 +5078,36 @@ async function migrerMensurations(clientId, rafraichirPage) {
   }
 }
 
+// Jour du bilan (Dashboard!D11 de la feuille client) + date de début (Clients!D de la
+// feuille de logs GAS — le seul "premier repère" jamais conservé, la vraie dernière
+// connexion étant écrasée à chaque login). Upsert ciblé : n'écrase pas un champ
+// existant côté Supabase si GAS ne renvoie rien pour lui.
+async function migrerInfosClient(clientId) {
+  const statusEl = document.getElementById('migStatus_' + clientId);
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Lecture GAS prod (${_gasId(clientId)})…</div>`;
+  try {
+    const infos = await apiGasProd('chargerInfosMigrationClient', clientId);
+    if (!infos || (!infos.jourBilan && !infos.dateDebut)) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Rien à migrer (jour bilan/date début introuvables dans GAS).</span>`;
+      return;
+    }
+    const body = { client_id: clientId };
+    if (infos.jourBilan) body.jour_bilan = infos.jourBilan;
+    if (infos.dateDebut) body.date_debut = infos.dateDebut;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const champs = [infos.jourBilan ? 'jour du bilan' : null, infos.dateDebut ? 'date de début' : null].filter(Boolean).join(' + ');
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${champs} importé(s).</span>`;
+    await rafraichir();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--critical);">Erreur : ${esc(e.message)}</span>`;
+  }
+}
+
 // ── Page Migration ──────────────────────────────────────────────────────
 const PROFILS_CONNUS = [
   { client_id:'yohanp',      prenom:'Yohan',   nom:'Grosbertin', email:'yohangrsbrtn@gmail.com', supabase_only:true  },
@@ -5069,6 +5126,7 @@ function renderMigrationPage(el) {
       <td style="display:flex;gap:6px;">
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="openMigrationPreview('${esc(c.id)}')">Prévisualiser</button>
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerInfosClient('${esc(c.id)}')" title="Migre le jour du bilan et la date de début depuis GAS">⬇ Jour bilan / Début</button>
       </td>
     </tr>`;
   }).join('');

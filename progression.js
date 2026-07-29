@@ -256,7 +256,7 @@ function renderProgressionPage() {
     </div>`;
   })() : '';
 
-  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(80px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
 
     <!-- Hero niveau — identique à l'en-tête de l'accueil (même taille, même agencement) -->
     <div style="
@@ -294,6 +294,5 @@ function renderProgressionPage() {
     ${collectionHtml}
     ${historiqueHtml}
 
-    <button class="btn-secondary" onclick="goTo('home')" style="margin-top:10px;">← Accueil</button>
-  </div>`;
+  </div>${renderNavBar('progression')}`;
 }
