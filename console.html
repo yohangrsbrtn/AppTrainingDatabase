@@ -1822,6 +1822,17 @@ async function sauvegarderProtocole(){
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
+// Dernier jour du cycle = date début + (durée en semaines × 7 − 1) jours,
+// même convention que la feuille Google Sheets (C8 "Date de fin du cycle").
+function _protocoleDateFinFmt(dateDebut, dureeSemaines){
+  if (!dateDebut || !dureeSemaines) return '—';
+  const [y, m, j] = dateDebut.split('-').map(Number);
+  if (!y || !m || !j) return '—';
+  const d = new Date(y, m - 1, j); // évite le décalage de fuseau horaire d'un new Date("YYYY-MM-DD")
+  d.setDate(d.getDate() + (parseInt(dureeSemaines) * 7 - 1));
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' });
+}
+
 function renderEditeurProtocolePage(el){
   const p = protocoleEnEdition;
   if (!p) { setNav('protocole'); return; }
@@ -1863,8 +1874,9 @@ function renderEditeurProtocolePage(el){
     </div>
     <div class="table-card" style="padding:18px 20px;">
       <div class="field-grid">
-        <div class="field-row"><label>Date début du cycle</label><input type="date" value="${p.date_debut}" onchange="protocoleEnEdition.date_debut=this.value"></div>
-        <div class="field-row"><label>Durée (semaines)</label><input type="number" value="${p.duree_semaines}" onchange="protocoleEnEdition.duree_semaines=parseInt(this.value)||12"></div>
+        <div class="field-row"><label>Date début du cycle</label><input type="date" value="${p.date_debut}" onchange="protocoleEnEdition.date_debut=this.value; renderMain();"></div>
+        <div class="field-row"><label>Durée (semaines)</label><input type="number" value="${p.duree_semaines}" onchange="protocoleEnEdition.duree_semaines=parseInt(this.value)||12; renderMain();"></div>
+        <div class="field-row"><label>Date de fin du cycle</label><input type="text" value="${_protocoleDateFinFmt(p.date_debut, p.duree_semaines)}" disabled style="opacity:.7;"></div>
         <div class="field-row" style="grid-column:span 2;"><label>Objectif</label><input type="text" value="${esc(p.objectif||'')}" onchange="protocoleEnEdition.objectif=this.value"></div>
       </div>
     </div>
