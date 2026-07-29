@@ -20,6 +20,7 @@ let _dJournalDateOuverte  = '';   // date (dd/MM/yyyy) du jour ouvert, '' = list
 let _dJournalCibleEtape   = null; // null | 'choix' — sélection de la diète cible du jour
 let _dJournalSlotEnEdition= null; // 1-7 : numéro du "Repas N" en cours de remplissage
 let _dJournalAjoutEtape   = null; // null | 'choix' | 'coach-dietes' | 'coach-repas' | 'menu' | 'compose'
+let _dJournalDerniereErreur = null; // message d'erreur persistant (survit au toast) affiché dans le picker diagnostiqué
 let _dJournalDieteChoisie = null; // { ligne, col, nom, repas } — diète en cours de parcours (choix d'un repas coach)
 let _dDieteDetailCache    = {};   // "ligne|col" -> détail chargerDieteParPosition (résolution cible + slots coach)
 
@@ -1134,6 +1135,7 @@ function renderJournalChoixSource() {
     }).join('');
     return `
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Depuis quelle diète ?</div>
+      ${_dJournalDerniereErreur ? `<div style="font-size:12px;color:#e05c5c;background:#e05c5c1a;border:1px solid #e05c5c55;border-radius:8px;padding:8px 10px;margin-bottom:10px;">⚠ ${esc(_dJournalDerniereErreur)}</div>` : ''}
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucune diète trouvée.</div>'}
       <button onclick="_dJournalAjoutEtape='choix';setPage('diete')" style="width:100%;margin-top:10px;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">‹ Retour</button>`;
   }
@@ -1290,12 +1292,16 @@ async function confirmerComposeJournal() {
 
 async function choisirDieteJournal(d) {
   setPage('diete-loading');
+  _dJournalDerniereErreur = null;
   try {
     const refKey = _refKeyForDiete(d);
     const detail = await _resoudreDieteDetail(refKey);
     _dJournalDieteChoisie = { refKey, nom: d.nom, repas: detail.repas || [] };
     _dJournalAjoutEtape = 'coach-repas';
-  } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+  } catch(e) {
+    _dJournalDerniereErreur = e.message;
+    showToast('Erreur : ' + e.message, '#c0392b');
+  }
   setPage('diete');
 }
 
