@@ -478,13 +478,38 @@ function _renderMensChart2Section(releves) {
     style="padding:3px 11px;border-radius:99px;border:1px solid ${_mChart2Keys.has(k)?_M_COLORS[i]:'var(--border)'};background:${_mChart2Keys.has(k)?_M_COLORS[i]+'22':'transparent'};color:${_mChart2Keys.has(k)?_M_COLORS[i]:'var(--muted)'};font-size:11px;font-weight:${_mChart2Keys.has(k)?'700':'400'};cursor:pointer;transition:all .15s;">${_M_LABELS[i]}</button>`).join('');
   const colors = actives.map(k => _M_COLORS[_M_COLS.indexOf(k)]);
   const labels = actives.map(k => _M_LABELS[_M_COLS.indexOf(k)]);
-  const chart = (actives.length && releves.length >= 2)
+  // _buildMensChart renvoie '' (silencieusement) si la/les colonnes actives n'ont pas assez
+  // de valeurs numériques — même quand releves.length>=2, ex: le client n'a rempli que
+  // "cuisses" et jamais "fessiers" (pill par défaut). Sans ce filet, la carte reste vide sans
+  // aucun message.
+  const chartHtml = (actives.length && releves.length >= 2)
     ? _buildMensChart('m_c2_' + actives.join('_'), releves, actives, colors, labels, ' cm')
-    : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données</div>';
+    : '';
+  const chart = chartHtml || '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données pour ' + (actives.length ? actives.map(k=>_M_LABELS[_M_COLS.indexOf(k)]).join('/') : 'cette sélection') + '.</div>';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div><div id="mensChart2">${chart}</div>`;
 }
 
+// Choisit comme pill par défaut la première mensuration qui a réellement au moins 2 valeurs
+// numériques, plutôt que de figer 'fessiers' même quand le client n'a jamais rempli ce champ.
+function _mChart2KeyParDefaut(releves) {
+  for (const k of _M_COLS) {
+    const n = (releves||[]).filter(r => { const v = parseFloat(r[k]); return !isNaN(v) && v > 0; }).length;
+    if (n >= 2) return k;
+  }
+  return _M_COLS[0];
+}
+
+function _mChart2ADesDonnees(k, releves) {
+  return (releves||[]).filter(r => { const v = parseFloat(r[k]); return !isNaN(v) && v > 0; }).length >= 2;
+}
+
 function renderAutresMens() {
+  // Si la sélection actuelle (par défaut 'fessiers') n'a aucune donnée exploitable alors
+  // qu'une autre mensuration en a, bascule automatiquement dessus plutôt que d'afficher
+  // une carte vide sans explication.
+  if (![..._mChart2Keys].some(k => _mChart2ADesDonnees(k, _mReleves))) {
+    _mChart2Keys = new Set([_mChart2KeyParDefaut(_mReleves)]);
+  }
   return `<div id="app">
     ${renderHeader('Autres mensurations', 'Mensurations', false)}
     <div class="page">

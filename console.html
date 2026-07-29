@@ -3029,7 +3029,10 @@ function _renderMens2Section(rows, idBase, selKeys, setterFn) {
     style="padding:3px 11px;border-radius:99px;border:1px solid ${selKeys.has(k)?MENS_COLORS[i]:'var(--hairline)'};background:${selKeys.has(k)?MENS_COLORS[i]+'22':'transparent'};color:${selKeys.has(k)?MENS_COLORS[i]:'var(--text-faint)'};font-size:11px;font-weight:${selKeys.has(k)?'700':'400'};cursor:pointer;transition:all .15s;">${MENS_LABELS[i]}</button>`).join('');
   const colors=actives.map(k=>MENS_COLORS[MENS_COLS.indexOf(k)]);
   const labels=actives.map(k=>MENS_LABELS[MENS_COLS.indexOf(k)]);
-  const chart=_buildMensChart(idBase+'_'+actives.join('_'), rows, actives, colors, labels, ' cm');
+  // _buildMensChart renvoie '' silencieusement si la sélection active n'a pas assez de
+  // valeurs numériques (même si d'autres colonnes en ont) — sans ce filet la carte reste vide.
+  const chart=_buildMensChart(idBase+'_'+actives.join('_'), rows, actives, colors, labels, ' cm')
+    || `<div style="font-size:13px;color:var(--text-faint);text-align:center;padding:20px;">Pas assez de données pour ${actives.map(k=>MENS_LABELS[MENS_COLS.indexOf(k)]).join('/')}.</div>`;
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>${chart}`;
 }
 
