@@ -87,3 +87,115 @@ function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
   limite.setHours(12, 0, 0, 0);
   return new Date(envoyeAtStr) <= limite;
 }
+
+// ── Protocole chimie — moteur de calcul partagé coach (console.html) +
+// client (protocole.js), même logique que le générateur Google Sheets
+// (genererProtocole/genererPlanning) : totaux du cycle par molécule +
+// planning semaine par semaine avec le dosage par prise.
+function _protocoleCalculerMolecule(m, dureeSemaines) {
+  const categorie      = m.categorie;
+  const parJourSemaine = m.par_jour_semaine;
+  const dosageProduit   = Number(m.dosage_produit) || 0;
+  const dosagePrise     = Number(m.dosage_prise) || 0;
+  const intervalle      = Number(m.intervalle) || 1;
+
+  let semDebut, semFin, nbSemaines;
+  if (categorie === 'GH') {
+    semDebut = 1; semFin = dureeSemaines; nbSemaines = dureeSemaines;
+  } else {
+    semDebut   = parseInt(m.semaine_debut) || 1;
+    semFin     = parseInt(m.semaine_fin) || semDebut;
+    nbSemaines = semFin - semDebut + 1;
+  }
+
+  let totalMg = 0, doseParPrise = 0, nbInjParSem = 0, dosageHebdoMg = 0;
+  let totalConverti = '', quantiteRequise = '';
+
+  if (categorie === 'Injectable') {
+    nbInjParSem = Math.round((7 / intervalle) * 10) / 10;
+    const dosageParSem = parJourSemaine === 'Jour' ? dosagePrise * 7 : dosagePrise;
+    totalMg = dosageParSem * nbSemaines;
+    doseParPrise = dosageParSem / nbInjParSem;
+    dosageHebdoMg = dosageParSem;
+    if (dosageProduit > 0) {
+      const totalMl = totalMg / dosageProduit;
+      totalConverti = (Math.round(totalMl * 10) / 10) + ' ml';
+      quantiteRequise = Math.ceil(totalMl / 10) + ' viale(s) 10ml';
+    }
+  } else if (categorie === 'Oral') {
+    const dosageParJour = parJourSemaine === 'Semaine' ? dosagePrise / 7 : dosagePrise;
+    totalMg = dosageParJour * 7 * nbSemaines;
+    doseParPrise = dosageParJour;
+    dosageHebdoMg = dosageParJour * 7;
+    if (dosageProduit > 0) {
+      const nbCp = Math.ceil(totalMg / dosageProduit);
+      totalConverti = nbCp + ' cp';
+      quantiteRequise = nbCp + ' comprimés';
+    }
+  } else if (categorie === 'GH') {
+    const dosageParJour = parJourSemaine === 'Semaine' ? dosagePrise / 7 : dosagePrise;
+    totalMg = dosageParJour * 7 * nbSemaines;
+    doseParPrise = dosageParJour;
+    dosageHebdoMg = dosageParJour * 7;
+    totalConverti = Math.round(totalMg) + ' UI';
+    if (dosageProduit > 0) quantiteRequise = Math.ceil(totalMg / dosageProduit) + ' flacon(s) de ' + dosageProduit + ' UI';
+  }
+
+  return Object.assign({}, m, {
+    categorie, dosageProduit, dosagePrise, intervalle,
+    semDebut, semFin, nbSemaines, nbInjParSem, doseParPrise,
+    totalMg, totalConverti, quantiteRequise, dosageHebdoMg,
+  });
+}
+
+// Texte affiché pour une molécule à la semaine `s` (1-based) — '—' si la
+// molécule n'est pas active cette semaine-là (jamais le cas pour GH).
+function _protocoleCalculerSemaine(mol, s) {
+  if (mol.categorie !== 'GH' && (s < mol.semDebut || s > mol.semFin)) return '—';
+
+  if (mol.categorie === 'Injectable') {
+    const mlParInj = mol.dosageProduit > 0 ? Math.round((mol.doseParPrise / mol.dosageProduit) * 100) / 100 : 0;
+    const intervalle = mol.intervalle;
+    if (intervalle === 1)   return `${mlParInj}ml · quotidien`;
+    if (intervalle === 3.5) return `${mlParInj}ml × 2x/sem`;
+    if (intervalle === 7)   return `${mlParInj}ml × 1x/sem`;
+    return `${mlParInj}ml/inj · E${intervalle}D`;
+  }
+  if (mol.categorie === 'Oral') {
+    const nbCp = mol.dosageProduit > 0 ? Math.round(mol.doseParPrise / mol.dosageProduit * 10) / 10 : '';
+    return nbCp ? `${nbCp}cp/j` : `${mol.doseParPrise}mg/j`;
+  }
+  if (mol.categorie === 'GH') return `${mol.doseParPrise}UI/j`;
+  return '';
+}
+
+// Calcule le cycle complet (totaux par molécule + planning semaine par
+// semaine avec statut passée/en cours/à venir) à partir d'un protocole
+// `{ date_debut, duree_semaines }` et de ses molécules brutes (lignes
+// client_protocole_molecules). Utilisé tel quel par console.html (coach,
+// création/édition + preview) et protocole.js (client, lecture seule).
+function _protocoleCalculer(protocole, molecules) {
+  const dureeSemaines = parseInt(protocole.duree_semaines) || 12;
+  const molsCalc = (molecules || []).map(m => _protocoleCalculerMolecule(m, dureeSemaines));
+
+  const dateDebut = new Date(protocole.date_debut);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  const semaines = [];
+  for (let s = 1; s <= dureeSemaines; s++) {
+    const dateS = new Date(dateDebut); dateS.setDate(dateDebut.getDate() + (s - 1) * 7);
+    const dateFin = new Date(dateS); dateFin.setDate(dateS.getDate() + 6);
+    dateS.setHours(0, 0, 0, 0); dateFin.setHours(0, 0, 0, 0);
+
+    let statut = 'future';
+    if (today > dateFin) statut = 'passee';
+    else if (today >= dateS && today <= dateFin) statut = 'encours';
+
+    semaines.push({
+      numero: s, date: dateS, statut,
+      doses: molsCalc.map(m => ({ nom: m.nom, texte: _protocoleCalculerSemaine(m, s) })),
+    });
+  }
+
+  return { molecules: molsCalc, semaines };
+}

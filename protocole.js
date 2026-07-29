@@ -12,6 +12,7 @@ let _protocoleTab = 'cycle';
 let _analysesExpanded = new Set();
 
 async function loadProtocole() {
+  if (isSupabase()) { await _supaLoadProtocole(); return; }
   showLoadingOverlay('Chargement…');
   try {
     const [proto, analyses] = await Promise.all([
@@ -23,6 +24,53 @@ async function loadProtocole() {
     hideLoadingOverlay();
     setPage('protocole');
     schedulerPrechargement();
+  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+}
+
+const _PROTOCOLE_MOIS = ['jan','fév','mar','avr','mai','juin','juil','août','sep','oct','nov','déc'];
+function _protocoleFmtDate(d) {
+  const dt = new Date(d);
+  return dt.getDate() + ' ' + _PROTOCOLE_MOIS[dt.getMonth()];
+}
+
+// Pas d'équivalent Supabase pour la feuille "Analyses" (prises de sang) —
+// hors périmètre pour l'instant, seul le cycle chimie est porté.
+async function _supaLoadProtocole() {
+  showLoadingOverlay('Chargement…');
+  try {
+    const clientId = getClient();
+    const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=chimie_actif`, { headers: supaHeaders() });
+    const profilArr = profilRes.ok ? await profilRes.json() : [];
+    const actif = !!(profilArr[0] && profilArr[0].chimie_actif);
+    if (!actif) { _protocoleData = { hasProtocole: false }; hideLoadingOverlay(); setPage('protocole'); return; }
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=*,client_protocole_molecules(*)`,
+      { headers: supaHeaders() }
+    );
+    const arr = res.ok ? await res.json() : [];
+    if (!arr.length) { _protocoleData = { hasProtocole: false }; hideLoadingOverlay(); setPage('protocole'); return; }
+
+    const row = arr[0];
+    const molecules = (row.client_protocole_molecules || []).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
+    const calc = _protocoleCalculer(row, molecules);
+
+    _protocoleData = {
+      hasProtocole: true,
+      dateDebut: _protocoleFmtDate(row.date_debut),
+      dureeSemaines: row.duree_semaines,
+      objectif: row.objectif || '',
+      molecules: calc.molecules.map(m => ({
+        nom: m.nom, categorie: m.categorie,
+        dosageHebdoMg: Math.round(m.dosageHebdoMg * 10) / 10,
+        totalMg: Math.round(m.totalMg * 10) / 10,
+        totalConverti: m.totalConverti, quantiteRequise: m.quantiteRequise,
+      })),
+      semaines: calc.semaines.map(s => ({ numero: s.numero, date: _protocoleFmtDate(s.date), statut: s.statut, doses: s.doses })),
+    };
+    _analysesData = { hasAnalyses: false };
+    hideLoadingOverlay();
+    setPage('protocole');
   } catch(e) { hideLoadingOverlay(); setPage('home'); }
 }
 
@@ -40,14 +88,15 @@ function toggleAnalyseMarqueur(nom) {
 function renderProtocolePage() {
   const d = _protocoleData || {};
   const a = _analysesData || {};
+  const supa = isSupabase(); // pas de feuille "Analyses" côté Supabase — cycle seul, pas d'onglets
 
-  const tabsHtml = `
+  const tabsHtml = supa ? '' : `
     <div style="display:flex;gap:8px;margin-bottom:14px;">
       <button onclick="switchProtocoleTab('cycle')" style="flex:1;background:${_protocoleTab === 'cycle' ? 'linear-gradient(135deg,#378ADD,#2260a8)' : '#2d3142'};color:${_protocoleTab === 'cycle' ? '#fff' : '#e8eaf0'};border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;">Cycle</button>
       <button onclick="switchProtocoleTab('analyses')" style="flex:1;background:${_protocoleTab === 'analyses' ? 'linear-gradient(135deg,#378ADD,#2260a8)' : '#2d3142'};color:${_protocoleTab === 'analyses' ? '#fff' : '#e8eaf0'};border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;">Analyses</button>
     </div>`;
 
-  const body = _protocoleTab === 'analyses' ? renderProtocoleAnalyses(a) : renderProtocoleCycle(d);
+  const body = (!supa && _protocoleTab === 'analyses') ? renderProtocoleAnalyses(a) : renderProtocoleCycle(d);
 
   return `<div id="app">
     ${renderHeader('Protocole', _protocoleTab === 'cycle' && d.dureeSemaines ? d.dureeSemaines + ' semaines' : '', false)}

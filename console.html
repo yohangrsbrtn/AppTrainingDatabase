@@ -726,6 +726,14 @@ async function chargerDonnees(){
     if (c) c.enRetard = retardsSupa[i];
   });
 
+  // Protocole chimie Supabase — distinct du chimieActif GAS legacy (c.chimieActif) :
+  // tout client ayant une fiche client_profils peut avoir un protocole créé depuis la
+  // console (indépendamment de supabase_only), donc _hasSupaProfil couvre tout le monde.
+  profils.forEach(p => {
+    const c = clients.find(cl => cl.id === p.client_id);
+    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; }
+  });
+
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
 }
 
@@ -767,6 +775,7 @@ function renderMain(){
   if (state.nav === 'classement') { renderClassementPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
+  if (state.nav === 'editeur-protocole') { renderEditeurProtocolePage(el); return; }
   if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
   if (state.nav === 'dietes') { renderDietesPage(el); return; }
   if (state.nav === 'editeur-diete') { renderEditeurDietePage(el); return; }
@@ -1673,13 +1682,14 @@ async function rechercherOpenFoodFacts(query){
 // ── Page Protocole ─────────────────────────────────────────────────────
 function renderProtocolePage(el){
   const actifs = data.clients.filter(c=>c.chimieActif);
+  const supaClients = data.clients.filter(c=>c._hasSupaProfil);
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Protocole</h1></div>
       <div class="meta">${actifs.length} actif${actifs.length>1?'s':''}</div>
     </div>
     <div class="table-card">
-      <div class="table-toolbar"><div class="title">Clients avec le protocole chimie activé</div></div>
+      <div class="table-toolbar"><div class="title">Clients avec le protocole chimie activé (legacy GAS)</div></div>
       <div class="table-scroll"><table class="clients">
         <thead><tr><th>Client</th><th>Niveau</th><th></th></tr></thead>
         <tbody>
@@ -1692,7 +1702,205 @@ function renderProtocolePage(el){
         </tbody>
       </table></div>
     </div>
-    <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>`;
+    <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>
+
+    <div class="table-card" style="margin-top:22px;">
+      <div class="table-toolbar"><div class="title">Protocoles chimie (Supabase)</div></div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Visible côté client</th><th></th></tr></thead>
+        <tbody>
+          ${supaClients.map(c => `
+            <tr>
+              <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+              <td><span class="chip ${c.chimieActifSupa?'ok':'off'}"><span class="dot"></span>${c.chimieActifSupa?'Actif':'Inactif'}</span></td>
+              <td class="row-actions">
+                <button class="btn" onclick="toggleChimieActifSupa('${c.id}', ${!!c.chimieActifSupa})">${c.chimieActifSupa?'Désactiver':'Activer'}</button>
+                <button class="btn primary" onclick="ouvrirEditeurProtocole('${c.id}', '${esc(c.nom).replace(/'/g, "\\'")}')">Protocole →</button>
+              </td>
+            </tr>`).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun client Supabase.</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>`;
+}
+
+async function toggleChimieActifSupa(clientId, actif){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ chimie_actif: !actif }),
+    });
+    await rafraichir();
+    if (state.nav === 'protocole') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// ── Éditeur de protocole chimie (Supabase) ─────────────────────────────
+// Réplique les fonctions de création de cycle/molécules de la feuille Google
+// Sheets "Protocol" (genererProtocole/genererPlanning) — même logique de
+// calcul (_protocoleCalculer, api.js), partagée avec le rendu côté client
+// (protocole.js).
+let protocoleEnEdition = null; // { id, client_id, clientNom, date_debut, duree_semaines, objectif, molecules:[...] }
+let _protocolePreview  = null; // résultat de _protocoleCalculer après génération/enregistrement
+
+async function ouvrirEditeurProtocole(clientId, clientNom){
+  setNav('editeur-protocole');
+  protocoleEnEdition = { id: null, client_id: clientId, clientNom: clientNom || clientId, date_debut: new Date().toISOString().slice(0,10), duree_semaines: 12, objectif: '', molecules: [] };
+  _protocolePreview = null;
+  renderMain();
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=*,client_protocole_molecules(*)`,
+      { headers: supaHeaders() }
+    );
+    const arr = res.ok ? await res.json() : [];
+    if (arr.length > 0) {
+      const row = arr[0];
+      protocoleEnEdition = {
+        id: row.id, client_id: clientId, clientNom: clientNom || clientId,
+        date_debut: row.date_debut, duree_semaines: row.duree_semaines, objectif: row.objectif || '',
+        molecules: (row.client_protocole_molecules || []).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0)),
+      };
+      _protocolePreview = _protocoleCalculer(row, protocoleEnEdition.molecules);
+    }
+  } catch(e) {}
+  renderMain();
+}
+
+function ajouterMoleculeProtocole(){
+  const p = protocoleEnEdition;
+  p.molecules.push({ nom:'', categorie:'Injectable', unite:'mg/ml', par_jour_semaine:'Semaine', dosage_produit:'', dosage_prise:'', semaine_debut:1, semaine_fin: p.duree_semaines || 12, intervalle:3.5, ordre: p.molecules.length });
+  renderMain();
+}
+function retirerMoleculeProtocole(idx){
+  protocoleEnEdition.molecules.splice(idx,1);
+  renderMain();
+}
+
+async function sauvegarderProtocole(){
+  const p = protocoleEnEdition;
+  if (!p.date_debut || !p.duree_semaines) { alert('Date de début et durée du cycle requises.'); return; }
+  if (p.molecules.some(m => !(m.nom||'').trim())) { alert('Chaque molécule doit avoir un nom.'); return; }
+  try {
+    const body = { client_id: p.client_id, date_debut: p.date_debut, duree_semaines: parseInt(p.duree_semaines)||12, objectif: p.objectif || null };
+    let protocoleId = p.id;
+    if (protocoleId) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_protocoles?id=eq.${protocoleId}`, { method:'PATCH', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(body) });
+    } else {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/client_protocoles`, { method:'POST', headers: supaHeaders({ Prefer:'return=representation' }), body: JSON.stringify(body) });
+      const arr = await res.json();
+      protocoleId = arr[0].id;
+      p.id = protocoleId;
+    }
+
+    // Delete-all puis recreate (même pattern que sauvegarderDieteTemplate) —
+    // plus simple qu'un diff ligne par ligne pour une poignée de molécules.
+    await fetch(`${SUPABASE_URL}/rest/v1/client_protocole_molecules?protocole_id=eq.${protocoleId}`, { method:'DELETE', headers: supaHeaders() });
+    const dureeSemaines = parseInt(p.duree_semaines) || 12;
+    const molsBody = p.molecules.map((m,i) => ({
+      protocole_id: protocoleId, nom: m.nom.trim(), categorie: m.categorie, unite: m.unite || null,
+      par_jour_semaine: m.par_jour_semaine,
+      dosage_produit: m.dosage_produit !== '' && m.dosage_produit != null ? Number(m.dosage_produit) : null,
+      dosage_prise: m.dosage_prise !== '' && m.dosage_prise != null ? Number(m.dosage_prise) : null,
+      semaine_debut: m.categorie === 'GH' ? 1 : (parseInt(m.semaine_debut) || 1),
+      semaine_fin: m.categorie === 'GH' ? dureeSemaines : (parseInt(m.semaine_fin) || parseInt(m.semaine_debut) || 1),
+      intervalle: m.intervalle !== '' && m.intervalle != null ? Number(m.intervalle) : 1,
+      ordre: i,
+    }));
+    if (molsBody.length > 0) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_protocole_molecules`, { method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(molsBody) });
+    }
+
+    _protocolePreview = _protocoleCalculer(body, molsBody);
+    renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function renderEditeurProtocolePage(el){
+  const p = protocoleEnEdition;
+  if (!p) { setNav('protocole'); return; }
+
+  const molsHtml = p.molecules.map((m,i) => `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;padding:12px 14px;border-top:1px solid var(--hairline);">
+      <div class="exo-champ" style="width:150px;"><label>Nom</label>
+        <input type="text" style="width:100%;" value="${esc(m.nom)}" oninput="protocoleEnEdition.molecules[${i}].nom=this.value"></div>
+      <div class="exo-champ" style="width:100px;"><label>Catégorie</label>
+        <select style="width:100%;padding:5px 7px;background:var(--surface-2);border:1px solid transparent;border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;" onchange="protocoleEnEdition.molecules[${i}].categorie=this.value; renderMain();">
+          ${['Injectable','Oral','GH'].map(c=>`<option value="${c}" ${m.categorie===c?'selected':''}>${c}</option>`).join('')}
+        </select></div>
+      <div class="exo-champ" style="width:80px;"><label>Unité</label>
+        <input type="text" style="width:100%;" value="${esc(m.unite||'')}" oninput="protocoleEnEdition.molecules[${i}].unite=this.value"></div>
+      <div class="exo-champ" style="width:90px;"><label>Par</label>
+        <select style="width:100%;padding:5px 7px;background:var(--surface-2);border:1px solid transparent;border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;" onchange="protocoleEnEdition.molecules[${i}].par_jour_semaine=this.value">
+          <option value="Jour" ${m.par_jour_semaine==='Jour'?'selected':''}>Jour</option>
+          <option value="Semaine" ${m.par_jour_semaine==='Semaine'?'selected':''}>Semaine</option>
+        </select></div>
+      <div class="exo-champ"><label>Dosage produit</label>
+        <input type="number" step="any" value="${m.dosage_produit ?? ''}" oninput="protocoleEnEdition.molecules[${i}].dosage_produit=this.value"></div>
+      <div class="exo-champ"><label>Dosage/prise</label>
+        <input type="number" step="any" value="${m.dosage_prise ?? ''}" oninput="protocoleEnEdition.molecules[${i}].dosage_prise=this.value"></div>
+      ${m.categorie !== 'GH' ? `
+      <div class="exo-champ"><label>Sem. début</label>
+        <input type="number" value="${m.semaine_debut ?? 1}" oninput="protocoleEnEdition.molecules[${i}].semaine_debut=this.value"></div>
+      <div class="exo-champ"><label>Sem. fin</label>
+        <input type="number" value="${m.semaine_fin ?? ''}" oninput="protocoleEnEdition.molecules[${i}].semaine_fin=this.value"></div>` : ''}
+      ${m.categorie === 'Injectable' ? `
+      <div class="exo-champ"><label>Intervalle (j)</label>
+        <input type="number" step="any" value="${m.intervalle ?? 1}" oninput="protocoleEnEdition.molecules[${i}].intervalle=this.value"></div>` : ''}
+      <button class="mini-btn" onclick="retirerMoleculeProtocole(${i})" style="margin-left:auto;">✕</button>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <button class="fiche-back" onclick="setNav('protocole')">← Protocole</button>
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Protocole — ${esc(p.clientNom)}</h1></div>
+    </div>
+    <div class="table-card" style="padding:18px 20px;">
+      <div class="field-grid">
+        <div class="field-row"><label>Date début du cycle</label><input type="date" value="${p.date_debut}" onchange="protocoleEnEdition.date_debut=this.value"></div>
+        <div class="field-row"><label>Durée (semaines)</label><input type="number" value="${p.duree_semaines}" onchange="protocoleEnEdition.duree_semaines=parseInt(this.value)||12"></div>
+        <div class="field-row" style="grid-column:span 2;"><label>Objectif</label><input type="text" value="${esc(p.objectif||'')}" onchange="protocoleEnEdition.objectif=this.value"></div>
+      </div>
+    </div>
+    <div class="table-card" style="margin-top:14px;">
+      <div class="table-toolbar"><div class="title">Molécules</div><button class="btn" onclick="ajouterMoleculeProtocole()">+ Ajouter une molécule</button></div>
+      ${molsHtml || `<div style="padding:20px;color:var(--text-faint);text-align:center;">Aucune molécule — clique sur "+ Ajouter une molécule".</div>`}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn primary" onclick="sauvegarderProtocole()">💾 Générer / Enregistrer le protocole</button>
+    </div>
+    ${_protocolePreview ? renderProtocolePreviewHtml(_protocolePreview) : ''}`;
+}
+
+function renderProtocolePreviewHtml(preview){
+  const catColor = c => c==='Injectable' ? '#e05c5c' : c==='Oral' ? '#4f8ef7' : '#a78bfa';
+
+  const totalsHtml = preview.molecules.map(m => `
+    <div class="panel-row">
+      <span class="l" style="color:${catColor(m.categorie)};font-weight:600;">${esc(m.nom)}</span>
+      <span class="v">${Math.round(m.totalMg*10)/10} mg · ${esc(m.totalConverti||'')}${m.quantiteRequise ? ' · ' + esc(m.quantiteRequise) : ''}</span>
+    </div>`).join('');
+
+  const fmtDate = d => new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+  const rowStyle = s => s==='passee' ? 'opacity:.4;text-decoration:line-through;' : s==='encours' ? 'background:#0d1a13;color:#3ddc84;font-weight:600;' : '';
+
+  const rows = preview.semaines.map(s => `
+    <tr style="${rowStyle(s.statut)}">
+      <td style="padding:6px 10px;font-weight:600;white-space:nowrap;">S${s.numero}</td>
+      <td style="padding:6px 10px;font-family:var(--font-mono);font-size:11px;white-space:nowrap;">${fmtDate(s.date)}</td>
+      ${s.doses.map(d => `<td style="padding:6px 10px;font-size:12px;white-space:nowrap;">${esc(d.texte)}</td>`).join('')}
+    </tr>`).join('');
+
+  return `
+    <div class="table-card" style="margin-top:14px;">
+      <div class="table-toolbar"><div class="title">Totaux du cycle</div></div>
+      ${totalsHtml || '<div style="padding:16px;color:var(--text-faint);">Aucune molécule.</div>'}
+    </div>
+    <div class="table-card" style="margin-top:14px;">
+      <div class="table-toolbar"><div class="title">Planning hebdomadaire</div></div>
+      <div class="table-scroll"><table class="clients">
+        <thead><tr><th>Sem.</th><th>Date</th>${preview.molecules.map(m=>`<th>${esc(m.nom)}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
 }
 
 // ── Programmes : bibliothèque d'exercices + templates (Supabase) ──────────
