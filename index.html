@@ -596,7 +596,7 @@ async function _completerConnexionSupabase(session) {
   _loginAuthMode = 'gas';
   _loginAuthEmail = '';
   _loginEmailConfirme = false;
-  setPage('home-supabase');
+  await loadHomeSupabase();
 }
 
 async function doLogin() {
