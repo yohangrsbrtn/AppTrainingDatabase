@@ -712,6 +712,7 @@ async function chargerDonnees(){
         niveau: null, enRetard: false, chimieActif: false, verrouile: false,
         dernConnexion: null, titreActif: null,
         _supabaseOnly: true,
+        supabaseOnlyActif: !!p.supabase_only,
       });
     }
   });
@@ -731,7 +732,7 @@ async function chargerDonnees(){
   // console (indépendamment de supabase_only), donc _hasSupaProfil couvre tout le monde.
   profils.forEach(p => {
     const c = clients.find(cl => cl.id === p.client_id);
-    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; }
+    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; }
   });
 
   data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
@@ -2675,7 +2676,7 @@ function renderTable(){
   if (!body) return;
   body.innerHTML = list.map(c => `
     <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
-      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : ''}</div></td>
+      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c.supabaseOnlyActif ? ' <span class="chip off" style="font-size:9px;">Supabase only</span>' : (c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : '')}</div></td>
       <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${c.verrouile ? ` <span class="chip off">🔒</span>` : ''}</td>
       <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
       <td>${esc(c.titreActif||'—')}</td>
@@ -2690,6 +2691,7 @@ function renderTable(){
             <button class="menu-item" onclick="event.stopPropagation();window.location.href='index.html?viewAs=${encodeURIComponent(c.id)}'">${iGrid()}Ouvrir en vue client</button>
             <button class="menu-item" onclick="event.stopPropagation();toggleChimie('${c.id}',${!!c.chimieActif})">${iFlask()}${c.chimieActif?'Désactiver':'Activer'} le protocole</button>
             <div class="menu-sep"></div>
+            ${!c.supabaseOnlyActif ? `<button class="menu-item" onclick="event.stopPropagation();togglerSupabaseOnly('${c.id}')">${iGrid()}Passer en Supabase only</button>` : ''}
             <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!c.verrouile})">${c.verrouile?iUnlock():iLock()}${c.verrouile?'Déverrouiller':'Verrouiller'} l'accès</button>
           </div>
         </div>
@@ -2705,6 +2707,23 @@ async function toggleChimie(id, actif){
 async function toggleVerrou(id, verrouille){
   try { await apiAs(verrouille ? 'deverrouilerAccesClient' : 'verrouilerAccesClient', id); await rafraichir(); if (state.nav==='clients') renderTable(); }
   catch(e) { alert('Erreur : ' + e.message); }
+}
+// Bascule client_profils.supabase_only à true — dernière étape de la migration : la
+// connexion du client passera entièrement par Supabase (plus GAS). Upsert car un client
+// tout juste migré peut ne pas encore avoir de ligne client_profils.
+async function togglerSupabaseOnly(id){
+  if (!confirm('Passer ce client en Supabase only ? Sa connexion utilisera désormais uniquement Supabase (plus GAS).')) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: id, supabase_only: true })
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    await rafraichir();
+    if (state.nav==='clients') renderTable();
+    if (state.nav==='fiche-client' && state.selected===id) openPanel(id);
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 let panelTab = 'apercu';
@@ -3073,6 +3092,9 @@ function renderFicheProfilTab(c){
       </div>
       <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
       <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
+      <div class="fiche-field"><label>Date de création du compte</label><input id="fDateCreationCompte" type="date" value="${esc(p.date_creation_compte||'')}">
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">À reporter depuis le fichier Excel de log clients de la PWA — sert de référence pour le nombre de séances/bilans attendus depuis la création du compte (distinct du "Début du coaching" ci-dessous).</div>
+      </div>
       <h3 style="margin-top:16px;">Suivi coaching</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
@@ -3730,6 +3752,7 @@ async function sauvegarderFicheSandbox(clientId){
     nom: document.getElementById('fNom').value.trim(),
     date_naissance: document.getElementById('fNaissance').value || null,
     email: document.getElementById('fEmail').value.trim(),
+    date_creation_compte: document.getElementById('fDateCreationCompte').value || null,
     date_debut: document.getElementById('fDebut').value || null,
     jour_bilan: document.getElementById('fJourBilan').value || null,
     taille_cm: parseInt(document.getElementById('fTaille').value)||null,
@@ -5328,6 +5351,7 @@ function _renderMigPreviewInfos() {
             ${row('Date naissance', '—', esc(p.date_naissance||''))}
             ${row('Niveau', c.niveau!=null?String(c.niveau):'', '')}
             ${row('Dernière connexion', esc(c.dernConnexion||''), '')}
+            ${row('Date création compte', '', esc(p.date_creation_compte||''))}
             ${row('Début coaching', '', esc(p.date_debut||''))}
             ${row('Jour de bilan', '', esc(p.jour_bilan||''))}
             ${row('Taille (cm)', '', p.taille_cm!=null?String(p.taille_cm):'')}
