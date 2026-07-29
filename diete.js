@@ -336,21 +336,24 @@ async function sbResoudreDieteDetail(clientDieteId) {
   if (!tmplRes.ok) throw new Error('diete_templates_' + tmplRes.status);
   const templates = await tmplRes.json();
   if (!templates.length) return { nom: templateNom, repas: [] };
+  // Pas de FK réelle entre repas_aliments et aliments_coach (macros migrées stockées
+  // directement sur repas_aliments) — un embed imbriqué aliments_coach(...) échoue
+  // systématiquement en 400 (PGRST200, relationship introuvable). On lit uniquement les
+  // colonnes directes de repas_aliments, comme le fait déjà ouvrirDieteSupabase() plus haut.
   const repasRes = await fetch(
     `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templates[0].id}&variante_index=eq.0&order=ordre.asc` +
-    `&select=nom,ordre,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+    `&select=nom,ordre,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
     { headers: supaHeaders() }
   );
   if (!repasRes.ok) throw new Error('repas_' + repasRes.status);
   const repasRaw = await repasRes.json();
   const toAliments = r => (r.repas_aliments || []).map(a => {
-    const al = a.aliments_coach || {};
     const q = a.quantite_g || 0;
-    const kcal = al.kcal_par_gramme ?? a.kcal_par_gramme ?? 0;
-    const prot = al.prot_par_gramme ?? a.prot_par_gramme ?? 0;
-    const glu  = al.glu_par_gramme  ?? a.glu_par_gramme  ?? 0;
-    const lip  = al.lip_par_gramme  ?? a.lip_par_gramme  ?? 0;
-    return { nom: al.nom || a.nom || '?', cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
+    const kcal = a.kcal_par_gramme || 0;
+    const prot = a.prot_par_gramme || 0;
+    const glu  = a.glu_par_gramme  || 0;
+    const lip  = a.lip_par_gramme  || 0;
+    return { nom: a.nom || '?', cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
   });
   return { nom: templateNom, repas: repasRaw.slice().sort((a,b)=>a.ordre-b.ordre).map(r => ({ nom: r.nom, aliments: toAliments(r) })) };
 }
