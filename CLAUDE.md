@@ -169,6 +169,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 
 ## Pièges connus
 
+- **Cache navigateur des `.js?v=N` dans `index.html`** — chaque script client est chargé avec un numéro de version figé (ex: `diete.js?v=2`). Toute modification d'un de ces fichiers (`diete.js`, `mensurations.js`, `progression.js`, `training.js`, `bilan.js`, `recettes.js`, `collection.js`, `coach.js`, `protocole.js`, `programme-client.js`, `api.js`) DOIT s'accompagner d'un incrément du `?v=` correspondant dans `index.html`, sinon le navigateur du client garde l'ancienne version en cache indéfiniment et le correctif ne prend jamais effet (vécu : fix diète/journal invisible pour le client malgré le push).
 - **`data.clients` exclut systématiquement `yohan`** — pour les modals d'assignation, `yohan` est ajouté manuellement
 - **`assignerTemplateAuClient`** : vérifier `templatesData` chargé avant `.find()`.
 - **Règle permanente : `font-size` ≥ 16px** sur tout `input`/`textarea`/`select` — Safari iOS zoome sinon

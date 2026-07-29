@@ -49,7 +49,7 @@ async function loadMensurationsSupabase() {
   setPage('mens-loading');
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,poids,mesure,phase`,
+      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,poids,mesure,phase,fessiers,cuisses,mollets,poitrine,epaules,bras`,
       { headers: supaHeaders() }
     );
     const data = res.ok ? await res.json() : [];
