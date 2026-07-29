@@ -4949,7 +4949,7 @@ const GAS_PROD_URL = 'https://script.google.com/macros/s/AKfycbwQiM6ixf-CTIWwcuN
 
 // Mapping ID Supabase → ID GAS quand ils diffèrent
 // (ex: compte test "yohanp" utilise la feuille réelle "yohan")
-const GAS_ID_MAP = { 'yohanp': 'yohan' };
+const GAS_ID_MAP = { 'yohanp': 'yohan', 'rarnaud': 'arnaudfouetilloux' };
 function _gasId(clientId) { return GAS_ID_MAP[clientId] || clientId; }
 
 async function apiGasProd(action, clientId, params = {}) {
@@ -5099,7 +5099,10 @@ async function migrerInfosClient(clientId) {
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('supabase_' + res.status);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error('supabase_' + res.status + (errBody ? ' — ' + errBody.slice(0, 200) : ''));
+    }
     const champs = [infos.jourBilan ? 'jour du bilan' : null, infos.dateDebut ? 'date de début' : null].filter(Boolean).join(' + ');
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${champs} importé(s).</span>`;
     await rafraichir();
