@@ -3793,7 +3793,10 @@ async function sauvegarderFicheSandbox(clientId){
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
       method:'POST', headers:supaHeaders({ Prefer:'return=representation,resolution=merge-duplicates' }), body:JSON.stringify(body)
     });
-    if (!res.ok) throw new Error('supabase_'+res.status);
+    if (!res.ok) {
+      const errBody = await res.text().catch(()=>'');
+      throw new Error('supabase_'+res.status+(errBody?' — '+errBody.slice(0,300):''));
+    }
     ficheData.profil = (await res.json())[0];
     if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
   } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
