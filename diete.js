@@ -103,20 +103,31 @@ async function loadDieteSupabase() {
   } catch(e) { setPage('home'); }
 }
 
-async function ouvrirDieteSupabase(templateNom) {
+async function ouvrirDieteSupabase(templateNom, clientDieteId) {
   _dNom = templateNom;
   setPage('diete-loading');
   try {
-    const tmplRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id,nom`,
-      { headers: supaHeaders() }
-    );
-    const templates = tmplRes.ok ? await tmplRes.json() : [];
-    if (!templates.length) {
-      _dDetail = { nom: templateNom, repas: [], _erreur: 'template_introuvable' };
-      _dSubPage = 'detail'; setPage('diete'); return;
+    // Résout via client_dietes.diete_template_id (fiable, un par client) quand disponible.
+    // Fallback par nom pour les diètes assignées avant l'ajout de cette colonne — peut
+    // ramener le template d'un AUTRE client si le nom est partagé, voir project_architecture_dietes.
+    let tmplId = null;
+    if (clientDieteId) {
+      const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=diete_template_id`, { headers: supaHeaders() });
+      const cd = cdRes.ok ? await cdRes.json() : [];
+      if (cd.length && cd[0].diete_template_id) tmplId = cd[0].diete_template_id;
     }
-    const tmplId = templates[0].id;
+    if (!tmplId) {
+      const tmplRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id,nom`,
+        { headers: supaHeaders() }
+      );
+      const templates = tmplRes.ok ? await tmplRes.json() : [];
+      if (!templates.length) {
+        _dDetail = { nom: templateNom, repas: [], _erreur: 'template_introuvable' };
+        _dSubPage = 'detail'; setPage('diete'); return;
+      }
+      tmplId = templates[0].id;
+    }
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
       `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
@@ -324,24 +335,31 @@ async function sbSupprimerSlotJournal(ligne) {
 // réseau en "diète valide à 0 repas" la fige en cache pour tout le reste de la session
 // (bug vécu : "aucun repas trouvé" / "seulement repas 1" alors que les données existent).
 async function sbResoudreDieteDetail(clientDieteId) {
-  const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=nom`, { headers: supaHeaders() });
+  const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=nom,diete_template_id`, { headers: supaHeaders() });
   if (!cdRes.ok) throw new Error('client_dietes_' + cdRes.status);
   const cd = await cdRes.json();
   if (!cd.length) return { nom: '', repas: [] };
   const templateNom = cd[0].nom;
-  const tmplRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id`,
-    { headers: supaHeaders() }
-  );
-  if (!tmplRes.ok) throw new Error('diete_templates_' + tmplRes.status);
-  const templates = await tmplRes.json();
-  if (!templates.length) return { nom: templateNom, repas: [] };
+  // Résout via diete_template_id (fiable) quand présent. Fallback par nom uniquement pour
+  // les diètes assignées avant l'ajout de cette colonne — peut ramener le template d'un
+  // AUTRE client si le nom est partagé (voir mémoire project_architecture_dietes).
+  let templateId = cd[0].diete_template_id || null;
+  if (!templateId) {
+    const tmplRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id`,
+      { headers: supaHeaders() }
+    );
+    if (!tmplRes.ok) throw new Error('diete_templates_' + tmplRes.status);
+    const templates = await tmplRes.json();
+    if (!templates.length) return { nom: templateNom, repas: [] };
+    templateId = templates[0].id;
+  }
   // Pas de FK réelle entre repas_aliments et aliments_coach (macros migrées stockées
   // directement sur repas_aliments) — un embed imbriqué aliments_coach(...) échoue
   // systématiquement en 400 (PGRST200, relationship introuvable). On lit uniquement les
   // colonnes directes de repas_aliments, comme le fait déjà ouvrirDieteSupabase() plus haut.
   const repasRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templates[0].id}&variante_index=eq.0&order=ordre.asc` +
+    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templateId}&variante_index=eq.0&order=ordre.asc` +
     `&select=nom,ordre,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
     { headers: supaHeaders() }
   );
@@ -430,7 +448,7 @@ function renderDieteList() {
     ? `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">Aucune diète trouvée.</div></div>`
     : _dDietes.map(d => {
       const nom = (d.nom||'').replace(/'/g,"\\'");
-      const onclick = d._supabase ? `ouvrirDieteSupabase('${nom}')` : `ouvrirDiete(${d.ligne},${d.col},'${nom}')`;
+      const onclick = d._supabase ? `ouvrirDieteSupabase('${nom}',${d.id})` : `ouvrirDiete(${d.ligne},${d.col},'${nom}')`;
       return `<div class="diete-item" onclick="${onclick}">
         <div class="diete-bar"></div>
         <span style="padding-left:8px;font-size:15px;font-weight:700;">${esc(d.nom)}</span>
