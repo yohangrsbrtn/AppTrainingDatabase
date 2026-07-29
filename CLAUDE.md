@@ -26,7 +26,7 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 - `programme-client.js` — page "Mon programme" côté client : **lecture seule** (logs charge/reps/RIR/commentaire via `pcSauverLog()`). ✅ Supabase-only opérationnel.
 - `bilan.js` — page Bilan client. Appelle encore GAS → **à porter sur Supabase**.
 - `training.js` — page Training client. Appelle encore GAS → **à porter**.
-- `diete.js` — page Diète client. ✅ Mode Supabase opérationnel (multi-diètes, repas équivalents swipeables, aliments migrés). Mode GAS encore actif pour les autres fonctions (menus, journal).
+- `diete.js` — page Diète client. ✅ Mode Supabase opérationnel : multi-diètes, repas équivalents swipeables, aliments migrés, **Mes menus** et **Mon journal** (portage complet, voir "Diète — Menus & Journal" ci-dessous). ⚠️ Nécessite d'exécuter `sql/2026-07-29_menus_journal.sql` dans Supabase avant utilisation (tables `client_menus`, `client_menu_aliments`, `client_journal`, `aliments_communaute` — pas encore créées).
 - `mensurations.js` — page Mensurations client. Appelle encore GAS → **à porter** (table `mensurations` Supabase existe déjà).
 - `recettes.js` — page Recettes client. ✅ Mode Supabase opérationnel (lecture depuis table `recettes`).
 - `progression.js`, `collection.js`, `coach.js`, `protocole.js` — autres pages, portage à faire.
@@ -56,6 +56,10 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 - **`client_dietes`** : `{ id, client_id, nom, actif, created_at }` — **plusieurs diètes actives simultanées** autorisées (Jour On, Jour Off, etc.). `actif=false` = archivée. Lien vers template via `nom` (pas de FK directe).
 - **`aliments_coach`** : `{ id, nom, categorie, kcal_par_gramme, prot_par_gramme, glu_par_gramme, lip_par_gramme }`
 - **`recettes`** : `{ id, nom, emoji, categorie, description, temps_prep_min, portions, kcal_par_portion, prot_par_portion, glu_par_portion, lip_par_portion, ingredients JSONB, etapes JSONB }` — éditables uniquement par le coach depuis console.html → onglet Recettes dans Diètes.
+- **`client_menus`** : `{ id, client_id, nom, created_at }` — "Mes menus" côté client (bibliothèque perso + repas composés à la volée depuis "Mon journal", qui réutilisent le même stockage). Schéma : `sql/2026-07-29_menus_journal.sql`.
+- **`client_menu_aliments`** : `{ id, menu_id, nom, quantite_g, kcal, prot, glu, sucres, fibres, lip, ags, ordre }` — un menu = des macros **totales déjà multipliées par la quantité** (pas des valeurs au gramme). `sucres`/`fibres`/`ags` peuvent être `null`.
+- **`client_journal`** : `{ id, client_id, date DATE, slot INT NULL, type TEXT('coach'|'menu'|'cible'), ref TEXT, label TEXT, created_at }` — "Mon journal" (jusqu'à 7 repas/jour). `type='cible'` = diète cible du jour (slot NULL, une seule par jour). `ref` auto-descriptif : `menuId` pour `type='menu'` ; `sb|<client_dietes.id>[|repasIndex]` pour `type='coach'/'cible'` (voir `_parseDieteRef`/`_refKeyForDiete` dans diete.js). UNIQUE partiel `(client_id,date,slot)` hors `cible`, UNIQUE partiel `(client_id,date)` pour `cible`.
+- **`aliments_communaute`** : `{ id, nom, kcal_par_gramme, prot_par_gramme, glu_par_gramme, sucres_par_gramme, fibres_par_gramme, lip_par_gramme, ags_par_gramme, code_barre, valide BOOL DEFAULT false, created_by, created_at }` — aliments créés par les clients (scan code-barres Open Food Facts ou saisie manuelle) dans le picker "+ Ajouter un aliment", partagés entre tous, marqués `valide=false` jusqu'à validation coach (pas d'écran de validation coach construit pour l'instant — à faire si besoin).
 
 ### Mensurations
 
@@ -152,7 +156,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **Login supabase_only** : flux d'auth Supabase (`verifierClientSupabase`)
 - **Home Supabase** (`renderHomeSupabase`) : affiche "Mon programme"
 - **Mon programme** (`programme-client.js`) : arborescence blocs/séances, logs charge/reps/RIR, chrono, semaine selector
-- **Ma diète** (`diete.js`) : multi-diètes (Jour On/Off…), repas équivalents swipeables, aliments migrés (fallback colonnes directes)
+- **Ma diète** (`diete.js`) : multi-diètes (Jour On/Off…), repas équivalents swipeables, aliments migrés (fallback colonnes directes), **Mes menus** (créer/éditer/supprimer des menus perso) et **Mon journal** (jusqu'à 7 repas/jour, diète cible du jour, comparaison prévu/réel) — ⚠️ nécessite `sql/2026-07-29_menus_journal.sql` exécuté d'abord
 - **Recettes** (`recettes.js`) : liste + détail depuis table `recettes` Supabase
 
 ### 🔧 À porter sur Supabase (appellent encore GAS)
@@ -185,6 +189,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **`client_programme_exercices.exercice_id`** : null pour les exercices migrés depuis GAS (la migration n'insère que `nom`). L'éditeur et la vue logs font un fallback lookup par nom dans `exercicesData` pour trouver `groupe_musculaire`.
 - **Race condition logs** (`pcSauverLog`) : corrigée avec mise à jour optimiste de `_pcLogs[key]` + queue `_pcSaveQueues[key]` par série. Enregistrement existant (a un `id`) → PATCH champ unique. Nouveau → POST avec tous les champs non-null accumulés. Ne jamais revenir à l'ancienne approche upsert sans queue.
 - **Bilan nav prev/next** : `_bilanNavList`, `_bilanNavIdx`, `_bilanNavSource` ('fiche'|'bilans'). Bouton retour contextuel. `_weekRange()` calcule "DD Mon → DD Mon" (dimanche = fin de semaine).
+- **Menus/Journal Supabase** (`diete.js`) : les fonctions `sbXxx()` renvoient **exactement** la même forme que les actions GAS d'origine (mêmes noms de champs : `menuId`, `ligne`, `ref`, `label`…) — c'est ce qui permet à tout le reste du fichier (rendu, résolution des slots) de fonctionner à l'identique quel que soit le mode. Ne jamais faire porter de champ différent sans adapter tous les call sites. Tout passe par les wrappers `_apiXxx()` (jamais `api()`/`sbXxx()` en direct dans le reste du fichier, sauf `choisirDieteCible`/`choisirDieteJournal` qui branchent explicitement selon `refKey.sb`).
 
 ## Workflow
 

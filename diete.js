@@ -175,7 +175,6 @@ async function ouvrirDiete(ligne, col, nom) {
 }
 
 async function switchDieteTab(tab) {
-  if (isSupabase()) return; // menus/journal non disponibles en mode Supabase
   _dSubPage = tab;
   if (tab === 'menus') _dMenuVue = 'liste';
   if (tab === 'journal') _dJournalAjoutEtape = null;
@@ -189,11 +188,208 @@ async function switchDieteTab(tab) {
     // croire que rien n'avait été enregistré et pousser à recréer une entrée en double. null
     // déclenche à la place un écran "Erreur de chargement" avec un vrai bouton Réessayer.
     const taches = [];
-    if (chargerMenus)   taches.push(api('listerMenus').then(r => { _dMenus = r; }).catch(() => { _dMenus = null; }));
-    if (chargerJournal) taches.push(api('listerJournal').then(r => { _dJournal = r; }).catch(() => { _dJournal = null; }));
+    if (chargerMenus)   taches.push(_apiListerMenus().then(r => { _dMenus = r; }).catch(() => { _dMenus = null; }));
+    if (chargerJournal) taches.push(_apiListerJournal().then(r => { _dJournal = r; }).catch(() => { _dJournal = null; }));
     await Promise.all(taches);
   }
   setPage('diete');
+}
+
+// ── Mes menus / Mon journal — implémentation Supabase ─────────────────────────
+// Chaque fonction sbXxx() renvoie exactement la même forme que l'action GAS
+// équivalente (mêmes noms de champs : menuId, ligne, ref, label…) pour que tout
+// le reste de ce fichier (rendu, résolution des slots, etc.) fonctionne à
+// l'identique quel que soit le mode. Les wrappers _apiXxx() ci-dessous font le
+// seul aiguillage GAS/Supabase ; le reste du fichier appelle uniquement ces
+// wrappers, jamais sbXxx()/api() directement (sauf cas particuliers commentés).
+
+function _apiListerMenus()   { return isSupabase() ? sbListerMenus()   : api('listerMenus'); }
+function _apiListerJournal() { return isSupabase() ? sbListerJournal() : api('listerJournal'); }
+function _apiSupprimerMenu(menuId) { return isSupabase() ? sbSupprimerMenu(menuId) : api('supprimerMenu', { menuId }); }
+function _apiCreerMenu(nom, aliments) { return isSupabase() ? sbCreerMenu(nom, aliments) : api('creerMenu', { nom, aliments }); }
+function _apiModifierMenu(menuId, nom, aliments) { return isSupabase() ? sbModifierMenu(menuId, nom, aliments) : api('modifierMenu', { menuId, nom, aliments }); }
+function _apiAjouterSlotJournal(date, slot, type, ref, label) { return isSupabase() ? sbAjouterSlotJournal(date, slot, type, ref, label) : api('ajouterSlotJournal', { date, slot, type, ref, label }); }
+function _apiSupprimerSlotJournal(ligne) { return isSupabase() ? sbSupprimerSlotJournal(ligne) : api('supprimerSlotJournal', { ligne }); }
+function _apiChargerBaseAliments() { return isSupabase() ? sbChargerBaseAliments() : api('chargerBaseAliments'); }
+function _apiAjouterAlimentCommunaute(p) { return isSupabase() ? sbAjouterAlimentCommunaute(p) : api('ajouterAlimentCommunaute', p); }
+
+function _sbDateToFr(iso)  { const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`; }
+function _sbDateToIso(fr)  { const [d,m,y] = fr.split('/'); return `${y}-${m}-${d}`; }
+
+async function sbListerMenus() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_menus?client_id=eq.${encodeURIComponent(S.client)}&order=created_at.asc` +
+    `&select=id,nom,client_menu_aliments(nom,quantite_g,kcal,prot,glu,sucres,fibres,lip,ags,ordre)`,
+    { headers: supaHeaders() }
+  );
+  if (!res.ok) throw new Error('fetch_menus');
+  const rows = await res.json();
+  return rows.map(m => ({
+    menuId: String(m.id),
+    nom: m.nom,
+    aliments: (m.client_menu_aliments || []).slice().sort((a,b) => (a.ordre||0)-(b.ordre||0)).map(a => ({
+      nom: a.nom, quantite: a.quantite_g, kcal: a.kcal, prot: a.prot, glu: a.glu,
+      sucres: a.sucres, fibres: a.fibres, lip: a.lip, ags: a.ags
+    }))
+  }));
+}
+
+async function _sbSauverAlimentsMenu(menuId, aliments) {
+  if (!aliments || !aliments.length) return;
+  const rows = aliments.map((a, i) => ({
+    menu_id: menuId, nom: a.nom, quantite_g: a.quantite, kcal: a.kcal, prot: a.prot, glu: a.glu,
+    sucres: a.sucres != null ? a.sucres : null, fibres: a.fibres != null ? a.fibres : null,
+    lip: a.lip, ags: a.ags != null ? a.ags : null, ordre: i
+  }));
+  await fetch(`${SUPABASE_URL}/rest/v1/client_menu_aliments`, { method: 'POST', headers: supaHeaders(), body: JSON.stringify(rows) });
+}
+
+async function sbCreerMenu(nom, aliments) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_menus`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ client_id: S.client, nom })
+  });
+  if (!res.ok) return { ok: false };
+  const [row] = await res.json();
+  await _sbSauverAlimentsMenu(row.id, aliments);
+  return { ok: true, menuId: String(row.id) };
+}
+
+async function sbModifierMenu(menuId, nom, aliments) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_menus?id=eq.${menuId}`, {
+    method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ nom })
+  });
+  if (!res.ok) return { ok: false };
+  await fetch(`${SUPABASE_URL}/rest/v1/client_menu_aliments?menu_id=eq.${menuId}`, { method: 'DELETE', headers: supaHeaders() });
+  await _sbSauverAlimentsMenu(menuId, aliments);
+  return { ok: true };
+}
+
+async function sbSupprimerMenu(menuId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_menus?id=eq.${menuId}`, { method: 'DELETE', headers: supaHeaders() });
+  return { ok: res.ok };
+}
+
+async function sbListerJournal() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_journal?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,slot,type,ref,label`,
+    { headers: supaHeaders() }
+  );
+  if (!res.ok) throw new Error('fetch_journal');
+  const rows = await res.json();
+  return rows.map(r => ({ ligne: r.id, date: _sbDateToFr(r.date), slot: r.slot, type: r.type, ref: r.ref, label: r.label }));
+}
+
+async function sbDefinirDieteCibleJournal(dateFr, clientDieteId, nom) {
+  const dateIso = _sbDateToIso(dateFr);
+  await fetch(`${SUPABASE_URL}/rest/v1/client_journal?client_id=eq.${encodeURIComponent(S.client)}&date=eq.${dateIso}&type=eq.cible`, { method: 'DELETE', headers: supaHeaders() });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_journal`, {
+    method: 'POST', headers: supaHeaders(),
+    body: JSON.stringify({ client_id: S.client, date: dateIso, slot: null, type: 'cible', ref: 'sb|' + clientDieteId, label: nom })
+  });
+  return { ok: res.ok };
+}
+
+// Vérifie l'unicité (date, slot) côté client avant insertion (pas de contrainte UNIQUE
+// exploitable simplement via PostgREST sans provoquer une erreur 409 à gérer) — même
+// comportement observable que le GAS d'origine (erreur 'slot_deja_rempli').
+async function sbAjouterSlotJournal(dateFr, slot, type, ref, label) {
+  const dateIso = _sbDateToIso(dateFr);
+  const existRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_journal?client_id=eq.${encodeURIComponent(S.client)}&date=eq.${dateIso}&slot=eq.${slot}&type=neq.cible&select=id`,
+    { headers: supaHeaders() }
+  );
+  const existants = existRes.ok ? await existRes.json() : [];
+  if (existants.length) return { ok: false, erreur: 'slot_deja_rempli' };
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_journal`, {
+    method: 'POST', headers: supaHeaders(),
+    body: JSON.stringify({ client_id: S.client, date: dateIso, slot, type, ref, label })
+  });
+  return { ok: res.ok };
+}
+
+async function sbSupprimerSlotJournal(ligne) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_journal?id=eq.${ligne}`, { method: 'DELETE', headers: supaHeaders() });
+  return { ok: res.ok };
+}
+
+// Résout une diète assignée au client (client_dietes) en {nom, repas:[{nom,aliments}]} —
+// même logique que ouvrirDieteSupabase(), mais renvoie l'objet au lieu de peupler _dDetail.
+// Ne prend que la variante de base (variante_index=0) de chaque repas : les équivalences
+// n'ont pas de sens pour une cible du journal (une seule valeur de comparaison par repas).
+async function sbResoudreDieteDetail(clientDieteId) {
+  const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=nom`, { headers: supaHeaders() });
+  const cd = cdRes.ok ? await cdRes.json() : [];
+  if (!cd.length) return { nom: '', repas: [] };
+  const templateNom = cd[0].nom;
+  const tmplRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(templateNom)}&order=id.desc&limit=1&select=id`,
+    { headers: supaHeaders() }
+  );
+  const templates = tmplRes.ok ? await tmplRes.json() : [];
+  if (!templates.length) return { nom: templateNom, repas: [] };
+  const repasRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templates[0].id}&variante_index=eq.0&order=ordre.asc` +
+    `&select=nom,ordre,repas_aliments(quantite_g,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,aliments_coach(nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`,
+    { headers: supaHeaders() }
+  );
+  const repasRaw = repasRes.ok ? await repasRes.json() : [];
+  const toAliments = r => (r.repas_aliments || []).map(a => {
+    const al = a.aliments_coach || {};
+    const q = a.quantite_g || 0;
+    const kcal = al.kcal_par_gramme ?? a.kcal_par_gramme ?? 0;
+    const prot = al.prot_par_gramme ?? a.prot_par_gramme ?? 0;
+    const glu  = al.glu_par_gramme  ?? a.glu_par_gramme  ?? 0;
+    const lip  = al.lip_par_gramme  ?? a.lip_par_gramme  ?? 0;
+    return { nom: al.nom || a.nom || '?', cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
+  });
+  return { nom: templateNom, repas: repasRaw.slice().sort((a,b)=>a.ordre-b.ordre).map(r => ({ nom: r.nom, aliments: toAliments(r) })) };
+}
+
+async function sbChargerBaseAliments() {
+  const [coachRes, commRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme&order=nom.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,sucres_par_gramme,fibres_par_gramme,lip_par_gramme,ags_par_gramme,code_barre,valide&order=nom.asc`, { headers: supaHeaders() })
+  ]);
+  const coach = coachRes.ok ? await coachRes.json() : [];
+  const comm  = commRes.ok  ? await commRes.json()  : [];
+  return {
+    // Base coach : pas de détail sucres/fibres/AGS (colonnes inexistantes) — cohérent avec
+    // le comportement GAS d'origine (aDetail = a.sucres !== null dans la modale d'ajout).
+    coach: coach.map(a => ({ nom: a.nom, kcal: a.kcal_par_gramme, prot: a.prot_par_gramme, glu: a.glu_par_gramme, lip: a.lip_par_gramme, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true })),
+    communaute: comm.map(a => ({ nom: a.nom, kcal: a.kcal_par_gramme, prot: a.prot_par_gramme, glu: a.glu_par_gramme, lip: a.lip_par_gramme, sucres: a.sucres_par_gramme, fibres: a.fibres_par_gramme, ags: a.ags_par_gramme, codeBarre: a.code_barre, source: 'communaute', valide: a.valide }))
+  };
+}
+
+async function sbAjouterAlimentCommunaute(p) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({
+      nom: p.nom, kcal_par_gramme: p.kcal, prot_par_gramme: p.prot, glu_par_gramme: p.glu,
+      sucres_par_gramme: p.sucres || null, fibres_par_gramme: p.fibres || null, lip_par_gramme: p.lip,
+      ags_par_gramme: p.ags || null, code_barre: p.codeBarre || null, valide: false, created_by: S.client
+    })
+  });
+  if (!res.ok) return { ok: false };
+  const [row] = await res.json();
+  return { ok: true, aliment: { nom: row.nom, kcal: row.kcal_par_gramme, prot: row.prot_par_gramme, glu: row.glu_par_gramme, lip: row.lip_par_gramme, sucres: row.sucres_par_gramme, fibres: row.fibres_par_gramme, ags: row.ags_par_gramme, codeBarre: row.code_barre, source: 'communaute', valide: row.valide } };
+}
+
+// Identifie une diète (issue de _dDietes, GAS ou Supabase) pour la résolution/le cache des
+// détails et pour l'encodage des ref des slots journal ('ligne|col[|idx]' en GAS,
+// 'sb|clientDieteId[|idx]' en Supabase — le préfixe 'sb|' rend le format auto-descriptif,
+// indépendant du mode courant au moment de la lecture).
+function _refKeyForDiete(d) {
+  return d._supabase ? { sb: true, id: d.id, cacheKey: 'sb|' + d.id } : { sb: false, ligne: d.ligne, col: d.col, cacheKey: d.ligne + '|' + d.col };
+}
+
+function _parseDieteRef(ref) {
+  if (ref.startsWith('sb|')) {
+    const [, id, idx] = ref.split('|');
+    return { sb: true, id, idx: idx !== undefined ? parseInt(idx) : undefined, cacheKey: 'sb|' + id };
+  }
+  const [ligne, col, idx] = ref.split('|');
+  return { sb: false, ligne: parseInt(ligne), col: parseInt(col), idx: idx !== undefined ? parseInt(idx) : undefined, cacheKey: ligne + '|' + col };
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -548,8 +744,8 @@ function renderDieteMenus() {
 
 async function supprimerMenuClient(menuId) {
   try {
-    await api('supprimerMenu', { menuId });
-    _dMenus = await api('listerMenus');
+    await _apiSupprimerMenu(menuId);
+    _dMenus = await _apiListerMenus();
     setPage('diete');
   } catch(e) {}
 }
@@ -655,11 +851,11 @@ async function confirmerCreationMenu() {
   if (!_dMenuDraft.aliments.length) { showToast('Ajoute au moins un aliment.', '#c0392b'); return; }
   try {
     if (_dMenuDraft.menuIdEdition) {
-      await api('modifierMenu', { menuId: _dMenuDraft.menuIdEdition, nom, aliments: _dMenuDraft.aliments });
+      await _apiModifierMenu(_dMenuDraft.menuIdEdition, nom, _dMenuDraft.aliments);
     } else {
-      await api('creerMenu', { nom, aliments: _dMenuDraft.aliments });
+      await _apiCreerMenu(nom, _dMenuDraft.aliments);
     }
-    _dMenus = await api('listerMenus');
+    _dMenus = await _apiListerMenus();
     _dMenuDraft = null;
     _dMenuVue = 'liste';
     setPage('diete');
@@ -712,12 +908,17 @@ function ouvrirJourJournalDepuisPicker() {
 async function ouvrirJourJournal(dateStr) {
   const slotsCoach = (_dJournal || []).filter(s => s.date === dateStr && s.type === 'coach');
   const cibleRow = (_dJournal || []).find(s => s.date === dateStr && s.type === 'cible');
-  const refs = slotsCoach.map(s => s.ref.split('|').slice(0,2).join('|'));
-  if (cibleRow) refs.push(cibleRow.ref);
-  const aCharger = [...new Set(refs)].map(ref => ref.split('|')).filter(([l,c]) => !_dDieteDetailCache[l+'|'+c]);
+  const refKeys = slotsCoach.map(s => _parseDieteRef(s.ref));
+  if (cibleRow) refKeys.push(_parseDieteRef(cibleRow.ref));
+  const seen = {};
+  const aCharger = refKeys.filter(r => {
+    if (_dDieteDetailCache[r.cacheKey] || seen[r.cacheKey]) return false;
+    seen[r.cacheKey] = true;
+    return true;
+  });
   if (aCharger.length) {
     setPage('diete-loading');
-    await Promise.all(aCharger.map(([l,c]) => _resoudreDieteDetail(parseInt(l), parseInt(c))));
+    await Promise.all(aCharger.map(r => _resoudreDieteDetail(r)));
   }
   _dJournalDateOuverte = dateStr;
   _dJournalAjoutEtape = null;
@@ -731,11 +932,10 @@ function fermerJourJournal() {
   setPage('diete');
 }
 
-async function _resoudreDieteDetail(ligne, col) {
-  const key = ligne + '|' + col;
-  if (_dDieteDetailCache[key]) return _dDieteDetailCache[key];
-  const d = await api('chargerDieteParPosition', { ligneTitre: ligne, colTitre: col });
-  _dDieteDetailCache[key] = d;
+async function _resoudreDieteDetail(refKey) {
+  if (_dDieteDetailCache[refKey.cacheKey]) return _dDieteDetailCache[refKey.cacheKey];
+  const d = refKey.sb ? await sbResoudreDieteDetail(refKey.id) : await api('chargerDieteParPosition', { ligneTitre: refKey.ligne, colTitre: refKey.col });
+  _dDieteDetailCache[refKey.cacheKey] = d;
   return d;
 }
 
@@ -744,9 +944,9 @@ function _resoudreSlot(s) {
     const m = (_dMenus || []).find(mm => mm.menuId === s.ref);
     return m ? m.aliments : [];
   }
-  const [ligne, col, idx] = s.ref.split('|');
-  const detail = _dDieteDetailCache[ligne+'|'+col];
-  const repas = detail && detail.repas && detail.repas[parseInt(idx)];
+  const r = _parseDieteRef(s.ref);
+  const detail = _dDieteDetailCache[r.cacheKey];
+  const repas = detail && detail.repas && detail.repas[r.idx];
   return repas ? repas.aliments : [];
 }
 
@@ -754,9 +954,9 @@ function _resoudreSlot(s) {
 function _cibleJournalActuelle() {
   const row = (_dJournal || []).find(s => s.date === _dJournalDateOuverte && s.type === 'cible');
   if (!row) return null;
-  const [l, c] = row.ref.split('|');
-  const detail = _dDieteDetailCache[l+'|'+c];
-  return { ligne: parseInt(l), col: parseInt(c), nom: row.label, ligneCibleRow: row.ligne, repas: (detail && detail.repas) || [] };
+  const r = _parseDieteRef(row.ref);
+  const detail = _dDieteDetailCache[r.cacheKey];
+  return { refKey: r, nom: row.label, ligneCibleRow: row.ligne, repas: (detail && detail.repas) || [] };
 }
 
 function renderDieteJournalJour() {
@@ -808,10 +1008,13 @@ function renderDieteJournalJour() {
 
 function renderDieteCibleSelecteur(cible) {
   if (_dJournalCibleEtape === 'choix') {
-    const rows = (_dDietes||[]).map(d => `
-      <div class="diete-item" onclick="_guardAction(() => choisirDieteCible(${d.ligne},${d.col},'${(d.nom||'').replace(/'/g,"\\'")}'), this)">
+    const rows = (_dDietes||[]).map(d => {
+      const nomEsc = (d.nom||'').replace(/'/g,"\\'");
+      const arg = d._supabase ? `{_supabase:true,id:${d.id},nom:'${nomEsc}'}` : `{ligne:${d.ligne},col:${d.col},nom:'${nomEsc}'}`;
+      return `<div class="diete-item" onclick="_guardAction(() => choisirDieteCible(${arg}), this)">
         <div class="diete-bar"></div><span style="padding-left:8px;font-size:14px;font-weight:600;">${esc(d.nom)}</span><div class="diete-arrow">›</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div class="card">
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Quelle diète cible pour ce jour ?</div>
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucune diète trouvée.</div>'}
@@ -830,12 +1033,17 @@ function renderDieteCibleSelecteur(cible) {
   </div>`;
 }
 
-async function choisirDieteCible(ligne, col, nom) {
+async function choisirDieteCible(d) {
   setPage('diete-loading');
   try {
-    await _resoudreDieteDetail(ligne, col);
-    await api('definirDieteCibleJournal', { date: _dJournalDateOuverte, ligneTitre: ligne, colTitre: col, nom });
-    _dJournal = await api('listerJournal');
+    const refKey = _refKeyForDiete(d);
+    await _resoudreDieteDetail(refKey);
+    if (refKey.sb) {
+      await sbDefinirDieteCibleJournal(_dJournalDateOuverte, refKey.id, d.nom);
+    } else {
+      await api('definirDieteCibleJournal', { date: _dJournalDateOuverte, ligneTitre: refKey.ligne, colTitre: refKey.col, nom: d.nom });
+    }
+    _dJournal = await _apiListerJournal();
   } catch(e) {}
   _dJournalCibleEtape = null;
   setPage('diete');
@@ -845,8 +1053,8 @@ async function retirerDieteCible() {
   const cible = _cibleJournalActuelle();
   if (!cible) return;
   try {
-    await api('supprimerSlotJournal', { ligne: cible.ligneCibleRow });
-    _dJournal = await api('listerJournal');
+    await _apiSupprimerSlotJournal(cible.ligneCibleRow);
+    _dJournal = await _apiListerJournal();
   } catch(e) {}
   setPage('diete');
 }
@@ -904,10 +1112,13 @@ function renderJournalChoixSource() {
       <button onclick="annulerChoixSlotJournal()" style="width:100%;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">Annuler</button>`;
   }
   if (_dJournalAjoutEtape === 'coach-dietes') {
-    const rows = (_dDietes||[]).map(d => `
-      <div class="diete-item" onclick="_guardAction(() => choisirDieteJournal(${d.ligne},${d.col},'${(d.nom||'').replace(/'/g,"\\'")}'), this)">
+    const rows = (_dDietes||[]).map(d => {
+      const nomEsc = (d.nom||'').replace(/'/g,"\\'");
+      const arg = d._supabase ? `{_supabase:true,id:${d.id},nom:'${nomEsc}'}` : `{ligne:${d.ligne},col:${d.col},nom:'${nomEsc}'}`;
+      return `<div class="diete-item" onclick="_guardAction(() => choisirDieteJournal(${arg}), this)">
         <div class="diete-bar"></div><span style="padding-left:8px;font-size:14px;font-weight:600;">${esc(d.nom)}</span><div class="diete-arrow">›</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Depuis quelle diète ?</div>
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucune diète trouvée.</div>'}
@@ -1039,24 +1250,24 @@ async function confirmerComposeJournal() {
   const nom = (document.getElementById('dComposeNom').value || '').trim() || ('Repas ' + slot + ' du ' + _dJournalDateOuverte);
   try {
     if (_dMenuDraft.menuIdEdition) {
-      const res = await api('modifierMenu', { menuId: _dMenuDraft.menuIdEdition, nom, aliments: _dMenuDraft.aliments });
+      const res = await _apiModifierMenu(_dMenuDraft.menuIdEdition, nom, _dMenuDraft.aliments);
       if (!res || !res.ok) { showToast('Erreur lors de la modification.', '#c0392b'); return; }
       // Le Label affiché dans le journal est une copie figée au moment de l'ajout — si le nom
       // a changé, on rafraîchit la ligne du slot (slot explicite désormais, donc sûr de
       // supprimer/réinsérer sans perdre sa position).
       const slotActuel = (_dJournal||[]).find(s => s.date === _dJournalDateOuverte && s.slot === slot && s.type === 'menu');
       if (slotActuel && slotActuel.label !== nom) {
-        await api('supprimerSlotJournal', { ligne: slotActuel.ligne });
-        await api('ajouterSlotJournal', { date: _dJournalDateOuverte, slot, type: 'menu', ref: _dMenuDraft.menuIdEdition, label: nom });
+        await _apiSupprimerSlotJournal(slotActuel.ligne);
+        await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'menu', _dMenuDraft.menuIdEdition, nom);
       }
     } else {
-      const res = await api('creerMenu', { nom, aliments: _dMenuDraft.aliments });
+      const res = await _apiCreerMenu(nom, _dMenuDraft.aliments);
       if (!res || !res.ok) { showToast('Erreur lors de la création.', '#c0392b'); return; }
-      const res2 = await api('ajouterSlotJournal', { date: _dJournalDateOuverte, slot, type: 'menu', ref: res.menuId, label: nom });
+      const res2 = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'menu', res.menuId, nom);
       if (!res2 || !res2.ok) { showToast(res2 && res2.erreur === 'slot_deja_rempli' ? 'Ce repas est déjà rempli.' : 'Erreur.', '#c0392b'); return; }
     }
-    _dMenus = await api('listerMenus');
-    _dJournal = await api('listerJournal');
+    _dMenus = await _apiListerMenus();
+    _dJournal = await _apiListerJournal();
     _dMenuDraft = null;
     _dJournalAjoutEtape = null;
     _dJournalSlotEnEdition = null;
@@ -1064,11 +1275,12 @@ async function confirmerComposeJournal() {
   } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
 }
 
-async function choisirDieteJournal(ligne, col, nom) {
+async function choisirDieteJournal(d) {
   setPage('diete-loading');
   try {
-    const detail = await _resoudreDieteDetail(ligne, col);
-    _dJournalDieteChoisie = { ligne, col, nom, repas: detail.repas || [] };
+    const refKey = _refKeyForDiete(d);
+    const detail = await _resoudreDieteDetail(refKey);
+    _dJournalDieteChoisie = { refKey, nom: d.nom, repas: detail.repas || [] };
     _dJournalAjoutEtape = 'coach-repas';
   } catch(e) {}
   setPage('diete');
@@ -1078,13 +1290,13 @@ async function ajouterSlotCoach(idx) {
   const dc = _dJournalDieteChoisie;
   const r = dc && dc.repas[idx];
   if (!r) return;
-  const ref = dc.ligne + '|' + dc.col + '|' + idx;
+  const ref = dc.refKey.sb ? ('sb|' + dc.refKey.id + '|' + idx) : (dc.refKey.ligne + '|' + dc.refKey.col + '|' + idx);
   const label = r.nom + ' · ' + dc.nom;
   const slot = _dJournalSlotEnEdition;
   try {
-    const res = await api('ajouterSlotJournal', { date: _dJournalDateOuverte, slot, type: 'coach', ref, label });
+    const res = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'coach', ref, label);
     if (!res || !res.ok) { showToast(res && res.erreur === 'slot_deja_rempli' ? 'Ce repas est déjà rempli.' : 'Erreur.', '#c0392b'); return; }
-    _dJournal = await api('listerJournal');
+    _dJournal = await _apiListerJournal();
     _dJournalAjoutEtape = null;
     _dJournalSlotEnEdition = null;
     _dJournalDieteChoisie = null;
@@ -1097,9 +1309,9 @@ async function ajouterSlotMenu(menuId) {
   if (!m) return;
   const slot = _dJournalSlotEnEdition;
   try {
-    const res = await api('ajouterSlotJournal', { date: _dJournalDateOuverte, slot, type: 'menu', ref: menuId, label: m.nom });
+    const res = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'menu', menuId, m.nom);
     if (!res || !res.ok) { showToast(res && res.erreur === 'slot_deja_rempli' ? 'Ce repas est déjà rempli.' : 'Erreur.', '#c0392b'); return; }
-    _dJournal = await api('listerJournal');
+    _dJournal = await _apiListerJournal();
     _dJournalAjoutEtape = null;
     _dJournalSlotEnEdition = null;
     setPage('diete');
@@ -1108,8 +1320,8 @@ async function ajouterSlotMenu(menuId) {
 
 async function supprimerSlotJournalClient(ligne) {
   try {
-    await api('supprimerSlotJournal', { ligne });
-    _dJournal = await api('listerJournal');
+    await _apiSupprimerSlotJournal(ligne);
+    _dJournal = await _apiListerJournal();
     setPage('diete');
   } catch(e) {}
 }
@@ -1122,7 +1334,7 @@ async function ouvrirAjoutAliment() {
   _dModifIndex = null;
   if (!_dBaseAliments) {
     _afficherModalAjout(true);
-    try { _dBaseAliments = await api('chargerBaseAliments'); } catch(e) { _dBaseAliments = { coach: [], communaute: [] }; }
+    try { _dBaseAliments = await _apiChargerBaseAliments(); } catch(e) { _dBaseAliments = { coach: [], communaute: [] }; }
   }
   _afficherModalAjout(false);
 }
@@ -1402,7 +1614,7 @@ async function confirmerCreationAliment() {
   if (kcal100 <= 0) { errEl.textContent = 'Entre au moins les calories.'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
   try {
-    const res = await api('ajouterAlimentCommunaute', {
+    const res = await _apiAjouterAlimentCommunaute({
       nom, kcal: kcal100/100, prot: prot100/100, glu: glu100/100,
       sucres: sucres100/100, fibres: fibres100/100, lip: lip100/100, ags: ags100/100,
       codeBarre: _dCreationCodeBarre || ''
