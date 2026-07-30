@@ -10,6 +10,7 @@ let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
 let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_consigne } assignés par le coach
+let _pcNotesCoach      = []; // [{ nom, note }] pour la modale bulle coach
 
 // ── Chargement ─────────────────────────────────────────────────────────
 
@@ -292,24 +293,32 @@ function renderPcSeancePage() {
       </div>`;
     }
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
-    const cible = [
+    const cibleLigne1 = [
       ex.series ? ex.series + ' séries' : '',
-      ex.reps   ? '× ' + ex.reps        : '',
-      ex.repos  ? '· repos ' + ex.repos : '',
-      ex.tempo  ? '· tempo ' + ex.tempo : '',
-      ex.rir    ? '· RIR ' + ex.rir     : ''
+      ex.reps   ? '× ' + ex.reps        : ''
     ].filter(Boolean).join(' ');
+    const cibleLigne2 = [
+      ex.rir    ? 'RIR ' + ex.rir     : '',
+      ex.repos  ? '⏱ ' + ex.repos    : '',
+      ex.tempo  ? 'tempo ' + ex.tempo : ''
+    ].filter(Boolean).join(' · ');
+
+    _pcNotesCoach[idx] = { nom: ex.nom, note: ex.notes || '' };
 
     return `<div class="card" style="padding:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:14px;font-weight:600;line-height:1.3;">${idx + 1}. ${esc(ex.nom)}</div>
-          ${cible ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cible}</div>` : ''}
+          <div style="display:flex;align-items:center;gap:7px;">
+            <div style="font-size:14px;font-weight:600;line-height:1.3;">${idx + 1}. ${esc(ex.nom)}</div>
+            ${ex.notes ? `<button onclick="pcAfficherNoteCoach(${idx})" style="background:#4f8ef722;border:1px solid #4f8ef755;border-radius:50%;width:24px;height:24px;padding:0;font-size:13px;cursor:pointer;line-height:24px;text-align:center;flex-shrink:0;">💬</button>` : ''}
+          </div>
+          ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
+          ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
         ${ex.repos ? `<button class="chrono-btn" style="font-size:11px;padding:5px 7px;" onclick="pcLancerChrono('${esc(ex.repos)}')">⏱</button>` : ''}
       </div>
       ${setsHtml}
-      <textarea class="bilan-input" rows="1" placeholder="Note…"
+      <textarea class="bilan-input" rows="3" placeholder="Note…"
         onchange="pcSauverCommentaire(${ex.id},this.value)"
         style="margin-top:6px;font-size:16px;">${esc(commentaireLog.commentaire || '')}</textarea>
     </div>`;
@@ -448,6 +457,21 @@ async function pcSauverLog(exerciceId, serie, field, value) {
 
 async function pcSauverCommentaire(exerciceId, value) {
   await pcSauverLog(exerciceId, 1, 'commentaire', value);
+}
+
+function pcAfficherNoteCoach(idx) {
+  const exo = _pcNotesCoach[idx];
+  if (!exo || !exo.note) return;
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
+  modal.innerHTML = `<div style="background:#1a1d29;border-radius:16px;padding:24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+    <div style="font-size:13px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">💬 Note du coach</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:12px;">${esc(exo.nom)}</div>
+    <div style="font-size:14px;color:#b4b8c4;line-height:1.6;white-space:pre-wrap;">${esc(exo.note)}</div>
+    <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top:20px;width:100%;padding:12px;background:#2d3142;border:none;border-radius:10px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;">Fermer</button>
+  </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
 }
 
 // ── Chrono ─────────────────────────────────────────────────────────────

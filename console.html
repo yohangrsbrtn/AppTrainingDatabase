@@ -2210,7 +2210,9 @@ function renderTemplatesSub(){
 let tplEnEdition = null;
 let tplPickerCible = null; // { bi, si }
 const BLOCS_TYPES = [{value:'',label:'Générique'},{value:'metabolique',label:'Métabolique'},{value:'mecanique',label:'Mécanique'},{value:'force',label:'Force'}];
-const RIR_PAR_TYPE = { metabolique:'0-1', mecanique:'1-2', force:'2-3' };
+const RIR_PAR_TYPE  = { metabolique:'0-1',  mecanique:'1-2',  force:'2-3' };
+const REPS_PAR_TYPE = { metabolique:'15-20', mecanique:'10-15', force:'6-10' };
+const REPOS_PAR_TYPE= { metabolique:"1'",   mecanique:"1'30",  force:"2'" };
 
 function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ titre: 'Séance 1', exercices: [] }] }; }
 
@@ -2223,11 +2225,9 @@ function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
   bloc.seances.forEach(seance => {
     seance.exercices.forEach(ex => {
       const lib = ex.exercice_id != null ? (exercicesLib||[]).find(e => e.id === ex.exercice_id) : null;
-      if (lib) {
-        if (lib['reps_'+type])  ex.reps  = lib['reps_'+type];
-        if (lib['repos_'+type]) ex.repos = lib['repos_'+type];
-      }
-      ex.rir = RIR_PAR_TYPE[type] || ex.rir;
+      ex.reps  = (lib && lib['reps_'+type])  ? lib['reps_'+type]  : (REPS_PAR_TYPE[type]  || ex.reps);
+      ex.repos = (lib && lib['repos_'+type]) ? lib['repos_'+type] : (REPOS_PAR_TYPE[type] || ex.repos);
+      ex.rir   = RIR_PAR_TYPE[type] || ex.rir;
     });
   });
 }
@@ -2246,7 +2246,7 @@ async function ouvrirEditeurTemplate(id){
           titre: s.titre,
           exercices: (s.programme_seance_exercices || []).map(l => {
             const ex = exercicesData.find(e=>e.id===l.exercice_id);
-            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir };
+            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir, notes: l.notes || '' };
           })
         }))
       }))
@@ -2318,6 +2318,12 @@ function renderBlocsTemplate(){
               <div class="exo-champ"><label>Tempo</label><input type="text" value="${esc(ex.tempo||'')}" placeholder="2010" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].tempo=this.value"></div>
               <div class="exo-champ"><label>RIR</label><input type="text" value="${esc(ex.rir||'')}" placeholder="1-2" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].rir=this.value"></div>
               <button class="mini-btn" style="margin-left:auto;align-self:center;" onclick="retirerExoDeSeance(${bi},${si},${ei})">✕</button>
+            </div>
+            <div style="padding:2px 14px 6px;display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;color:var(--text-faint);">💬</span>
+              <input type="text" value="${esc(ex.notes||'')}" placeholder="Note coach pour le client…"
+                oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
+                style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
             </div>`).join('')}
           <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
             <button class="btn" style="width:100%;justify-content:center;" onclick="ouvrirPickerExercice(${bi},${si})">+ Ajouter un exercice</button>
@@ -2453,7 +2459,7 @@ function ajouterExerciceASeance(exerciceId){
   const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
   tplEnEdition.blocs[bi].seances[si].exercices.push({
     exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
-    series: null, reps, repos, tempo: '', rir: RIR_PAR_TYPE[blocType] || '',
+    series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo: '', rir: RIR_PAR_TYPE[blocType] || '', notes: '',
   });
   document.getElementById('modal-picker').remove();
   renderBlocsTemplate();
@@ -2561,7 +2567,7 @@ async function assignerTemplateAuClient(templateId, clientId){
         const source = exercicesData.find(e => e.id === ex.exercice_id);
         exercicesPayload.push({
           seance_id: seanceId, exercice_id: ex.exercice_id, nom: source ? source.nom : '(exercice supprimé)',
-          ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir,
+          ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || null,
         });
       });
     });
@@ -3641,7 +3647,7 @@ async function ouvrirEditeurProgrammeClient(progId){
         exercices: (s.client_programme_exercices||[]).map(ex => {
           const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id) ||
                          (exercicesData||[]).find(e=>e.nom.toLowerCase()===(ex.nom||'').toLowerCase());
-          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir };
+          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || '' };
         })
       }))
     }))
@@ -3712,6 +3718,12 @@ function renderBlocsClientProg(){
               <div class="exo-champ"><label>Tempo</label><input type="text" value="${esc(ex.tempo||'')}" placeholder="2010" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].tempo=this.value"></div>
               <div class="exo-champ"><label>RIR</label><input type="text" value="${esc(ex.rir||'')}" placeholder="1-2" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].rir=this.value"></div>
               <button class="mini-btn" style="margin-left:auto;align-self:center;" onclick="cpRetirerExo(${bi},${si},${ei})">✕</button>
+            </div>
+            <div style="padding:2px 14px 6px;display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;color:var(--text-faint);">💬</span>
+              <input type="text" value="${esc(ex.notes||'')}" placeholder="Note coach pour le client…"
+                oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
+                style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
             </div>`).join('')}
           <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
             <button class="btn" style="width:100%;justify-content:center;" onclick="cpOuvrirPicker(${bi},${si})">+ Ajouter un exercice</button>
@@ -3781,8 +3793,8 @@ function cpAjouterExo(exerciceId){
   const blocType=clientProgEnEdition.blocs[bi].type;
   clientProgEnEdition.blocs[bi].seances[si].exercices.push({
     id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
-    series:null, reps:blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'',
-    repos:blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'', tempo:'', rir:RIR_PAR_TYPE[blocType]||''
+    series:null, reps:(blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'')||(REPS_PAR_TYPE[blocType]||''),
+    repos:(blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'')||(REPOS_PAR_TYPE[blocType]||''), tempo:'', rir:RIR_PAR_TYPE[blocType]||'', notes:''
   });
   document.getElementById('modal-picker-cp').remove();
   renderBlocsClientProg();
@@ -3819,9 +3831,9 @@ async function sauvegarderProgrammeClient(){
         for(let ei=0;ei<s.exercices.length;ei++){
           const ex=s.exercices[ei];
           if(ex.id){
-            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null})});
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
           } else {
-            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null})});
+            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
             ex.id=(await r.json())[0].id;
           }
           newExoIds.push(ex.id);
