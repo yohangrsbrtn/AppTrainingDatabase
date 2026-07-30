@@ -8,17 +8,9 @@ let _pcSemaine         = 1;
 let _pcSeanceId        = null; // id de la séance sélectionnée
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
-let _pcSubPage         = 'selector'; // 'selector' | 'seance' | 'evolution'
+let _pcSubPage         = 'selector'; // 'selector' | 'seance'
 let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_consigne } assignés par le coach
 let _pcNotesCoach      = []; // [{ nom, note }] pour la modale bulle coach
-
-// ── Évolution ───────────────────────────────────────────────────────────
-let _pcEvoLoading      = false;
-let _pcEvoCycles       = null;  // [{ id, nom }]
-let _pcEvoCycleId      = null;
-let _pcEvoProgs        = null;  // programmes du cycle sélectionné avec structure complète
-let _pcEvoSeanceKey    = null;  // titre de la séance sélectionnée
-let _pcEvoExoNom       = null;  // nom de l'exercice sélectionné
 
 // ── Chargement ─────────────────────────────────────────────────────────
 
@@ -113,8 +105,7 @@ function renderProgrammeClientPage() {
       <div class="empty"><div class="empty-text">Aucun programme assigné pour l'instant.</div></div>
     </div>${renderNavBar('training')}</div>`;
   }
-  if (_pcSubPage === 'seance')    return renderPcSeancePage();
-  if (_pcSubPage === 'evolution') return renderEvolutionPage();
+  if (_pcSubPage === 'seance') return renderPcSeancePage();
   return renderPcSelectorPage();
 }
 
@@ -165,7 +156,6 @@ function renderPcSelectorPage() {
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSeance(this.value)">${optsSeances || '<option>—</option>'}</select>
       </div>
       <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>Commencer →</button>
-      <button class="btn-secondary" style="margin-top:8px;" onclick="ouvrirEvolution()">📈 Évolution des charges</button>
     </div>
     ${renderNavBar('training')}
   </div>`;
@@ -268,258 +258,6 @@ function _pcRightPanel(seance) {
     ${musclesHtml && chartHtml ? '<div style="height:1px;background:var(--border);margin:8px 0;"></div>' : ''}
     ${musclesHtml}
   </div>`;
-}
-
-// ── Évolution des charges ────────────────────────────────────────────────
-
-async function ouvrirEvolution() {
-  _pcSubPage = 'evolution';
-  _pcEvoCycles = null;
-  _pcEvoProgs = null;
-  _pcEvoCycleId = null;
-  _pcEvoSeanceKey = null;
-  _pcEvoExoNom = null;
-  setPage('programme-client');
-  // Charger les cycles du client
-  _pcEvoLoading = true;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_cycles?client_id=eq.${encodeURIComponent(S.client)}&order=created_at.asc`, { headers: supaHeaders() });
-    _pcEvoCycles = res.ok ? await res.json() : [];
-  } catch(e) { _pcEvoCycles = []; }
-  _pcEvoLoading = false;
-  setPage('programme-client');
-}
-
-async function evoSelectCycle(cycleId) {
-  _pcEvoCycleId = cycleId ? parseInt(cycleId) : null;
-  _pcEvoSeanceKey = null;
-  _pcEvoExoNom = null;
-  _pcEvoProgs = null;
-  setPage('programme-client');
-  if (!_pcEvoCycleId) return;
-  // Charger tous les programmes du cycle avec leur structure
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?cycle_id=eq.${_pcEvoCycleId}&order=ordre_dans_cycle.asc`, { headers: supaHeaders() });
-    const progs = res.ok ? await res.json() : [];
-    _pcEvoProgs = await Promise.all(progs.map(async p => {
-      const resArbo = await fetch(
-        `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${p.id}&order=ordre.asc` +
-        `&select=*,client_programme_seances(*,client_programme_exercices(*))` +
-        `&client_programme_seances.order=ordre.asc&client_programme_seances.client_programme_exercices.order=ordre.asc`,
-        { headers: supaHeaders() }
-      );
-      const blocs = resArbo.ok ? await resArbo.json() : [];
-      return Object.assign({}, p, { blocs });
-    }));
-  } catch(e) { _pcEvoProgs = []; }
-  setPage('programme-client');
-}
-
-function _evoAllSeances() {
-  if (!_pcEvoProgs) return [];
-  const seen = new Set();
-  const list = [];
-  _pcEvoProgs.forEach(prog => {
-    (prog.blocs || []).forEach(bloc => {
-      (bloc.client_programme_seances || []).forEach(s => {
-        if (!seen.has(s.titre)) { seen.add(s.titre); list.push(s.titre); }
-      });
-    });
-  });
-  return list;
-}
-
-function _evoExosForSeance(seanceKey) {
-  if (!_pcEvoProgs || !seanceKey) return [];
-  const seen = new Set();
-  const list = [];
-  _pcEvoProgs.forEach(prog => {
-    (prog.blocs || []).forEach(bloc => {
-      (bloc.client_programme_seances || []).filter(s => s.titre === seanceKey).forEach(s => {
-        (s.client_programme_exercices || []).forEach(ex => {
-          if (!seen.has(ex.nom)) { seen.add(ex.nom); list.push(ex.nom); }
-        });
-      });
-    });
-  });
-  return list;
-}
-
-async function evoSelectExo(nom) {
-  _pcEvoExoNom = nom || null;
-  setPage('programme-client');
-  if (!_pcEvoExoNom || !_pcEvoSeanceKey || !_pcEvoProgs) return;
-
-  // Collecter tous les exercice IDs correspondant au nom + séance, dans l'ordre des programmes
-  const exoIds = [];
-  const progOffsets = []; // { progNom, semOffset, exoId, totalSem }
-  let offset = 0;
-  for (const prog of _pcEvoProgs) {
-    const totalSem = (prog.blocs||[]).reduce((acc,b)=>acc+(b.nombre_semaines||1),0) || 1;
-    (prog.blocs||[]).forEach(bloc => {
-      (bloc.client_programme_seances||[]).filter(s=>s.titre===_pcEvoSeanceKey).forEach(s => {
-        (s.client_programme_exercices||[]).filter(ex=>ex.nom===_pcEvoExoNom).forEach(ex => {
-          if (!exoIds.includes(ex.id)) {
-            exoIds.push(ex.id);
-            progOffsets.push({ progNom: prog.nom, semOffset: offset, exoId: ex.id, totalSem });
-          }
-        });
-      });
-    });
-    offset += totalSem;
-  }
-
-  if (!exoIds.length) { setPage('programme-client'); return; }
-
-  // Charger tous les logs
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIds.join(',')})&order=semaine.asc`,
-      { headers: supaHeaders() }
-    );
-    const logs = res.ok ? await res.json() : [];
-
-    // Construire les points: { semAbs, chargeMax }
-    const pointsMap = {};
-    logs.forEach(log => {
-      const entry = progOffsets.find(e => e.exoId === log.client_programme_exercice_id);
-      if (!entry || !log.charge) return;
-      const semAbs = entry.semOffset + log.semaine;
-      if (!pointsMap[semAbs] || log.charge > pointsMap[semAbs].chargeMax) {
-        pointsMap[semAbs] = { semAbs, chargeMax: parseFloat(log.charge), progNom: entry.progNom };
-      }
-    });
-    const points = Object.values(pointsMap).sort((a,b)=>a.semAbs-b.semAbs);
-
-    // Stocker pour le rendu
-    _pcEvoChartData = { points, progOffsets, exoNom: _pcEvoExoNom };
-  } catch(e) { _pcEvoChartData = null; }
-  setPage('programme-client');
-}
-
-let _pcEvoChartData = null;
-
-function renderEvolutionPage() {
-  const cycles = _pcEvoCycles;
-
-  if (_pcEvoLoading || cycles === null) {
-    return `<div id="app">${renderHeader('Évolution','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('training')}</div>`;
-  }
-
-  const backBtn = `<button class="btn-secondary" style="margin-bottom:12px;" onclick="_pcSubPage='selector';setPage('programme-client');">← Retour</button>`;
-
-  if (!cycles.length) {
-    return `<div id="app">${renderHeader('Évolution','',false)}<div class="page">
-      ${backBtn}
-      <div class="card" style="text-align:center;padding:24px;color:#8892a4;">
-        <div style="font-size:24px;margin-bottom:8px;">📈</div>
-        <div style="font-size:14px;">Aucun cycle configuré.</div>
-        <div style="font-size:12px;margin-top:6px;">Ton coach peut créer des cycles depuis la console pour regrouper tes blocs d'entraînement.</div>
-      </div>
-    </div>${renderNavBar('training')}</div>`;
-  }
-
-  const cycleOpts = `<option value="">Sélectionne un cycle…</option>` +
-    cycles.map(cy => `<option value="${cy.id}" ${cy.id===_pcEvoCycleId?'selected':''}>${esc(cy.nom)}</option>`).join('');
-
-  const seanceOpts = _pcEvoCycleId && _pcEvoProgs !== null
-    ? `<option value="">Sélectionne une séance…</option>` + _evoAllSeances().map(k => `<option value="${esc(k)}" ${k===_pcEvoSeanceKey?'selected':''}>${esc(k)}</option>`).join('')
-    : null;
-
-  const exoOpts = _pcEvoSeanceKey && _pcEvoProgs !== null
-    ? `<option value="">Sélectionne un exercice…</option>` + _evoExosForSeance(_pcEvoSeanceKey).map(n => `<option value="${esc(n)}" ${n===_pcEvoExoNom?'selected':''}>${esc(n)}</option>`).join('')
-    : null;
-
-  const chartHtml = _pcEvoChartData ? _buildEvoChart(_pcEvoChartData) : '';
-
-  return `<div id="app">
-    ${renderHeader('Évolution','',false)}
-    <div class="page">
-      ${backBtn}
-      <div class="card">
-        <div class="field-label">CYCLE</div>
-        <select class="t-select" style="font-size:16px;" onchange="evoSelectCycle(this.value)">${cycleOpts}</select>
-      </div>
-      ${seanceOpts !== null ? `<div class="card">
-        <div class="field-label">SÉANCE</div>
-        <select class="t-select" style="font-size:16px;" onchange="_pcEvoSeanceKey=this.value;_pcEvoExoNom=null;_pcEvoChartData=null;setPage('programme-client');">${seanceOpts}</select>
-      </div>` : ''}
-      ${exoOpts !== null ? `<div class="card">
-        <div class="field-label">EXERCICE</div>
-        <select class="t-select" style="font-size:16px;" onchange="evoSelectExo(this.value)">${exoOpts}</select>
-      </div>` : ''}
-      ${chartHtml ? `<div class="card">${chartHtml}</div>` : ''}
-      ${_pcEvoCycleId && _pcEvoProgs === null ? `<div style="display:flex;justify-content:center;padding:20px;">${renderSpinner()}</div>` : ''}
-    </div>
-    ${renderNavBar('training')}
-  </div>`;
-}
-
-function _buildEvoChart(data) {
-  const { points, progOffsets, exoNom } = data;
-  if (!points.length) return `<div style="text-align:center;color:#8892a4;padding:20px;">Pas encore de logs pour cet exercice.</div>`;
-
-  const W=560, H=180, PL=44, PR=12, PT=20, PB=36, cw=W-PL-PR, ch=H-PT-PB;
-  const charges = points.map(p=>p.chargeMax);
-  const maxC = Math.max(...charges);
-  const minC = Math.min(...charges);
-  const range = maxC - minC || 1;
-  const semMin = points[0].semAbs;
-  const semMax = points[points.length-1].semAbs;
-  const semRange = semMax - semMin || 1;
-
-  const x = s => PL + ((s - semMin) / semRange) * cw;
-  const y = v => PT + (1 - (v - minC) / range) * ch;
-
-  // Bandes par programme (fond coloré)
-  const PROG_COLORS = ['#4f8ef711','#3ecf8e11','#f59e0b11','#a78bfa11','#f9731611'];
-  const bands = progOffsets.map((e, i) => {
-    const x1 = x(e.semOffset + 1);
-    const x2 = x(e.semOffset + e.totalSem);
-    const col = PROG_COLORS[i % PROG_COLORS.length];
-    return `<rect x="${x1}" y="${PT}" width="${Math.max(0,x2-x1)}" height="${ch}" fill="${col}"/>`;
-  });
-
-  // Labels des programmes (en bas)
-  const progLabels = progOffsets.map(e => {
-    const midX = x(e.semOffset + Math.ceil(e.totalSem / 2));
-    return `<text x="${midX}" y="${H-4}" text-anchor="middle" font-size="8" fill="#8892a4">${esc(e.progNom)}</text>`;
-  });
-
-  // Ligne
-  const pts = points.map(p => `${x(p.semAbs).toFixed(1)},${y(p.chargeMax).toFixed(1)}`).join(' ');
-  const polyline = `<polyline points="${pts}" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linejoin="round"/>`;
-
-  // Dots
-  const dots = points.map(p => `<circle cx="${x(p.semAbs).toFixed(1)}" cy="${y(p.chargeMax).toFixed(1)}" r="3.5" fill="#4f8ef7"/>`).join('');
-
-  // Axes Y
-  const nTicks = 4;
-  const yTicks = Array.from({length:nTicks+1},(_,i)=>{
-    const v = minC + (range * i / nTicks);
-    const yv = y(v);
-    return `<line x1="${PL}" y1="${yv.toFixed(1)}" x2="${W-PR}" y2="${yv.toFixed(1)}" stroke="#ffffff0d" stroke-width="1"/>
-    <text x="${PL-4}" y="${(yv+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#8892a4">${Math.round(v)}</text>`;
-  }).join('');
-
-  // Axe X (semaines)
-  const xLabels = points.filter((_,i)=>i%Math.max(1,Math.floor(points.length/6))===0).map(p=>
-    `<text x="${x(p.semAbs).toFixed(1)}" y="${H-20}" text-anchor="middle" font-size="9" fill="#8892a4">S${p.semAbs}</text>`
-  ).join('');
-
-  const delta = points.length > 1 ? points[points.length-1].chargeMax - points[0].chargeMax : 0;
-  const deltaStr = delta > 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1);
-  const deltaColor = delta >= 0 ? '#3ecf8e' : '#e05c5c';
-
-  return `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
-      <div style="font-size:13px;font-weight:600;color:#e8eaf0;">${esc(exoNom)}</div>
-      <div style="font-size:12px;color:${deltaColor};font-weight:700;">${deltaStr} kg</div>
-    </div>
-    <div style="font-size:11px;color:#8892a4;margin-bottom:10px;">Charge max par semaine · ${points.length} semaine${points.length>1?'s':''} de données</div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;" xmlns="http://www.w3.org/2000/svg">
-      ${bands.join('')}${yTicks}${xLabels}${progLabels.join('')}${polyline}${dots}
-    </svg>`;
 }
 
 function renderPcSeancePage() {
