@@ -526,7 +526,7 @@ const NAV = [
 
 let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", clientTab:"actif", selected:null, progLogsId:null };
 let data = { clients:[], bilansCoach:[], bilansSupa:[], logs:[], aValider:[] };
-let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
+let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, tous_cycles:[], progression:null, notes:null };
 let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
 let _ficheBilansClientId = null;
 let _ficheBilans = null; // null=non chargé, []=vide, [...]
@@ -588,6 +588,12 @@ async function supprimerNoteApi(id){
 
 async function chargerTousProgrammes(clientId){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function chargerTousCycles(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_cycles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() });
   if (!res.ok) return [];
   return res.json();
 }
@@ -2823,17 +2829,18 @@ async function openPanel(id){
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
   try {
-    const [profil, tous_programmes, tous_dietes, progression, notes, xpData] = await Promise.all([
+    const [profil, tous_programmes, tous_dietes, tous_cycles, progression, notes, xpData] = await Promise.all([
       chargerFiche(id).catch(()=>({})),
       chargerTousProgrammes(id).catch(()=>[]),
       chargerTousDietes(id).catch(()=>[]),
+      chargerTousCycles(id).catch(()=>[]),
       chargerProgression(id).catch(()=>[]),
       chargerNotes(id).catch(()=>[]),
       chargerClientProgressionXP(id).catch(()=>null),
     ]);
     const programme = tous_programmes.find(p=>p.actif) || null;
     const diete = tous_dietes.find(d=>d.actif) || null;
-    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, notes, xpData };
+    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, tous_cycles, progression, notes, xpData };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   } catch(e) {
     ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], notes:[], xpData:null, error:e.message };
@@ -3224,32 +3231,209 @@ function renderFicheProfilTab(c){
     </div>`;
 }
 
+function _renderProgRow(p, clientId) {
+  const cycles = ficheData.tous_cycles || [];
+  const cycleActuel = cycles.find(cy => cy.id === p.cycle_id);
+  const cycleOpts = cycles.map(cy => `<option value="${cy.id}" ${cy.id===p.cycle_id?'selected':''}>${esc(cy.nom)}</option>`).join('');
+  return `
+    <div class="prog-row ${p.actif?'':'inactif'}" onclick="ouvrirLogsProgramme(${p.id})">
+      <div style="flex:1;min-width:0;">
+        <div class="p-nom">${esc(p.nom)}</div>
+        <div class="p-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</span>
+          ${cycleActuel ? `<span style="background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:99px;font-size:10px;font-weight:600;">⟳ ${esc(cycleActuel.nom)}</span>` : ''}
+        </div>
+      </div>
+      ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
+      <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
+      <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirModalDupliquerProg(${p.id},'${esc(p.nom)}','${clientId}')">Dupliquer</button>
+      <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${clientId}')">${p.actif?'Désactiver':'Activer'}</button>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>`;
+}
+
 function renderFicheProgTab(c){
-  const progs = ficheData.tous_programmes || [];
-  const actif = progs.find(p=>p.actif);
+  const progs  = ficheData.tous_programmes || [];
+  const cycles = ficheData.tous_cycles || [];
+
+  // Grouper : programmes dans un cycle (par cycle_id), programmes sans cycle
+  const progsParCycle = {};
+  const progsSansCycle = [];
+  progs.forEach(p => {
+    if (p.cycle_id) {
+      if (!progsParCycle[p.cycle_id]) progsParCycle[p.cycle_id] = [];
+      progsParCycle[p.cycle_id].push(p);
+    } else {
+      progsSansCycle.push(p);
+    }
+  });
+  // Trier les programmes dans chaque cycle par ordre_dans_cycle
+  Object.values(progsParCycle).forEach(arr => arr.sort((a,b)=>(a.ordre_dans_cycle||0)-(b.ordre_dans_cycle||0)));
+
+  const cyclesHtml = cycles.map(cy => {
+    const ps = progsParCycle[cy.id] || [];
+    return `
+      <div style="margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);">⟳ ${esc(cy.nom)}</div>
+          <button class="btn" style="font-size:10px;padding:2px 8px;color:var(--text-faint);" onclick="supprimerCycle(${cy.id},'${c.id}')">Supprimer</button>
+        </div>
+        ${ps.length ? ps.map(p => _renderProgRow(p, c.id)).join('') : `<div style="font-size:12px;color:var(--text-faint);padding:8px 0;">Aucun programme dans ce cycle.</div>`}
+      </div>`;
+  }).join('');
+
+  const standAloneHtml = progsSansCycle.length ? `
+    <div style="margin-bottom:18px;">
+      ${cycles.length ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:8px;">Programmes généraux</div>` : ''}
+      ${progsSansCycle.map(p => _renderProgRow(p, c.id)).join('')}
+    </div>` : '';
+
+  const emptyHtml = !progs.length ? `<div class="fiche-prog-empty" style="text-align:center;padding:32px;">
+    <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucun programme assigné</div>
+    <button class="btn primary" onclick="setNav('programmes')">→ Aller aux programmes</button>
+  </div>` : '';
+
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
-      <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
-      <div style="display:flex;gap:8px;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''}${cycles.length ? ` · ${cycles.length} cycle${cycles.length>1?'s':''}` : ''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" onclick="ouvrirCreerCycle('${c.id}')">+ Cycle</button>
         <button class="btn" onclick="ouvrirCreerProgrammePourClient('${c.id}')">+ Créer</button>
-        <button class="btn primary" onclick="setNav('programmes')">+ Assigner un template</button>
+        <button class="btn primary" onclick="setNav('programmes')">+ Assigner template</button>
       </div>
     </div>
-    ${progs.length ? progs.map(p=>`
-      <div class="prog-row ${p.actif?'':'inactif'}" onclick="ouvrirLogsProgramme(${p.id})">
-        <div style="flex:1;min-width:0;">
-          <div class="p-nom">${esc(p.nom)}</div>
-          <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
-        </div>
-        ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>`).join('')
-    : `<div class="fiche-prog-empty" style="text-align:center;padding:32px;">
-        <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucun programme assigné</div>
-        <button class="btn primary" onclick="setNav('programmes')">→ Aller aux programmes</button>
-      </div>`}`;
+    ${cyclesHtml}${standAloneHtml}${emptyHtml}`;
+}
+
+async function ouvrirCreerCycle(clientId) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-creer-cycle';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:400px;width:100%;">
+      <h3 style="margin:0 0 16px;">Nouveau cycle</h3>
+      <div class="fiche-field"><label>Nom du cycle</label>
+        <input id="cc-nom" type="text" placeholder="ex : Bloc Métabolique → Mécanique → Force" style="font-size:16px;">
+      </div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="document.getElementById('modal-creer-cycle').remove()">Annuler</button>
+        <button class="btn primary" id="cc-btn" onclick="confirmerCreerCycle('${clientId}')">Créer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('cc-nom').focus(), 50);
+}
+
+async function confirmerCreerCycle(clientId) {
+  const nom = (document.getElementById('cc-nom').value || '').trim();
+  if (!nom) { alert('Entre un nom pour le cycle.'); return; }
+  const btn = document.getElementById('cc-btn');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_cycles`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ client_id: clientId, nom })
+    });
+    if (!res.ok) throw new Error(res.status);
+    document.getElementById('modal-creer-cycle').remove();
+    ficheData.tous_cycles = await chargerTousCycles(clientId);
+    const el = document.getElementById('ficheTabContent');
+    const c = data.clients.find(x=>x.id===clientId);
+    if (el && c && ficheTab === 'programmes') el.innerHTML = renderFicheProgTab(c);
+  } catch(e) { alert('Erreur : ' + e.message); btn.disabled = false; btn.textContent = 'Créer'; }
+}
+
+async function supprimerCycle(cycleId, clientId) {
+  if (!confirm('Supprimer ce cycle ? Les programmes qu\'il contient resteront mais ne seront plus dans le cycle.')) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/programme_cycles?id=eq.${cycleId}`, { method: 'DELETE', headers: supaHeaders() });
+  ficheData.tous_cycles = await chargerTousCycles(clientId);
+  ficheData.tous_programmes = await chargerTousProgrammes(clientId);
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===clientId);
+  if (el && c && ficheTab === 'programmes') el.innerHTML = renderFicheProgTab(c);
+}
+
+async function ouvrirModalDupliquerProg(progId, progNom, clientId) {
+  const cycles = ficheData.tous_cycles || [];
+  const cycleOpts = `<option value="">— Aucun cycle (programme général) —</option>` +
+    cycles.map(cy => `<option value="${cy.id}">${esc(cy.nom)}</option>`).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-dupliquer-prog';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:440px;width:100%;">
+      <h3 style="margin:0 0 16px;">Dupliquer le programme</h3>
+      <div class="fiche-field"><label>Nom du nouveau programme</label>
+        <input id="dp-nom" type="text" value="${esc(progNom)} (copie)" style="font-size:16px;">
+      </div>
+      <div class="fiche-field" style="margin-top:10px;"><label>Assigner à un cycle (optionnel)</label>
+        <select id="dp-cycle" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 10px;width:100%;">${cycleOpts}</select>
+      </div>
+      <div style="font-size:12px;color:var(--text-faint);margin-top:8px;">Les logs ne sont pas copiés — seule la structure (blocs, séances, exercices).</div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="document.getElementById('modal-dupliquer-prog').remove()">Annuler</button>
+        <button class="btn primary" id="dp-btn" onclick="confirmerDupliquerProg(${progId},'${clientId}')">Dupliquer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  setTimeout(() => { const el = document.getElementById('dp-nom'); if (el) { el.focus(); el.select(); } }, 50);
+}
+
+async function confirmerDupliquerProg(progId, clientId) {
+  const nom = (document.getElementById('dp-nom').value || '').trim();
+  const cycleId = document.getElementById('dp-cycle').value || null;
+  if (!nom) { alert('Entre un nom.'); return; }
+  const btn = document.getElementById('dp-btn');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    // 1. Charger la structure source
+    const src = await chargerProgrammeById(progId);
+    if (!src) throw new Error('Programme source introuvable.');
+
+    // 2. Créer le nouveau programme (inactif)
+    const ordreInCycle = cycleId ? ((ficheData.tous_programmes||[]).filter(p=>p.cycle_id==cycleId).length) : 0;
+    const cpRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ client_id: clientId, nom, actif: false, cycle_id: cycleId ? parseInt(cycleId) : null, ordre_dans_cycle: ordreInCycle })
+    });
+    if (!cpRes.ok) throw new Error('programme ' + cpRes.status);
+    const newProg = (await cpRes.json())[0];
+
+    // 3. Copier blocs → séances → exercices
+    for (const bloc of (src.blocs || [])) {
+      const bRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`, {
+        method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+        body: JSON.stringify({ client_programme_id: newProg.id, ordre: bloc.ordre, nombre_semaines: bloc.nombre_semaines, type: bloc.type })
+      });
+      if (!bRes.ok) continue;
+      const newBloc = (await bRes.json())[0];
+      for (const seance of (bloc.seances || [])) {
+        const sRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`, {
+          method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+          body: JSON.stringify({ bloc_id: newBloc.id, titre: seance.titre, ordre: seance.ordre })
+        });
+        if (!sRes.ok) continue;
+        const newSeance = (await sRes.json())[0];
+        const exos = (seance.client_programme_exercices || []).map((ex, ei) => ({
+          client_programme_seance_id: newSeance.id, exercice_id: ex.exercice_id, nom: ex.nom,
+          ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || null
+        }));
+        if (exos.length) {
+          await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`, {
+            method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+            body: JSON.stringify(exos)
+          });
+        }
+      }
+    }
+
+    document.getElementById('modal-dupliquer-prog').remove();
+    ficheData.tous_programmes = await chargerTousProgrammes(clientId);
+    ficheData.programme = ficheData.tous_programmes.find(p=>p.actif) || null;
+    const el = document.getElementById('ficheTabContent');
+    const c = data.clients.find(x=>x.id===clientId);
+    if (el && c && ficheTab === 'programmes') el.innerHTML = renderFicheProgTab(c);
+  } catch(e) { alert('Erreur : ' + e.message); btn.disabled = false; btn.textContent = 'Dupliquer'; }
 }
 
 function renderFicheDieteTab(c){
