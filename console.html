@@ -6635,8 +6635,7 @@ function _renderMigPreviewBilans() {
   if (!bilans.length) return `<div style="color:var(--text-faint);padding:24px;">Aucun bilan dans GAS pour ce client.</div>`;
 
   const allLignes = bilans.map(b => b.ligneTitre);
-  const selectables = bilans.filter(b => !supaBilanLignes.has(b.ligneTitre));
-  const allSelected = selectables.length > 0 && selectables.every(b => migBilanSel.has(b.ligneTitre));
+  const allSelected = bilans.length > 0 && bilans.every(b => migBilanSel.has(b.ligneTitre));
   const migreCount = supaBilanLignes.size;
   const newCount = migBilanSel.size;
 
@@ -6720,8 +6719,7 @@ function toggleBilanSel(ligneTitre, checked) {
 
 function toggleAllBilanSel(checked) {
   const bilans = migPreviewData.gasBilans || [];
-  const supaBilanLignes = migPreviewData.supaBilanLignes || new Set();
-  if (checked) bilans.filter(b => !supaBilanLignes.has(b.ligneTitre)).forEach(b => migBilanSel.add(b.ligneTitre));
+  if (checked) bilans.forEach(b => migBilanSel.add(b.ligneTitre));
   else bilans.forEach(b => migBilanSel.delete(b.ligneTitre));
   const content = document.getElementById('migPreviewContent');
   if (content) content.innerHTML = _renderMigPreviewBilans();
