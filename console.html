@@ -1377,10 +1377,10 @@ function _rowsTableCoach(){
     <tr>
       <td><strong>${esc(a.nom)}</strong></td>
       <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
-      <td class="mono">${Math.round((a.kcal_par_gramme||0)*100)}</td>
-      <td class="mono">${Math.round((a.prot_par_gramme||0)*100)}g</td>
-      <td class="mono">${Math.round((a.glu_par_gramme||0)*100)}g</td>
-      <td class="mono">${Math.round((a.lip_par_gramme||0)*100)}g</td>
+      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round(a.kcal_par_gramme||0) : Math.round((a.kcal_par_gramme||0)*100)}<span style="font-size:9px;color:var(--text-faint);margin-left:2px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></td>
+      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.prot_par_gramme||0)*10)/10 : Math.round((a.prot_par_gramme||0)*100)}g</td>
+      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.glu_par_gramme||0)*10)/10 : Math.round((a.glu_par_gramme||0)*100)}g</td>
+      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.lip_par_gramme||0)*10)/10 : Math.round((a.lip_par_gramme||0)*100)}g</td>
       <td style="white-space:nowrap;text-align:right;">
         <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
@@ -1613,12 +1613,19 @@ function ouvrirFormulaireAliment(id){
           ${ALIM_CATEGORIES.map(c=>`<option value="${esc(c)}" ${a?.categorie===c?'selected':''}>${esc(c)}</option>`).join('')}
         </select>
       </div>
-      <p style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">Valeurs pour 100g</p>
+      <div class="field-row"><label>Unité</label>
+        <select id="afUnite" style="font-size:16px;" onchange="document.getElementById('afRefLabel').textContent=this.value==='g'?'Valeurs pour 100g':'Valeurs par unité (1 portion)'">
+          <option value="g" ${!a?.unite||a.unite==='g'?'selected':''}>Grammes (g)</option>
+          <option value="portion" ${a?.unite==='portion'?'selected':''}>Portions</option>
+        </select>
+      </div>
+      <p id="afRefLabel" style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">${!a?.unite||a.unite==='g'?'Valeurs pour 100g':'Valeurs par unité (1 portion)'}</p>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
-        <div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="afGlu" type="number" min="0" step="0.1" value="${a ? Math.round((a.glu_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="afLip" type="number" min="0" step="0.1" value="${a ? Math.round((a.lip_par_gramme||0)*100*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        ${(() => { const isG = !a?.unite||a.unite==='g'; const mult = isG ? 100 : 1;
+        return `<div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="afGlu" type="number" min="0" step="0.1" value="${a ? Math.round((a.glu_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="afLip" type="number" min="0" step="0.1" value="${a ? Math.round((a.lip_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>`; })()}
       </div>
       <div id="afErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
       <div class="modal-actions">
@@ -1635,11 +1642,13 @@ async function sauvegarderAlimentCoach(id){
   const errEl = document.getElementById('afErr');
   if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
   const categorie = document.getElementById('afCat').value || null;
-  const kcal = (parseFloat(document.getElementById('afKcal').value)||0) / 100;
-  const prot = (parseFloat(document.getElementById('afProt').value)||0) / 100;
-  const glu  = (parseFloat(document.getElementById('afGlu').value)||0) / 100;
-  const lip  = (parseFloat(document.getElementById('afLip').value)||0) / 100;
-  const payload = { nom, categorie, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip };
+  const unite = document.getElementById('afUnite').value || 'g';
+  const div = unite === 'g' ? 100 : 1;
+  const kcal = (parseFloat(document.getElementById('afKcal').value)||0) / div;
+  const prot = (parseFloat(document.getElementById('afProt').value)||0) / div;
+  const glu  = (parseFloat(document.getElementById('afGlu').value)||0) / div;
+  const lip  = (parseFloat(document.getElementById('afLip').value)||0) / div;
+  const payload = { nom, categorie, unite, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip };
   try {
     const method = id ? 'PATCH' : 'POST';
     const url = id ? `${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${id}` : `${SUPABASE_URL}/rest/v1/aliments_coach`;
@@ -4524,7 +4533,7 @@ async function ouvrirEditeurDiete(id){
     const repasRaw = res.ok ? await res.json() : tpl.repas||[];
     dieteTplEnEdition = {
       id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
+      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
     };
     if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   } else {
@@ -4542,7 +4551,7 @@ function _renderAlimListHtml(ri) {
     ${r.aliments.map((a,ai) => `
       <div class="aliment-row">
         <span class="a-nom">${esc(a.nom)}</span>
-        <span class="macro-pills">${a.quantite_g}g · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+        <span class="macro-pills">${a.quantite_g}${a.unite&&a.unite!=='g'?' '+a.unite:'g'} · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
         <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
       </div>`).join('')}
     ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}">
@@ -4711,7 +4720,7 @@ function _renderModalAjoutAliment(){
                 <div class="alim-pick-nom">${esc(a.nom)}</div>
                 ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
               </div>
-              <div class="alim-pick-macros">${Math.round((a.kcal_par_gramme||0)*100)} kcal · P${Math.round((a.prot_par_gramme||0)*100)} G${Math.round((a.glu_par_gramme||0)*100)} L${Math.round((a.lip_par_gramme||0)*100)}</div>
+              <div class="alim-pick-macros">${a.unite&&a.unite!=='g'?Math.round(a.kcal_par_gramme||0):Math.round((a.kcal_par_gramme||0)*100)} kcal · P${a.unite&&a.unite!=='g'?Math.round((a.prot_par_gramme||0)*10)/10:Math.round((a.prot_par_gramme||0)*100)} G${a.unite&&a.unite!=='g'?Math.round((a.glu_par_gramme||0)*10)/10:Math.round((a.glu_par_gramme||0)*100)} L${a.unite&&a.unite!=='g'?Math.round((a.lip_par_gramme||0)*10)/10:Math.round((a.lip_par_gramme||0)*100)}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></div>
             </div>`).join('')}
           ${baseList.length===0&&alimentsCoachData!==null?`<div style="text-align:center;padding:20px;color:var(--text-faint);">Base vide — ajoute des aliments depuis la page "Base alimentaire".</div>`:''}
         </div>
@@ -4772,7 +4781,7 @@ function _filtrerBaseAlim(q){
 function _selectionnerAlimBase(id){
   const a = alimentsCoachData.find(x=>x.id===id);
   if (!a) return;
-  _ouvrirSaisieQuantite(a.nom, a.kcal_par_gramme, a.prot_par_gramme, a.glu_par_gramme, a.lip_par_gramme);
+  _ouvrirSaisieQuantite(a.nom, a.kcal_par_gramme, a.prot_par_gramme, a.glu_par_gramme, a.lip_par_gramme, a.unite||'g');
 }
 
 async function _rechercherOFF(){
@@ -4799,29 +4808,36 @@ function _selectionnerOFF(idx){
   _ouvrirSaisieQuantite(r.nom, r.kcal, r.prot, r.glu, r.lip);
 }
 
-function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
+function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
+  unite = unite || 'g';
+  const isG = unite === 'g';
+  const refMult = isG ? 100 : 1;
+  const refLabel = isG ? '/ 100g' : '/ ' + unite;
+  const qteLabel = isG ? 'Quantité (g)' : 'Nombre de ' + unite + 's';
+  const qteDefault = isG ? 100 : 1;
   const modal = document.getElementById('modal-ajout-aliment');
   const box = modal.querySelector('.modal-box');
   box.innerHTML = `
     <h3 style="margin-bottom:4px;">${esc(nom)}</h3>
     ${_ajoutAlimCount > 0 ? `<div style="font-size:11px;color:var(--success);margin-bottom:10px;">✓ ${_ajoutAlimCount} aliment${_ajoutAlimCount>1?'s':''} ajouté${_ajoutAlimCount>1?'s':''} à ce repas</div>` : ''}
     <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
-      <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*100)}</div><div class="mu">/ 100g</div></div>
-      <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*100)}g</div><div class="mu">/ 100g</div></div>
-      <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*100)}g</div><div class="mu">/ 100g</div></div>
-      <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*100)}g</div><div class="mu">/ 100g</div></div>
+      <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*refMult)}</div><div class="mu">${refLabel}</div></div>
+      <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
+      <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
+      <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
     </div>
-    <div class="field-row"><label>Quantité (g)</label><input id="aQteSelected" type="number" min="1" value="100" style="font-size:16px;" onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg})"></div>
+    <div class="field-row"><label>${qteLabel}</label><input id="aQteSelected" type="number" min="1" value="${qteDefault}" style="font-size:16px;" onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')"></div>
     <div class="modal-actions">
       <button class="btn" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">← Retour</button>
-      <button class="btn primary" onclick="_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg})">Ajouter</button>
+      <button class="btn primary" onclick="_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')">Ajouter</button>
     </div>`;
   setTimeout(()=>document.getElementById('aQteSelected')?.select(), 50);
 }
 
-function _confirmerAlimSelectionne(nom, kcal_pg, prot_pg, glu_pg, lip_pg){
+function _confirmerAlimSelectionne(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
+  unite = unite || 'g';
   const qte = parseFloat(document.getElementById('aQteSelected').value)||0;
-  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal_pg, prot_par_gramme:prot_pg, glu_par_gramme:glu_pg, lip_par_gramme:lip_pg });
+  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite, quantite_g:qte, kcal_par_gramme:kcal_pg, prot_par_gramme:prot_pg, glu_par_gramme:glu_pg, lip_par_gramme:lip_pg });
   _ajoutAlimCount++;
   _updateAlimentsDom(ajoutAlimRI);
   // Retour à la recherche avec flash de confirmation
@@ -4877,7 +4893,7 @@ async function sauvegarderDieteTemplate(){
       if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
@@ -5072,54 +5088,16 @@ async function supprimerRecette(id) {
   } catch(e){ alert('Erreur : ' + e.message); }
 }
 
-function exporterRecetteVersBase(id) {
+async function exporterRecetteVersBase(id) {
   const r = (recettesCoachData||[]).find(x=>x.id===id);
   if (!r || !r.kcal_par_portion) return;
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.id = 'modal-export-recette';
-  modal.onclick = e => { if(e.target===modal) modal.remove(); };
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width:400px;">
-      <h3>${r.emoji||'🍽️'} ${esc(r.nom)}</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
-        Macros par portion : <strong>${Math.round(r.kcal_par_portion)} kcal</strong> · P ${Math.round(r.prot_par_portion||0)}g · G ${Math.round(r.glu_par_portion||0)}g · L ${Math.round(r.lip_par_portion||0)}g
-      </p>
-      <div class="field-row" style="margin-bottom:16px;">
-        <label>Poids d'une portion (g)</label>
-        <input id="exportPoids" type="number" min="1" value="100" style="font-size:16px;width:100px;">
-      </div>
-      <div id="exportPreview" style="font-size:12px;color:var(--text-faint);margin-bottom:16px;"></div>
-      <div id="exportErr" style="color:var(--critical);font-size:13px;display:none;margin-bottom:10px;"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn" onclick="document.getElementById('modal-export-recette').remove()">Annuler</button>
-        <button class="btn primary" onclick="_confirmerExportRecette(${id})">Ajouter à la base</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  const input = document.getElementById('exportPoids');
-  const preview = document.getElementById('exportPreview');
-  const updatePreview = () => {
-    const g = parseFloat(input.value);
-    if (!g || g <= 0) { preview.textContent = ''; return; }
-    preview.textContent = `→ Macros pour 100g : ${Math.round(r.kcal_par_portion/g*100)} kcal · P ${(r.prot_par_portion/g*100).toFixed(1)}g · G ${(r.glu_par_portion/g*100).toFixed(1)}g · L ${(r.lip_par_portion/g*100).toFixed(1)}g`;
-  };
-  input.addEventListener('input', updatePreview);
-  updatePreview();
-}
-
-async function _confirmerExportRecette(id) {
-  const r = (recettesCoachData||[]).find(x=>x.id===id);
-  const g = parseFloat(document.getElementById('exportPoids').value);
-  const errEl = document.getElementById('exportErr');
-  if (!g || g <= 0) { errEl.textContent='Poids invalide.'; errEl.style.display='block'; return; }
   const nom = `${r.emoji||'🍽️'} ${r.nom}`;
   const body = {
-    nom, categorie: 'Recettes',
-    kcal_par_gramme: r.kcal_par_portion / g,
-    prot_par_gramme: (r.prot_par_portion||0) / g,
-    glu_par_gramme:  (r.glu_par_portion||0) / g,
-    lip_par_gramme:  (r.lip_par_portion||0) / g
+    nom, categorie: 'Recettes', unite: 'portion',
+    kcal_par_gramme: r.kcal_par_portion,
+    prot_par_gramme: r.prot_par_portion || 0,
+    glu_par_gramme:  r.glu_par_portion  || 0,
+    lip_par_gramme:  r.lip_par_portion  || 0
   };
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach`, {
@@ -5128,9 +5106,8 @@ async function _confirmerExportRecette(id) {
     if (!res.ok) throw new Error('supabase_' + res.status);
     const saved = (await res.json())[0];
     alimentsCoachData = alimentsCoachData ? [...alimentsCoachData, saved].sort((a,b)=>a.nom.localeCompare(b.nom,'fr')) : [saved];
-    document.getElementById('modal-export-recette').remove();
-    alert(`"${nom}" ajouté à la base alimentaire (1 portion = ${g}g) !`);
-  } catch(e) { errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+    alert(`"${nom}" ajouté à la base alimentaire (1 portion = ${Math.round(r.kcal_par_portion)} kcal) !`);
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 function ouvrirEditeurRecette(id) {
@@ -6887,7 +6864,7 @@ async function sauvegarderDietePourClient() {
       if (!rRes.ok) throw new Error('repas ' + rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
