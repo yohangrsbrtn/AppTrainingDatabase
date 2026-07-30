@@ -3695,7 +3695,7 @@ async function ouvrirEditeurProgrammeClient(progId){
   const prog = await chargerProgrammeById(progId);
   if (!prog) { alert('Programme introuvable'); return; }
   clientProgEnEdition = {
-    id: prog.id, client_id: prog.client_id, nom: prog.nom, actif: prog.actif,
+    id: prog.id, client_id: prog.client_id, nom: prog.nom, actif: prog.actif, bloc_actif_id: prog.bloc_actif_id || null,
     blocs: (prog.blocs||[]).map(b => ({
       id: b.id, type: b.type||null, nombre_semaines: b.nombre_semaines||null,
       seances: (b.client_programme_seances||[]).map(s => ({
@@ -3740,6 +3740,16 @@ function renderEditeurProgrammeClient(el){
   renderBlocsClientProg();
 }
 
+async function cpSetBlocActif(bi){
+  const cp = clientProgEnEdition;
+  const bloc = cp.blocs[bi];
+  if (!bloc || !bloc.id) { showToast('Enregistrez le programme d\'abord.', '#f0a500'); return; }
+  cp.bloc_actif_id = bloc.id;
+  await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,
+    { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({bloc_actif_id: bloc.id}) });
+  renderBlocsClientProg();
+}
+
 function renderBlocsClientProg(){
   const cont = document.getElementById('cpBlocsContainer');
   if (!cont) return;
@@ -3757,6 +3767,9 @@ function renderBlocsClientProg(){
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
         <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
+        ${cp.blocs.length>1?(bloc.id && bloc.id===cp.bloc_actif_id
+          ? `<span style="font-size:11px;font-weight:700;color:${color};padding:4px 8px;background:${color}18;border-radius:var(--radius-sm);flex-shrink:0;">⭐ Actif</span>`
+          : `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="cpSetBlocActif(${bi})">Définir actif</button>`):''}
         ${cp.blocs.length>1?`<button class="icon-btn del" onclick="cpRetirerBloc(${bi})">${iTrash()}</button>`:''}
       </div>`}
       ${bloc.seances.map((seance,si)=>{
@@ -3888,7 +3901,7 @@ async function sauvegarderProgrammeClient(){
   if(btn){btn.disabled=true;btn.textContent='Enregistrement…';}
   if(errEl) errEl.style.display='none';
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom})});
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,bloc_actif_id:cp.bloc_actif_id||null})});
     const newBlocIds=[],newSeanceIds=[],newExoIds=[];
     for(let bi=0;bi<cp.blocs.length;bi++){
       const b=cp.blocs[bi];

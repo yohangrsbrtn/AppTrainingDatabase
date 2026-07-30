@@ -6,6 +6,7 @@ const BLOC_LABELS = { metabolique: 'Métabolique', mecanique: 'Mécanique', forc
 let _pcClientProgramme = null; // null | 'error' | objet programme
 let _pcSemaine         = 1;
 let _pcSeanceId        = null; // id de la séance sélectionnée
+let _pcBlocId          = null; // bloc actuellement sélectionné
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
@@ -50,8 +51,11 @@ async function loadProgrammeClient() {
     const blocs = await resArbo.json();
     _pcClientProgramme = Object.assign({}, cp, { blocs });
     if (!_pcSemaine) _pcSemaine = 1;
-    // Sélection par défaut : première séance du premier bloc
-    const firstSeance = _pcAllSeances()[0];
+    // Sélection du bloc : bloc_actif_id défini par le coach, sinon premier bloc
+    const defaultBlocId = cp.bloc_actif_id || (blocs[0]?.id ?? null);
+    if (!_pcBlocId || !blocs.find(b => b.id === _pcBlocId)) _pcBlocId = defaultBlocId;
+    // Sélection par défaut : première séance du bloc sélectionné
+    const firstSeance = _pcSeancesForBloc(_pcBlocId)[0];
     if (!_pcSeanceId && firstSeance) _pcSeanceId = firstSeance.id;
     await chargerLogsProgramme();
     setPage('programme-client');
@@ -74,6 +78,33 @@ function _pcTotalSemaines() {
   if (!_pcClientProgramme || _pcClientProgramme === 'error') return 1;
   return (_pcClientProgramme.blocs || []).reduce((acc, b) => acc + (b.nombre_semaines || 1), 0) || 1;
 }
+
+function _pcSeancesForBloc(blocId) {
+  const bloc = (_pcClientProgramme?.blocs || []).find(b => b.id === blocId);
+  return (bloc?.client_programme_seances || []).map(s => Object.assign({}, s, { _blocType: bloc.type }));
+}
+
+function _pcSemainesForBloc(blocId) {
+  const bloc = (_pcClientProgramme?.blocs || []).find(b => b.id === blocId);
+  if (!bloc) return 1;
+  if (bloc.nombre_semaines) return bloc.nombre_semaines;
+  // Fallback : dériver depuis les logs existants
+  const exoIds = new Set((bloc.client_programme_seances || [])
+    .flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id)));
+  let maxSem = 1;
+  Object.keys(_pcLogs).forEach(k => {
+    const parts = k.split('|');
+    if (exoIds.has(parseInt(parts[0]))) maxSem = Math.max(maxSem, parseInt(parts[1]));
+  });
+  return maxSem;
+}
+
+function _pcBlocLabel(bloc) {
+  if (!bloc) return 'Bloc';
+  return BLOC_LABELS[bloc.type] || ('Bloc ' + ((_pcClientProgramme?.blocs || []).indexOf(bloc) + 1));
+}
+
+const PC_BLOC_COLOR = { metabolique: '#1D9E75', mecanique: '#378ADD', force: '#D85A30' };
 
 async function chargerLogsProgramme() {
   const ids = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
@@ -125,19 +156,48 @@ function _renderPcObjectifsBand() {
 }
 
 function renderPcSelectorPage() {
-  const cp = _pcClientProgramme;
-  const allSeances  = _pcAllSeances();
-  const totalSem    = _pcTotalSemaines();
+  const cp     = _pcClientProgramme;
+  const blocs  = cp.blocs || [];
+  const blocActifId = cp.bloc_actif_id || null;
+  const blocSelectionne = blocs.find(b => b.id === _pcBlocId) || blocs[0];
+  const seances    = _pcSeancesForBloc(_pcBlocId);
+  const totalSem   = _pcSemainesForBloc(_pcBlocId);
+  const isReadonly = blocActifId && _pcBlocId !== blocActifId;
+
+  // Sélecteur de bloc — uniquement si multi-blocs
+  let blocSelectorHtml = '';
+  if (blocs.length > 1) {
+    const pills = blocs.map(b => {
+      const isSelected = b.id === _pcBlocId;
+      const isActif    = b.id === blocActifId;
+      const color      = PC_BLOC_COLOR[b.type] || '#666';
+      const label      = _pcBlocLabel(b);
+      return `<button onclick="pcChangerBloc(${b.id})" style="
+        padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:${isSelected?'700':'500'};
+        border:2px solid ${isSelected ? color : 'var(--border)'};
+        background:${isSelected ? color + '22' : 'transparent'};
+        color:${isSelected ? color : 'var(--text-muted)'};">
+        ${esc(label)}${isActif ? ' ⭐' : ''}
+      </button>`;
+    }).join('');
+    const notice = isReadonly
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">👁 Lecture seule — ce bloc n'est pas actif</div>`
+      : '';
+    blocSelectorHtml = `<div class="card">
+      <div class="field-label">BLOC</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0;">${pills}</div>
+      ${notice}
+    </div>`;
+  }
 
   const optsSemaines = Array.from({ length: totalSem }, (_, i) => i + 1)
     .map(i => `<option value="${i}" ${i === _pcSemaine ? 'selected' : ''}>Semaine ${i}</option>`).join('');
 
-  const optsSeances = allSeances.map(s => {
-    const label = s.titre + (s._blocType ? ' — ' + (BLOC_LABELS[s._blocType] || s._blocType) : '');
-    return `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(label)}</option>`;
-  }).join('');
+  const optsSeances = seances.map(s =>
+    `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`
+  ).join('');
 
-  const canGo = _pcSeanceId && allSeances.length > 0;
+  const canGo = _pcSeanceId && seances.length > 0;
 
   return `<div id="app">
     ${renderHeader('Programme', '', false)}
@@ -147,6 +207,7 @@ function renderPcSelectorPage() {
         <div class="field-label">PROGRAMME</div>
         <div style="font-size:15px;font-weight:600;color:var(--accent);padding:6px 0;">${esc(cp.nom)}</div>
       </div>
+      ${blocSelectorHtml}
       <div class="card">
         <div class="field-label">SEMAINE</div>
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSemaine(this.value)">${optsSemaines}</select>
@@ -155,7 +216,7 @@ function renderPcSelectorPage() {
         <div class="field-label">SÉANCE</div>
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSeance(this.value)">${optsSeances || '<option>—</option>'}</select>
       </div>
-      <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>Commencer →</button>
+      <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>${isReadonly ? '👁 Voir la séance' : 'Commencer →'}</button>
     </div>
     ${renderNavBar('training')}
   </div>`;
@@ -186,7 +247,7 @@ function _e1rm(charge, reps, rir) {
 }
 
 function _pcRenderChart(seance) {
-  const totalSem = _pcTotalSemaines();
+  const totalSem = _pcSemainesForBloc(_pcBlocId);
   if (totalSem < 2) return '';
   const exos   = seance.client_programme_exercices || [];
   const colors = ['#378ADD', '#1D9E75', '#D85A30', '#a78bfa', '#f59e0b', '#ec4899', '#06b6d4', '#84cc16'];
@@ -261,15 +322,18 @@ function _pcRightPanel(seance) {
 }
 
 function renderPcSeancePage() {
-  const seance = _pcAllSeances().find(s => s.id === _pcSeanceId);
+  const seance = _pcSeancesForBloc(_pcBlocId).find(s => s.id === _pcSeanceId)
+    || _pcAllSeances().find(s => s.id === _pcSeanceId);
   if (!seance) { _pcSubPage = 'selector'; return renderPcSelectorPage(); }
 
-  const totalSem   = _pcTotalSemaines();
-  const allSeances = _pcAllSeances();
+  const cp          = _pcClientProgramme;
+  const isReadonly  = !!(cp.bloc_actif_id && _pcBlocId !== cp.bloc_actif_id);
+  const totalSem    = _pcSemainesForBloc(_pcBlocId);
+  const blocSeances = _pcSeancesForBloc(_pcBlocId);
 
   const optsSemaines = Array.from({ length: totalSem }, (_, i) => i + 1)
     .map(i => `<option value="${i}" ${i === _pcSemaine ? 'selected' : ''}>Semaine ${i}</option>`).join('');
-  const optsSeances = allSeances.map(s => `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`).join('');
+  const optsSeances = blocSeances.map(s => `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`).join('');
 
   const exosHtml = (seance.client_programme_exercices || []).map((ex, idx) => {
     const nbSeries = parseInt(ex.series) || 3;
@@ -285,11 +349,12 @@ function renderPcSeancePage() {
         if (prevLog.rir)    parts.push('RIR ' + prevLog.rir);
         refPrec = `<div style="font-size:11px;color:#5a6172;margin-bottom:2px;padding-left:38px;">Sem ${_pcSemaine - 1} : ${parts.join(' · ')}</div>`;
       }
+      const roAttr = isReadonly ? 'disabled style="opacity:.55;padding:6px 2px;"' : 'style="padding:6px 2px;"';
       setsHtml += refPrec + `<div class="set-row">
         <span class="set-num">S${s}</span>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"   style="padding:6px 2px;">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" onchange="pcSauverLog(${ex.id},${s},'charge',this.value)" style="padding:6px 2px;">
-        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"    style="padding:6px 2px;">
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"`}   ${roAttr}>
+        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'charge',this.value)"`} ${roAttr}>
+        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"`}    ${roAttr}>
       </div>`;
     }
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
@@ -319,8 +384,8 @@ function renderPcSeancePage() {
       </div>
       ${setsHtml}
       <textarea class="bilan-input" rows="3" placeholder="Note…"
-        onchange="pcSauverCommentaire(${ex.id},this.value)"
-        style="margin-top:6px;font-size:16px;">${esc(commentaireLog.commentaire || '')}</textarea>
+        ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaire(${ex.id},this.value)"`}
+        style="margin-top:6px;font-size:16px;${isReadonly?'opacity:.55;':''}">${esc(commentaireLog.commentaire || '')}</textarea>
     </div>`;
   }).join('') || `<div class="empty"><div class="empty-text">Aucun exercice dans cette séance.</div></div>`;
 
@@ -332,9 +397,10 @@ function renderPcSeancePage() {
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSeanceNav(this.value)">${optsSeances}</select>
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSemaineNav(this.value)">${optsSemaines}</select>
       </div>
+      ${isReadonly ? `<div style="font-size:12px;color:var(--text-muted);background:var(--surface-2);border-radius:8px;padding:8px 12px;margin-bottom:12px;">👁 Lecture seule — ce bloc n'est pas actif. Aucune saisie possible.</div>` : ''}
       ${rightPanel ? `<div style="margin-bottom:12px;">${rightPanel}</div>` : ''}
       ${exosHtml}
-      <button id="pcValiderSeanceBtn" class="btn-primary" onclick="pcValiderSeance()" style="margin-top:8px;width:100%;">✅ Valider la séance</button>
+      ${!isReadonly ? `<button id="pcValiderSeanceBtn" class="btn-primary" onclick="pcValiderSeance()" style="margin-top:8px;width:100%;">✅ Valider la séance</button>` : ''}
       <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
     </div>
     <div id="pcChronoOverlay" style="display:none;"></div>
@@ -346,6 +412,13 @@ function renderPcSeancePage() {
 
 function pcChangerSemaine(val) { _pcSemaine = parseInt(val) || 1; setPage('programme-client'); }
 function pcChangerSeance(val)  { _pcSeanceId = parseInt(val) || val; setPage('programme-client'); }
+function pcChangerBloc(blocId) {
+  _pcBlocId  = blocId;
+  _pcSemaine = 1;
+  const firstSeance = _pcSeancesForBloc(blocId)[0];
+  _pcSeanceId = firstSeance ? firstSeance.id : null;
+  setPage('programme-client');
+}
 
 async function pcOuvrirSeance() {
   if (!_pcSeanceId) return;
