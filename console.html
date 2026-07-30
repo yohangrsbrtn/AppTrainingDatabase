@@ -3780,8 +3780,8 @@ function renderBlocsClientProg(){
 function cpDupliquerBloc(bi){
   const src = clientProgEnEdition.blocs[bi];
   const copie = JSON.parse(JSON.stringify(src));
+  copie.id = null; // nouveau bloc Supabase
   copie.type = null; // le coach choisit le nouveau type
-  // Les exercices dupliqués n'ont pas d'id Supabase (nouveaux)
   copie.seances.forEach(s => { s.id = null; s.exercices.forEach(ex => { ex.id = null; }); });
   clientProgEnEdition.blocs.splice(bi + 1, 0, copie);
   _repartitionCpBlocIdx = bi + 1;
