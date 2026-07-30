@@ -149,7 +149,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 <script src="bilan.js?v=4"></script>
 <script src="training.js?v=2"></script>
 <script src="diete.js?v=7"></script>
-<script src="mensurations.js?v=3"></script>
+<script src="mensurations.js?v=4"></script>
 <script src="recettes.js?v=2"></script>
 <script src="progression.js?v=4"></script>
 <script src="collection.js?v=2"></script>
@@ -685,6 +685,7 @@ async function loadHomeSupabase(){
     _journeeData = journee;
   } catch(e) { S.data.profil = {}; _journeeData = { aucun: true }; }
   setPage('home-supabase');
+  _apresChargementHome();
 }
 function renderHomeSupabase(){
   if (S.data.profil && S.data.profil.prenom) {
@@ -737,6 +738,9 @@ function renderHomeSupabase(){
       </div>` : ''}
 
     </div>
+
+    <div id="top5Home"></div>
+
   </div>`;
 }
 

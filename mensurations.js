@@ -521,8 +521,7 @@ function renderAutresMens() {
 }
 
 function _toggleMChart2(key) {
-  if (_mChart2Keys.has(key)) { if (_mChart2Keys.size > 1) _mChart2Keys.delete(key); }
-  else _mChart2Keys.add(key);
+  _mChart2Keys = new Set([key]);
   const el = document.getElementById('mensChart2Wrap');
   if (el) el.innerHTML = _renderMensChart2Section(_mReleves);
 }

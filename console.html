@@ -6102,7 +6102,7 @@ function _renderProgGASDetail(feuilleData, supaProgs) {
                 return `<div style="padding:8px 14px;border-top:1px solid var(--hairline);">
                   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                     <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
-                    <div style="font-size:11px;color:var(--text-faint);">${ex.series||'?'}×${esc(ex.repsCible||ex.reps||'?')}</div>
+                    <div style="font-size:11px;color:var(--text-faint);">${ex.series||'?'}×${esc(ex.repsCible||ex.reps||'?')}${ex.repos?' · ⏱ '+esc(ex.repos):''}${ex.tempo?' · tempo '+esc(ex.tempo):''}${ex.rirCible||ex.rir?' · RIR '+(ex.rirCible||ex.rir):''}</div>
                   </div>
                   ${hasLog ? sets.filter(set=>set.charge!==''||set.reps!=='').map(set=>`
                     <div style="display:flex;gap:8px;font-size:11.5px;padding:1px 0;color:var(--text-muted);">
@@ -6242,7 +6242,7 @@ async function migrerProgrammeGAS() {
           const exPayload = exercices.map((ex, ei) => ({
             seance_id: savedSeance.id, nom: ex.nom||'Exercice', ordre: ei,
             series: ex.series || null, reps: ex.repsCible || ex.reps || null,
-            repos: null, tempo: null, rir: null,
+            repos: ex.repos || null, tempo: ex.tempo || null, rir: ex.rirCible || null,
           }));
           const exRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,
             { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(exPayload) });
