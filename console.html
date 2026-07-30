@@ -2289,10 +2289,13 @@ function renderBlocsTemplate(){
   const cont = document.getElementById('blocsContainer');
   const t = tplEnEdition;
   const simple = t.blocs.length === 1 && !t.blocs[0].type && !t.blocs[0].nombre_semaines;
-  cont.innerHTML = t.blocs.map((bloc, bi) => `
-    <div class="day-block" style="margin-bottom:18px;">
+  cont.innerHTML = t.blocs.map((bloc, bi) => {
+    const color = BLOC_COLOR[bloc.type] || 'var(--hairline)';
+    return `
+    <div class="day-block" style="margin-bottom:18px;border-left:3px solid ${color};">
       ${simple ? '' : `
-      <div class="day-head" style="flex-wrap:wrap;">
+      <div class="day-head" style="flex-wrap:wrap;border-bottom:2px solid ${color}20;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
         <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(tplEnEdition.blocs[${bi}],exercicesData);renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o => `<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
@@ -2300,13 +2303,19 @@ function renderBlocsTemplate(){
         <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="dupliquerBlocTemplate(${bi})">Dupliquer</button>
         ${t.blocs.length>1 ? `<button class="icon-btn del" onclick="retirerBlocTemplate(${bi})">${iTrash()}</button>` : ''}
       </div>`}
-      ${bloc.seances.map((seance, si) => `
+      ${bloc.seances.map((seance, si) => {
+        const collapsed = _tplCollapsed.has(bi+'-'+si);
+        const exoCount = seance.exercices.length;
+        return `
         <div style="border-top:1px solid var(--hairline);">
-          <div class="day-head">
-            <input type="text" value="${esc(seance.titre)}" oninput="tplEnEdition.blocs[${bi}].seances[${si}].titre=this.value" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;">
-            <button class="icon-btn del" onclick="retirerSeanceTemplate(${bi},${si})">${iTrash()}</button>
+          <div class="day-head" style="cursor:pointer;" onclick="tplToggleSeance(${bi},${si})">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
+            <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();tplEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
+            ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
+            <button class="icon-btn del" onclick="event.stopPropagation();retirerSeanceTemplate(${bi},${si})">${iTrash()}</button>
           </div>
-          ${seance.exercices.map((ex, ei) => `
+          <div style="display:${collapsed?'none':'block'};">
+            ${seance.exercices.map((ex, ei) => `
             <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
@@ -2326,19 +2335,27 @@ function renderBlocsTemplate(){
                 oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
                 style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
             </div>`).join('')}
-          <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
-            <button class="btn" style="width:100%;justify-content:center;" onclick="ouvrirPickerExercice(${bi},${si})">+ Ajouter un exercice</button>
+            <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+              <button class="btn" style="width:100%;justify-content:center;" onclick="ouvrirPickerExercice(${bi},${si})">+ Ajouter un exercice</button>
+            </div>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
       <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
         <button class="btn" style="width:100%;justify-content:center;" onclick="ajouterSeanceTemplate(${bi})">+ Ajouter une séance</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   renderRepartition();
 }
 
 let _repartitionTplBlocIdx = 0;
 let _repartitionCpBlocIdx  = 0;
+let _tplCollapsed = new Set();
+let _cpCollapsed  = new Set();
+const BLOC_COLOR = { metabolique:'#1D9E75', mecanique:'#378ADD', force:'#D85A30' };
+function tplToggleSeance(bi,si){ const k=bi+'-'+si; _tplCollapsed.has(k)?_tplCollapsed.delete(k):_tplCollapsed.add(k); renderBlocsTemplate(); }
+function cpToggleSeance(bi,si){  const k=bi+'-'+si; _cpCollapsed.has(k)?_cpCollapsed.delete(k):_cpCollapsed.add(k);  renderBlocsClientProg(); }
 
 function renderRepartition(){
   const cont = document.getElementById('tplRepartitionContainer');
@@ -3728,10 +3745,13 @@ function renderBlocsClientProg(){
   if (!cont) return;
   const cp = clientProgEnEdition;
   const simple = cp.blocs.length===1 && !cp.blocs[0].type && !cp.blocs[0].nombre_semaines;
-  cont.innerHTML = cp.blocs.map((bloc,bi)=>`
-    <div class="day-block" style="margin-bottom:18px;">
+  cont.innerHTML = cp.blocs.map((bloc,bi)=>{
+    const color = BLOC_COLOR[bloc.type] || 'var(--hairline)';
+    return `
+    <div class="day-block" style="margin-bottom:18px;border-left:3px solid ${color};">
       ${simple ? '' : `
-      <div class="day-head" style="flex-wrap:wrap;">
+      <div class="day-head" style="flex-wrap:wrap;border-bottom:2px solid ${color}20;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
         <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(clientProgEnEdition.blocs[${bi}],exercicesData);renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
@@ -3739,13 +3759,19 @@ function renderBlocsClientProg(){
         <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
         ${cp.blocs.length>1?`<button class="icon-btn del" onclick="cpRetirerBloc(${bi})">${iTrash()}</button>`:''}
       </div>`}
-      ${bloc.seances.map((seance,si)=>`
+      ${bloc.seances.map((seance,si)=>{
+        const collapsed = _cpCollapsed.has(bi+'-'+si);
+        const exoCount = seance.exercices.length;
+        return `
         <div style="border-top:1px solid var(--hairline);">
-          <div class="day-head">
-            <input type="text" value="${esc(seance.titre)}" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;">
-            <button class="icon-btn del" onclick="cpRetirerSeance(${bi},${si})">${iTrash()}</button>
+          <div class="day-head" style="cursor:pointer;" onclick="cpToggleSeance(${bi},${si})">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
+            <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
+            ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
+            <button class="icon-btn del" onclick="event.stopPropagation();cpRetirerSeance(${bi},${si})">${iTrash()}</button>
           </div>
-          ${seance.exercices.map((ex,ei)=>`
+          <div style="display:${collapsed?'none':'block'};">
+            ${seance.exercices.map((ex,ei)=>`
             <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
@@ -3765,14 +3791,17 @@ function renderBlocsClientProg(){
                 oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
                 style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
             </div>`).join('')}
-          <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
-            <button class="btn" style="width:100%;justify-content:center;" onclick="cpOuvrirPicker(${bi},${si})">+ Ajouter un exercice</button>
+            <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
+              <button class="btn" style="width:100%;justify-content:center;" onclick="cpOuvrirPicker(${bi},${si})">+ Ajouter un exercice</button>
+            </div>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
       <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
         <button class="btn" style="width:100%;justify-content:center;" onclick="cpAjouterSeance(${bi})">+ Ajouter une séance</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   const rCont = document.getElementById('cpRepartitionContainer');
   if (rCont) renderRepartitionInto(rCont, cp.blocs, _repartitionCpBlocIdx, 'cp');
 }
