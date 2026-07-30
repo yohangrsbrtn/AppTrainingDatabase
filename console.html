@@ -526,6 +526,7 @@ const NAV = [
 
 let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", clientTab:"actif", selected:null, progLogsId:null };
 let data = { clients:[], bilansCoach:[], bilansSupa:[], logs:[], aValider:[] };
+let _dataRefreshing = false;
 let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
 let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
 let _ficheBilansClientId = null;
@@ -641,6 +642,7 @@ function renderSidebar(){
       }).join('')}
     </div>
   `).join('') + `
+    ${_dataRefreshing ? `<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;margin-bottom:6px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:11px;color:var(--text-faint);"><div class="spin" style="width:10px;height:10px;border-width:1.5px;flex-shrink:0;"></div>Mise à jour…</div>` : ''}
     <div class="sidebar-footer">
       <div class="avatar">YG</div>
       <div><div class="name">Yohan</div><div class="role">Coach</div></div>
@@ -6898,7 +6900,10 @@ function _showShell() {
     renderMain();
     renderNotifMenu();
     // Mise à jour silencieuse en fond — ne bloque jamais l'UI
-    chargerDonnees().then(() => { renderSidebar(); renderMain(); }).catch(() => {});
+    _dataRefreshing = true; renderSidebar();
+    chargerDonnees()
+      .catch(() => {})
+      .finally(() => { _dataRefreshing = false; renderSidebar(); renderMain(); });
     return;
   }
   // Pas de cache : premier chargement — on attend avec un timeout de 15 s
