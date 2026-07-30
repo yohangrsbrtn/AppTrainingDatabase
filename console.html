@@ -5258,7 +5258,7 @@ function _gasId(clientId) { return GAS_ID_MAP[clientId] || clientId; }
 async function apiGasProd(action, clientId, params = {}) {
   const body = { action, token: getToken(), client: _gasId(clientId), params };
   const ctrl = new AbortController();
-  const tid  = setTimeout(() => ctrl.abort(), 12000);
+  const tid  = setTimeout(() => ctrl.abort(), 30000);
   try {
     const res = await fetch(GAS_PROD_URL, {
       method: 'POST',
