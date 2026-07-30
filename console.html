@@ -923,7 +923,7 @@ async function openBilanDetailFromLog(client, ts, coachTraite) {
 }
 
 function openBilanDetailSupabase(bilan) {
-  const dateIso = bilan.date_validation || (bilan.created_at||'').split('T')[0] || '';
+  const dateIso = bilan.date_validation || '';
   const dateFr  = dateIso ? dateIso.split('-').reverse().join('/') : '';
   bilanDetailState = {
     loaded: true,
@@ -1111,7 +1111,7 @@ function renderBilanDetailPage(el) {
 
   const _navDateLabel = (b) => {
     if (!b) return '';
-    const iso = b.date_validation || (b.created_at||'').split('T')[0] || '';
+    const iso = b.date_validation || '';
     const dateFr = iso ? iso.split('-').reverse().join('/') : '';
     return dateFr || b.semaine_label || '';
   };
@@ -3054,16 +3054,14 @@ function renderFicheBilansTab(c){
     return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
   const rows = _ficheBilans.map((b, idx) => {
-    const dateRaw = b.date_validation || (b.created_at||'').split('T')[0] || '';
+    const dateRaw = b.date_validation || '';
     const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
-    const label = b.semaine_label || dateFr;
     const traite = b.coach_traite;
     const chip = traite
       ? `<span class="chip ok"><span class="dot"></span>Traité</span>`
       : `<span class="chip late"><span class="dot"></span>À traiter</span>`;
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td>${dateFr}</td>
-      <td style="color:var(--text-faint);font-size:12px;">${esc(label)}</td>
       <td>${chip}</td>
     </tr>`;
   }).join('');
@@ -3071,7 +3069,6 @@ function renderFicheBilansTab(c){
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
         <th style="text-align:left;padding:6px 8px;">Date</th>
-        <th style="text-align:left;padding:6px 8px;">Semaine</th>
         <th style="text-align:left;padding:6px 8px;">Statut</th>
       </tr></thead>
       <tbody>${rows}</tbody>
