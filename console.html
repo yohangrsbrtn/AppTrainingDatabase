@@ -1377,10 +1377,12 @@ function _rowsTableCoach(){
     <tr>
       <td><strong>${esc(a.nom)}</strong></td>
       <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
-      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round(a.kcal_par_gramme||0) : Math.round((a.kcal_par_gramme||0)*100)}<span style="font-size:9px;color:var(--text-faint);margin-left:2px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></td>
-      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.prot_par_gramme||0)*10)/10 : Math.round((a.prot_par_gramme||0)*100)}g</td>
-      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.glu_par_gramme||0)*10)/10 : Math.round((a.glu_par_gramme||0)*100)}g</td>
-      <td class="mono">${a.unite&&a.unite!=='g' ? Math.round((a.lip_par_gramme||0)*10)/10 : Math.round((a.lip_par_gramme||0)*100)}g</td>
+      ${(() => { const u=a.unite&&a.unite!=='g'; const m=u?1:100; const ref=u?`<span style="font-size:9px;font-weight:400;color:var(--text-faint);margin-left:3px;">/ ${a.unite}</span>`:''; return `
+      <td class="mono">${Math.round((a.kcal_par_gramme||0)*m)} kcal${u?`<span style="font-size:9px;color:var(--text-faint);margin-left:2px;">/ ${a.unite}</span>`:''}</td>
+      <td class="mono">P ${Math.round((a.prot_par_gramme||0)*m*10)/10}g</td>
+      <td class="mono">G ${Math.round((a.glu_par_gramme||0)*m*10)/10}g</td>
+      <td class="mono">L ${Math.round((a.lip_par_gramme||0)*m*10)/10}g</td>
+      `; })()}
       <td style="white-space:nowrap;text-align:right;">
         <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
