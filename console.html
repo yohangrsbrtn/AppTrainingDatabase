@@ -3875,7 +3875,7 @@ async function sauvegarderProgrammeClient(){
         if(s.id){
           await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${s.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({titre:s.titre,ordre:si})});
         } else {
-          const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_bloc_id:b.id,titre:s.titre,ordre:si})});
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({bloc_id:b.id,titre:s.titre,ordre:si})});
           s.id=(await r.json())[0].id;
         }
         newSeanceIds.push(s.id);
@@ -3884,7 +3884,7 @@ async function sauvegarderProgrammeClient(){
           if(ex.id){
             await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
           } else {
-            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
+            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
             ex.id=(await r.json())[0].id;
           }
           newExoIds.push(ex.id);
