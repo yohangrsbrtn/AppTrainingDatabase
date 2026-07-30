@@ -415,7 +415,9 @@ function renderLoginCreate() {
     <div class="login-title">🔐 Crée ton mot de passe</div>
     <div class="login-sub">Pour sécuriser ton espace coaching</div>
     <div class="login-form">
-      <input id="l-mdp1" type="password" placeholder="Minimum 4 caractères" autocomplete="new-password">
+      <input id="l-email-create" type="email" placeholder="Ton adresse e-mail" autocomplete="email" style="font-size:16px">
+      <div class="login-hint" style="font-size:13px;color:#888;margin-top:-8px;">Pour récupérer ton mot de passe si besoin</div>
+      <input id="l-mdp1" type="password" placeholder="Minimum 6 caractères" autocomplete="new-password">
       <input id="l-mdp2" type="password" placeholder="Répète ton mot de passe" autocomplete="new-password">
       <button class="btn-primary" id="l-btn">Créer mon mot de passe →</button>
       <div class="login-error" id="l-err"></div>
@@ -435,6 +437,8 @@ function bindLogin() {
   } else if (_loginStep === 'create') {
     const handler = _loginAuthMode === 'supabase' ? doCreerMotDePasseSupabase : doCreerMotDePasse;
     btn.addEventListener('click', handler);
+    const emailCreate = document.getElementById('l-email-create');
+    if (emailCreate) emailCreate.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('l-mdp1').focus(); });
     document.getElementById('l-mdp2').addEventListener('keydown', e => { if (e.key === 'Enter') handler(); });
   } else if (_loginStep === 'reset-password') {
     btn.addEventListener('click', doDefinirNouveauMotDePasse);
@@ -553,29 +557,29 @@ async function doDefinirNouveauMotDePasse() {
 }
 
 async function doCreerMotDePasseSupabase() {
+  const emailSaisi = (document.getElementById('l-email-create').value || '').trim().toLowerCase();
   const mdp1 = document.getElementById('l-mdp1').value;
   const mdp2 = document.getElementById('l-mdp2').value;
   const btn  = document.getElementById('l-btn');
   const err  = document.getElementById('l-err');
   err.textContent = '';
+  if (!emailSaisi || !emailSaisi.includes('@')) { err.textContent = 'Entre une adresse e-mail valide.'; return; }
   if (mdp1.length < 6) { err.textContent = 'Minimum 6 caractères.'; return; }
   if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
   btn.disabled = true; btn.textContent = '…';
-  const email = _loginAuthEmail || (_loginClient + '@apptraining-users.com');
   try {
-    const { data, error } = await sbAuth.auth.signUp({ email, password: mdp1 });
+    const { data, error } = await sbAuth.auth.signUp({ email: emailSaisi, password: mdp1 });
     if (error) throw new Error(error.message);
     let session = data.session;
     if (!session) {
-      // Pas de session immédiate (ex: confirmation email activée côté projet) — on retente un signIn direct.
-      const retry = await sbAuth.auth.signInWithPassword({ email, password: mdp1 });
+      const retry = await sbAuth.auth.signInWithPassword({ email: emailSaisi, password: mdp1 });
       if (retry.error) throw new Error(retry.error.message);
       session = retry.data.session;
     }
     await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
-      body: JSON.stringify({ client_id: _loginClient, mdp_defini: true })
+      body: JSON.stringify({ client_id: _loginClient, mdp_defini: true, email: emailSaisi, email_confirme: true })
     }).catch(() => {});
     await _completerConnexionSupabase(session);
   } catch(e) {
