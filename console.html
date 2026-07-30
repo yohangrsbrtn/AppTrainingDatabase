@@ -2297,7 +2297,8 @@ function renderBlocsTemplate(){
           ${BLOCS_TYPES.map(o => `<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="tplEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
-        ${t.blocs.length>1 ? `<button class="icon-btn del" style="margin-left:auto;" onclick="retirerBlocTemplate(${bi})">${iTrash()}</button>` : ''}
+        <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="dupliquerBlocTemplate(${bi})">Dupliquer</button>
+        ${t.blocs.length>1 ? `<button class="icon-btn del" onclick="retirerBlocTemplate(${bi})">${iTrash()}</button>` : ''}
       </div>`}
       ${bloc.seances.map((seance, si) => `
         <div style="border-top:1px solid var(--hairline);">
@@ -2336,34 +2337,73 @@ function renderBlocsTemplate(){
   renderRepartition();
 }
 
+let _repartitionTplBlocIdx = 0;
+let _repartitionCpBlocIdx  = 0;
+
 function renderRepartition(){
   const cont = document.getElementById('tplRepartitionContainer');
   if (!cont) return;
-  renderRepartitionInto(cont, tplEnEdition ? tplEnEdition.blocs : []);
+  const blocs = tplEnEdition ? tplEnEdition.blocs : [];
+  renderRepartitionInto(cont, blocs, _repartitionTplBlocIdx, 'tpl');
 }
 
-function renderRepartitionInto(cont, blocs){
+function renderRepartitionInto(cont, blocs, selectedBlocIdx, context){
+  if (!blocs || !blocs.length) { cont.innerHTML = ''; return; }
+  const idx = Math.min(selectedBlocIdx ?? 0, blocs.length - 1);
+  const multiBloc = blocs.length > 1;
+
+  // Pills de sélection de bloc (si plusieurs blocs)
+  const BLOCS_LABELS_SHORT = { metabolique: 'Méta', mecanique: 'Méca', force: 'Force' };
+  const pills = multiBloc ? blocs.map((b, bi) => {
+    const label = (b.type && BLOCS_LABELS_SHORT[b.type]) ? BLOCS_LABELS_SHORT[b.type] : `Bloc ${bi+1}`;
+    const active = bi === idx;
+    const fn = context === 'tpl'
+      ? `_repartitionTplBlocIdx=${bi};renderRepartition()`
+      : `_repartitionCpBlocIdx=${bi};_rerenderCpRepartition()`;
+    return `<button onclick="${fn}" style="padding:3px 10px;border-radius:99px;border:1px solid ${active?'var(--accent)':'var(--hairline)'};background:${active?'var(--accent-soft)':'transparent'};color:${active?'var(--accent)':'var(--text-faint)'};font-size:11px;font-weight:${active?'700':'400'};cursor:pointer;">${esc(label)}</button>`;
+  }).join('') : '';
+
+  const bloc = blocs[idx];
   const map = {};
-  (blocs||[]).forEach(b => (b.seances||[]).forEach(s => (s.exercices||[]).forEach(ex => {
+  (bloc.seances||[]).forEach(s => (s.exercices||[]).forEach(ex => {
     const g = ex.groupe_musculaire || 'Non défini';
-    const n = parseInt(ex.series) || 0;
-    map[g] = (map[g]||0) + n;
-  })));
+    map[g] = (map[g]||0) + (parseInt(ex.series)||0);
+  }));
   const total = Object.values(map).reduce((a,b)=>a+b,0);
-  if (!total) { cont.innerHTML=''; return; }
+  if (!total && !multiBloc) { cont.innerHTML = ''; return; }
+
   const sorted = Object.entries(map).sort((a,b)=>b[1]-a[1]);
   cont.innerHTML = `
     <div class="table-card" style="padding:16px;margin-bottom:16px;">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:10px;">Répartition des séries par groupe musculaire</div>
-      ${sorted.map(([g,n])=>`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);">Répartition des séries</div>
+        ${pills ? `<div style="display:flex;gap:4px;">${pills}</div>` : ''}
+      </div>
+      ${total ? sorted.map(([g,n])=>`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
           <div style="width:150px;font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(g)}</div>
           <div style="flex:1;height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;">
             <div style="height:100%;width:${Math.round(n/total*100)}%;background:var(--accent);border-radius:4px;"></div>
           </div>
           <div style="width:50px;font-size:12px;font-weight:700;text-align:right;">${n} sér.</div>
-        </div>`).join('')}
+        </div>`).join('')
+      : `<div style="font-size:12px;color:var(--text-faint);">Aucun exercice dans ce bloc.</div>`}
     </div>`;
+}
+
+function _rerenderCpRepartition(){
+  const rCont = document.getElementById('cpRepartitionContainer');
+  if (rCont && clientProgEnEdition) renderRepartitionInto(rCont, clientProgEnEdition.blocs, _repartitionCpBlocIdx, 'cp');
+}
+
+function dupliquerBlocTemplate(bi){
+  const src = tplEnEdition.blocs[bi];
+  const copie = JSON.parse(JSON.stringify(src));
+  copie.type = null; // le coach choisit le nouveau type
+  copie.nombre_semaines = src.nombre_semaines || null;
+  tplEnEdition.blocs.splice(bi + 1, 0, copie);
+  _repartitionTplBlocIdx = bi + 1;
+  renderBlocsTemplate();
 }
 
 function ajouterBlocTemplate(){
@@ -3696,7 +3736,8 @@ function renderBlocsClientProg(){
           ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
-        ${cp.blocs.length>1?`<button class="icon-btn del" style="margin-left:auto;" onclick="cpRetirerBloc(${bi})">${iTrash()}</button>`:''}
+        <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
+        ${cp.blocs.length>1?`<button class="icon-btn del" onclick="cpRetirerBloc(${bi})">${iTrash()}</button>`:''}
       </div>`}
       ${bloc.seances.map((seance,si)=>`
         <div style="border-top:1px solid var(--hairline);">
@@ -3733,7 +3774,18 @@ function renderBlocsClientProg(){
       </div>
     </div>`).join('');
   const rCont = document.getElementById('cpRepartitionContainer');
-  if (rCont) renderRepartitionInto(rCont, cp.blocs);
+  if (rCont) renderRepartitionInto(rCont, cp.blocs, _repartitionCpBlocIdx, 'cp');
+}
+
+function cpDupliquerBloc(bi){
+  const src = clientProgEnEdition.blocs[bi];
+  const copie = JSON.parse(JSON.stringify(src));
+  copie.type = null; // le coach choisit le nouveau type
+  // Les exercices dupliqués n'ont pas d'id Supabase (nouveaux)
+  copie.seances.forEach(s => { s.id = null; s.exercices.forEach(ex => { ex.id = null; }); });
+  clientProgEnEdition.blocs.splice(bi + 1, 0, copie);
+  _repartitionCpBlocIdx = bi + 1;
+  renderBlocsClientProg();
 }
 
 function cpAjouterBloc(){ clientProgEnEdition.blocs.push(blocVide()); renderBlocsClientProg(); }
