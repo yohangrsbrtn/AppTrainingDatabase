@@ -158,14 +158,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 <script src="programme-client.js?v=2"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
-// IDs client qui ont accès coach (GAS id + Supabase id du même compte)
-const COACH_CLIENT_IDS = ['yohan', 'yohanp'];
-
 const S = {
   page: 'loading',
   client:  localStorage.getItem('at_client')  || '',
   token:   localStorage.getItem('at_token')   || '',
-  isCoach: localStorage.getItem('at_coach') === '1' || COACH_CLIENT_IDS.includes(localStorage.getItem('at_client')),
+  isCoach: localStorage.getItem('at_coach') === '1' || localStorage.getItem('at_client') === 'yohan',
   data: {}
 };
 
@@ -588,24 +585,19 @@ async function doCreerMotDePasseSupabase() {
 }
 
 async function _completerConnexionSupabase(session) {
-  const isCoach = COACH_CLIENT_IDS.includes(_loginClient);
   localStorage.setItem('at_client', _loginClient);
   localStorage.setItem('at_token', session.access_token);
-  localStorage.setItem('at_coach', isCoach ? '1' : '0');
+  localStorage.setItem('at_coach', '0');
   localStorage.setItem('at_auth_mode', 'supabase');
   S.client = _loginClient;
   S.token = session.access_token;
-  S.isCoach = isCoach;
+  S.isCoach = false;
   _loginStep = 'identifiant';
   _loginClient = '';
   _loginAuthMode = 'gas';
   _loginAuthEmail = '';
   _loginEmailConfirme = false;
-  if (isCoach && window.innerWidth >= 900) {
-    window.location.replace('console.html');
-  } else {
-    await loadHomeSupabase();
-  }
+  await loadHomeSupabase();
 }
 
 async function doLogin() {
@@ -660,7 +652,7 @@ async function doCreerMotDePasse() {
 async function _completerConnexion(json) {
   localStorage.setItem('at_client', json.client);
   localStorage.setItem('at_token',  json.token);
-  const isCoach = !!(json.coachMode || COACH_CLIENT_IDS.includes(json.client));
+  const isCoach = !!(json.coachMode || json.client === 'yohan');
   localStorage.setItem('at_coach',  isCoach ? '1' : '0');
   S.client  = json.client;
   S.token   = json.token;
@@ -1905,7 +1897,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 if (S.token && S.client) {
   if (localStorage.getItem('at_auth_mode') === 'supabase') {
-    if (S.isCoach && window.innerWidth >= 900) { window.location.replace('console.html'); return; }
     loadHomeSupabase();
   } else {
   const _urlParams = new URLSearchParams(window.location.search);
