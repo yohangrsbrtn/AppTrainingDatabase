@@ -532,6 +532,7 @@ let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 
 let _ficheBilansClientId = null;
 let _ficheBilans = null; // null=non chargé, []=vide, [...]
 let _ficheBilansLoading = false;
+let _ficheBilansSel = new Set(); // ids bilans sélectionnés (fiche client → onglet Bilans)
 let _bilanNavList = null;   // liste Supabase bilans pour nav prev/next
 let _bilanNavIdx  = -1;
 let _bilanNavSource = null; // 'fiche' | 'bilans'
@@ -3034,6 +3035,7 @@ function renderFicheBilansTab(c){
     _ficheBilansClientId = c.id;
     _ficheBilans = null;
     _ficheBilansLoading = false;
+    _ficheBilansSel = new Set();
   }
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
@@ -3053,6 +3055,8 @@ function renderFicheBilansTab(c){
   if (_ficheBilans.length === 0) {
     return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
+  const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
+  const selCount = _ficheBilansSel.size;
   const rows = _ficheBilans.map((b, idx) => {
     const dateRaw = b.date_validation || '';
     const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
@@ -3060,20 +3064,69 @@ function renderFicheBilansTab(c){
     const chip = traite
       ? `<span class="chip ok"><span class="dot"></span>Traité</span>`
       : `<span class="chip late"><span class="dot"></span>À traiter</span>`;
+    const checked = _ficheBilansSel.has(b.id);
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
+      <td style="width:32px;text-align:center;" onclick="event.stopPropagation();">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanSel(${b.id}, this.checked)">
+      </td>
       <td>${dateFr}</td>
       <td>${chip}</td>
     </tr>`;
   }).join('');
   return `<div class="fiche-card" style="overflow-x:auto;">
+    <div class="table-toolbar" style="padding:10px 8px;">
+      <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanSel(this.checked)">
+        Tout sélectionner
+      </label>
+      <button class="btn" style="font-size:12px;color:var(--critical);margin-left:auto;" ${selCount === 0 ? 'disabled' : ''}
+        onclick="supprimerFicheBilansSel('${esc(c.id)}')">
+        🗑 Supprimer (${selCount})
+      </button>
+    </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
+        <th></th>
         <th style="text-align:left;padding:6px 8px;">Date</th>
         <th style="text-align:left;padding:6px 8px;">Statut</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+function toggleFicheBilanSel(id, checked) {
+  if (checked) _ficheBilansSel.add(id);
+  else _ficheBilansSel.delete(id);
+  const el = document.getElementById('ficheTabContent');
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilansClientId);
+  if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+}
+
+function toggleAllFicheBilanSel(checked) {
+  _ficheBilansSel = checked ? new Set((_ficheBilans||[]).map(b => b.id)) : new Set();
+  const el = document.getElementById('ficheTabContent');
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilansClientId);
+  if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+}
+
+async function supprimerFicheBilansSel(clientId) {
+  const ids = [..._ficheBilansSel];
+  if (!ids.length) return;
+  if (!confirm(`Supprimer ${ids.length} bilan(s) ? Cette action est irréversible.`)) return;
+  const el = document.getElementById('ficheTabContent');
+  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Suppression…</div>`;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
+      { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) }
+    );
+    if (!res.ok) { const t = await res.text(); alert(`Erreur suppression : ${res.status} — ${t}`); }
+  } catch(e) { alert(`Erreur suppression : ${e.message}`); }
+  _ficheBilansSel = new Set();
+  _ficheBilans = null;
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  if (el) el.innerHTML = renderFicheBilansTab(c);
 }
 
 // ── Mensuration charts — helpers partagés ────────────────────────────────────
