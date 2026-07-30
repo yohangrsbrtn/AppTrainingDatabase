@@ -6878,32 +6878,40 @@ async function confirmerSauvegardeTemplatePourClient() {
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────
+function _showShell() {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('shell').style.display   = 'grid';
+}
 (async function boot(){
   const cached = localStorage.getItem('at_console_cache_v2');
   if (cached) {
-    try {
-      data = JSON.parse(cached).data;
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('shell').style.display = 'grid';
-      renderSidebar();
-      renderMain();
-      renderNotifMenu();
-    } catch(e) {}
-  }
-  // Rafraîchit en arrière-plan ; si pas de cache, attend avant d'afficher
-  try {
-    await chargerDonnees();
-    if (!cached) {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('shell').style.display = 'grid';
-      renderNotifMenu();
-    }
+    try { data = JSON.parse(cached).data; } catch(e) {}
+    _showShell();
     renderSidebar();
     renderMain();
-  } catch(e) {
-    if (!cached) document.getElementById('main').innerHTML =
-      `<div class="empty-panel"><strong>Erreur de chargement</strong><br>${esc(e.message)}<br><br><button class="btn primary" onclick="rafraichir()">Réessayer</button></div>`;
+    renderNotifMenu();
+    // Mise à jour silencieuse en fond — ne bloque jamais l'UI
+    chargerDonnees().then(() => { renderSidebar(); renderMain(); }).catch(() => {});
+    return;
   }
+  // Pas de cache : premier chargement — on attend avec un timeout de 15 s
+  try {
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000));
+    await Promise.race([chargerDonnees(), timeout]);
+  } catch(e) {
+    // Timeout ou erreur réseau : on affiche quand même ce qu'on a (data peut être partiel)
+    if (!data || !data.clients) {
+      _showShell();
+      renderNotifMenu();
+      document.getElementById('main').innerHTML =
+        `<div class="empty-panel"><strong>Chargement lent ou erreur réseau.</strong><br><button class="btn primary" onclick="location.reload()" style="margin-top:10px;">Réessayer</button></div>`;
+      return;
+    }
+  }
+  _showShell();
+  renderSidebar();
+  renderMain();
+  renderNotifMenu();
 })();
 </script>
 </body>
