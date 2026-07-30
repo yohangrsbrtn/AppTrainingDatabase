@@ -6167,15 +6167,19 @@ async function migrerDieteGAS() {
       }
     }
 
-    // 3. Assigner seulement si pas déjà assignée (évite les doublons à la re-migration)
+    // 3. Assigner / mettre à jour diete_template_id (idempotent)
     const existCdRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&nom=eq.${encodeURIComponent(nom)}&select=id`,
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&nom=eq.${encodeURIComponent(nom)}&select=id,diete_template_id`,
       { headers: supaHeaders() });
     const existCd = existCdRes.ok ? await existCdRes.json() : [];
     if (!existCd.length) {
       const assignRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
         { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, diete_template_id: tpl.id, actif: true }) });
       if (!assignRes.ok) throw new Error('assign ' + assignRes.status);
+    } else if (!existCd[0].diete_template_id || existCd[0].diete_template_id !== tpl.id) {
+      // Mettre à jour diete_template_id si null ou incorrect (migration initiale avant ce fix)
+      await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${existCd[0].id}`,
+        { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ diete_template_id: tpl.id }) });
     }
 
     // 4. Invalider le cache templates
