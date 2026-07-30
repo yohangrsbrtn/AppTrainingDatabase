@@ -3603,15 +3603,35 @@ function renderProgLogsPage(el){
   const semainesAvecLogs = new Set();
   Object.keys(logs).forEach(k => { const parts=k.split('|'); if(parts[1]) semainesAvecLogs.add(parseInt(parts[1])); });
 
-  // Build progression data across all weeks
+  // Map exId → bloc index (pour offset chronologique)
+  const exToBloc = {};
+  blocs.forEach((b, bi) => {
+    (b.client_programme_seances||[]).forEach(s => {
+      (s.client_programme_exercices||[]).forEach(ex => { exToBloc[ex.id] = bi; });
+    });
+  });
+  // Semaines réelles par bloc : nombre_semaines ou max des logs
+  const blocMaxSem = blocs.map(b => b.nombre_semaines || 0);
+  Object.entries(logs).forEach(([key]) => {
+    const parts = key.split('|');
+    const exId = parts[0], sem = parseInt(parts[1]);
+    const bi = exToBloc[exId];
+    if (bi !== undefined && sem > (blocMaxSem[bi]||0)) blocMaxSem[bi] = sem;
+  });
+  // Offset cumulatif par bloc (bloc 0 = 0, bloc 1 = sem bloc 0, etc.)
+  const blocOffset = blocs.map((_, bi) => { let off=0; for(let i=0;i<bi;i++) off+=blocMaxSem[i]; return off; });
+
+  // Build progression data cross-blocs avec semaines globales
   const progByEx = {};
   Object.entries(logs).forEach(([key, l]) => {
     const parts = key.split('|');
     const exId = parts[0], sem = parseInt(parts[1]);
     const charge = parseFloat(l.charge);
     if (!isNaN(charge) && charge > 0) {
+      const bi = exToBloc[exId] ?? 0;
+      const globalSem = sem + (blocOffset[bi] || 0);
       if (!progByEx[exId]) progByEx[exId] = {};
-      if (!progByEx[exId][sem] || charge > progByEx[exId][sem]) progByEx[exId][sem] = charge;
+      if (!progByEx[exId][globalSem] || charge > progByEx[exId][globalSem]) progByEx[exId][globalSem] = charge;
     }
   });
 
@@ -3803,7 +3823,11 @@ function renderBlocsClientProg(){
           ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
-        <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
+        ${cp.blocs.length>1?`<div style="display:flex;flex-direction:column;gap:2px;margin-left:auto;">
+          <button class="icon-btn" onclick="cpMonterBloc(${bi})" style="padding:2px 6px;font-size:13px;${bi===0?'opacity:.3;pointer-events:none;':''}">↑</button>
+          <button class="icon-btn" onclick="cpDescendreBloc(${bi})" style="padding:2px 6px;font-size:13px;${bi===cp.blocs.length-1?'opacity:.3;pointer-events:none;':''}">↓</button>
+        </div>`:''}
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
         ${cp.blocs.length>1?(bloc.id && bloc.id===cp.bloc_actif_id
           ? `<span style="font-size:11px;font-weight:700;color:${color};padding:4px 8px;background:${color}18;border-radius:var(--radius-sm);flex-shrink:0;">⭐ Actif</span>`
           : `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="cpSetBlocActif(${bi})">Définir actif</button>`):''}
@@ -3867,6 +3891,8 @@ function cpDupliquerBloc(bi){
   renderBlocsClientProg();
 }
 
+function cpMonterBloc(bi){ if(bi===0) return; const b=clientProgEnEdition.blocs; [b[bi-1],b[bi]]=[b[bi],b[bi-1]]; renderBlocsClientProg(); }
+function cpDescendreBloc(bi){ const b=clientProgEnEdition.blocs; if(bi>=b.length-1) return; [b[bi],b[bi+1]]=[b[bi+1],b[bi]]; renderBlocsClientProg(); }
 function cpAjouterBloc(){ clientProgEnEdition.blocs.push(blocVide()); renderBlocsClientProg(); }
 function cpRetirerBloc(bi){ clientProgEnEdition.blocs.splice(bi,1); renderBlocsClientProg(); }
 function cpAjouterSeance(bi){ const s=clientProgEnEdition.blocs[bi].seances; s.push({id:null,titre:'Séance '+(s.length+1),exercices:[]}); renderBlocsClientProg(); }
