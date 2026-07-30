@@ -745,6 +745,15 @@ async function chargerDonnees(){
   } catch(e) {}
 
   data = { clients, bilansCoach, bilansSupa, logs: (logsRes && logsRes.logs) || [], aValider };
+  // Persist pour stale-while-revalidate au prochain chargement
+  try {
+    localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data }));
+  } catch(e) {
+    // QuotaExceeded : réessayer sans les logs (potentiellement volumineux)
+    try {
+      localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data: { ...data, logs: data.logs.slice(0, 50) } }));
+    } catch(e2) {}
+  }
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
@@ -6870,10 +6879,31 @@ async function confirmerSauvegardeTemplatePourClient() {
 
 // ── Boot ───────────────────────────────────────────────────────────────
 (async function boot(){
-  await rafraichir();
-  renderNotifMenu();
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('shell').style.display = 'grid';
+  const cached = localStorage.getItem('at_console_cache_v2');
+  if (cached) {
+    try {
+      data = JSON.parse(cached).data;
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('shell').style.display = 'grid';
+      renderSidebar();
+      renderMain();
+      renderNotifMenu();
+    } catch(e) {}
+  }
+  // Rafraîchit en arrière-plan ; si pas de cache, attend avant d'afficher
+  try {
+    await chargerDonnees();
+    if (!cached) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('shell').style.display = 'grid';
+      renderNotifMenu();
+    }
+    renderSidebar();
+    renderMain();
+  } catch(e) {
+    if (!cached) document.getElementById('main').innerHTML =
+      `<div class="empty-panel"><strong>Erreur de chargement</strong><br>${esc(e.message)}<br><br><button class="btn primary" onclick="rafraichir()">Réessayer</button></div>`;
+  }
 })();
 </script>
 </body>
