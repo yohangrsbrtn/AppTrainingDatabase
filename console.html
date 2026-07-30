@@ -524,8 +524,8 @@ const NAV = [
   ]},
 ];
 
-let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", selected:null, progLogsId:null };
-let data = { clients:[], bilansCoach:[], logs:[], aValider:[] };
+let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", clientTab:"actif", selected:null, progLogsId:null };
+let data = { clients:[], bilansCoach:[], bilansSupa:[], logs:[], aValider:[] };
 let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
 let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
 let _ficheBilansClientId = null;
@@ -658,6 +658,8 @@ function setSort(key){
 
 function filteredSortedClients(){
   let list = data.clients.filter(c => (c.nom||'').toLowerCase().includes(state.search.toLowerCase()));
+  // Filtre par onglet statut (actif / pause / ancien)
+  list = list.filter(c => (c.statut || 'actif') === state.clientTab);
   if (state.statusFilter === 'late') list = list.filter(c => c.enRetard);
   if (state.statusFilter === 'locked') list = list.filter(c => c.verrouile);
   list = list.slice().sort((a,b) => {
@@ -732,10 +734,17 @@ async function chargerDonnees(){
   // console (indépendamment de supabase_only), donc _hasSupaProfil couvre tout le monde.
   profils.forEach(p => {
     const c = clients.find(cl => cl.id === p.client_id);
-    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; }
+    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; c.statut = p.statut || 'actif'; }
   });
 
-  data = { clients, bilansCoach, logs: (logsRes && logsRes.logs) || [], aValider };
+  // Bilans Supabase en attente de traitement par le coach (soumis par clients supabase_only)
+  let bilansSupa = [];
+  try {
+    const bsRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&coach_traite=eq.false&select=id,client_id,created_at,semaine_label&order=created_at.desc`, { headers: supaHeaders() });
+    if (bsRes.ok) bilansSupa = await bsRes.json();
+  } catch(e) {}
+
+  data = { clients, bilansCoach, bilansSupa, logs: (logsRes && logsRes.logs) || [], aValider };
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
@@ -2566,6 +2575,10 @@ async function assignerTemplateAuClient(templateId, clientId){
 
 function renderDashboard(el){
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
+  const bilansSupaATrait = (data.bilansSupa || []).map(b => {
+    const c = data.clients.find(x=>x.id===b.client_id);
+    return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id };
+  });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
 
   // Activité 7 jours : nombre de logs par jour calendaire (à partir de tms)
@@ -2583,8 +2596,14 @@ function renderDashboard(el){
     </div>
     <div class="dash-grid">
       <div class="card">
-        <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span></div>
-        ${bilansATraiter.length ? `<div class="card-list">
+        <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span>${(bilansATraiter.length+bilansSupaATrait.length)>0?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${bilansATraiter.length+bilansSupaATrait.length}</span>`:''}</div>
+        ${(bilansATraiter.length+bilansSupaATrait.length) ? `<div class="card-list">
+          ${bilansSupaATrait.map(b => `
+            <div class="card-list-row" onclick="marquerBilanSupaTraite(${b.id})">
+              <div class="mini-avatar">${initials(b.clientNom)}</div>
+              <div><div class="t">${esc(b.clientNom)}</div><div class="s">${esc(b.semaine_label||'Supabase')} · clic pour marquer traité</div></div>
+              <span class="chip ok" style="font-size:9px;">Supabase</span>
+            </div>`).join('')}
           ${bilansATraiter.map(b => `
             <div class="card-list-row" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">
               <div class="mini-avatar">${initials(b.nom)}</div>
@@ -2652,7 +2671,41 @@ async function marquerTraite(client, ts){
   }
 }
 
+async function marquerBilanSupaTraite(bilanId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data.bilansSupa = (data.bilansSupa || []).filter(b => b.id !== bilanId);
+    if (state.nav === 'dashboard') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function changerStatutClient(clientId, statut) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: clientId, statut })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const c = data.clients.find(x => x.id === clientId);
+    if (c) c.statut = statut;
+    document.querySelectorAll('.menu').forEach(m => m.classList.remove('open'));
+    renderTable();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
 function renderClientsPage(el){
+  const tabs = [
+    { id:'actif', label:'Actifs' },
+    { id:'pause', label:'En pause' },
+    { id:'ancien', label:'Anciens' },
+  ];
+  const counts = {};
+  tabs.forEach(t => { counts[t.id] = data.clients.filter(c=>(c.statut||'actif')===t.id).length; });
+
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Clients</h1></div>
@@ -2663,8 +2716,10 @@ function renderClientsPage(el){
     </div>
     <div class="table-card">
       <div class="table-toolbar">
-        <div class="title">Tous les clients</div>
-        <div class="chip-filter">
+        <div class="fiche-tabs" style="border-bottom:none;padding:0;gap:4px;">
+          ${tabs.map(t=>`<button class="fiche-tab ${state.clientTab===t.id?'active':''}" onclick="state.clientTab='${t.id}';renderClientsPage(document.getElementById('main'))">${t.label} <span style="font-size:10px;opacity:.7;">${counts[t.id]}</span></button>`).join('')}
+        </div>
+        <div class="chip-filter" style="margin-left:auto;">
           <button class="${state.statusFilter==='all'?'active':''}" onclick="setStatusFilter('all')">Tous</button>
           <button class="${state.statusFilter==='late'?'active':''}" onclick="setStatusFilter('late')">En retard</button>
           <button class="${state.statusFilter==='locked'?'active':''}" onclick="setStatusFilter('locked')">Verrouillés</button>
@@ -2712,6 +2767,10 @@ function renderTable(){
             <div class="menu-sep"></div>
             ${!c.supabaseOnlyActif ? `<button class="menu-item" onclick="event.stopPropagation();togglerSupabaseOnly('${c.id}')">${iGrid()}Passer en Supabase only</button>` : ''}
             <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!c.verrouile})">${c.verrouile?iUnlock():iLock()}${c.verrouile?'Déverrouiller':'Verrouiller'} l'accès</button>
+            <div class="menu-sep"></div>
+            ${(c.statut||'actif')!=='actif'?`<button class="menu-item" onclick="event.stopPropagation();changerStatutClient('${c.id}','actif')">✅ Marquer actif</button>`:''}
+            ${(c.statut||'actif')!=='pause'?`<button class="menu-item" onclick="event.stopPropagation();changerStatutClient('${c.id}','pause')">⏸ Mettre en pause</button>`:''}
+            ${(c.statut||'actif')!=='ancien'?`<button class="menu-item" onclick="event.stopPropagation();changerStatutClient('${c.id}','ancien')">📦 Archiver (ancien)</button>`:''}
           </div>
         </div>
       </td>
@@ -3072,14 +3131,19 @@ function renderFicheMensurationsTab(c){
     }
     return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
   }
-  if (!_ficheMensurations.length) {
-    return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune mensuration enregistrée dans Supabase.</p></div>`;
-  }
-
-  const rows = _ficheMensurations;
   const cm = (v) => v!=null ? v+' cm' : '—';
   const kg = (v) => v!=null ? v+' kg' : '—';
 
+  if (!_ficheMensurations.length) {
+    return `<div class="fiche-card">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button class="btn primary" onclick="ouvrirModalMensuration('${c.id}',null)">+ Ajouter</button>
+      </div>
+      <p style="color:var(--text-faint);">Aucune mensuration enregistrée dans Supabase.</p>
+    </div>`;
+  }
+
+  const rows = _ficheMensurations;
   const chart1 = rows.length>=2 ? _buildMensChart('fiche_c1', rows, ['poids','mesure'], ['var(--accent)','#4caf50'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
   const hasAutres = rows.some(r=>MENS_COLS.some(k=>parseFloat(r[k])>0));
   const chart2Section = hasAutres ? _renderMens2Section(rows,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2') : '';
@@ -3097,14 +3161,21 @@ function renderFicheMensurationsTab(c){
       <td>${cm(r.poitrine)}</td>
       <td>${cm(r.epaules)}</td>
       <td>${cm(r.bras)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn" style="font-size:11px;padding:3px 8px;" onclick="ouvrirModalMensuration('${c.id}',${r.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--critical);margin-left:4px;" onclick="supprimerMensuration(${r.id},'${c.id}')">×</button>
+      </td>
     </tr>`;
   }).join('');
 
   return `<div class="fiche-card">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn primary" onclick="ouvrirModalMensuration('${c.id}',null)">+ Ajouter</button>
+    </div>
     ${chart1 ? `<h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin:0 0 10px;">Poids &amp; Tour de taille</h4>${chart1}` : ''}
     ${chart2Section ? `<h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin:20px 0 10px;">Autres mensurations</h4><div id="ficheMensChart2">${chart2Section}</div>` : ''}
     <div class="table-scroll" style="margin-top:20px;"><table class="alim-table">
-      <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th></tr></thead>
+      <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th><th></th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table></div>
   </div>`;
@@ -4949,6 +5020,89 @@ async function sauverRecette() {
   } catch(e){ alert('Erreur : ' + e.message); }
 }
 
+// ── Mensurations CRUD ───────────────────────────────────────────────────
+function ouvrirModalMensuration(clientId, rowId) {
+  const row = rowId ? (_ficheMensurations||_pageMensurationsRows||[]).find(r=>r.id===rowId) || {} : {};
+  const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  const phases = ['Sèche','Prise de masse','Maintien','Recomposition'];
+  const field = (id, label, val, type='number', extra='') =>
+    `<div class="fiche-field"><label>${label}</label><input id="mm-${id}" type="${type}" value="${esc(val!=null?val:'')}" style="font-size:16px;" ${extra}></div>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:520px;width:100%;">
+      <h3 style="margin:0 0 16px;">${rowId ? 'Modifier' : 'Ajouter'} une mensuration</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        ${field('date','Date',row.date||new Date().toISOString().slice(0,10),'date')}
+        <div class="fiche-field"><label>Phase</label>
+          <select id="mm-phase" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;">
+            <option value="">—</option>
+            ${phases.map(p=>`<option value="${p}" ${row.phase===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        ${field('poids','Poids (kg)',row.poids,'number','step="0.1" min="0"')}
+        ${field('mesure','Tour de taille (cm)',row.mesure,'number','step="0.5" min="0"')}
+        ${field('fessiers','Fessiers (cm)',row.fessiers,'number','step="0.5" min="0"')}
+        ${field('cuisses','Cuisses (cm)',row.cuisses,'number','step="0.5" min="0"')}
+        ${field('mollets','Mollets (cm)',row.mollets,'number','step="0.5" min="0"')}
+        ${field('poitrine','Poitrine (cm)',row.poitrine,'number','step="0.5" min="0"')}
+        ${field('epaules','Épaules (cm)',row.epaules,'number','step="0.5" min="0"')}
+        ${field('bras','Bras (cm)',row.bras,'number','step="0.5" min="0"')}
+      </div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauvegarderMensuration('${clientId}',${rowId||'null'})">Enregistrer</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function sauvegarderMensuration(clientId, rowId) {
+  const v = id => { const el = document.getElementById('mm-'+id); return el ? el.value : null; };
+  const num = s => s !== '' && s != null ? parseFloat(s) : null;
+  const body = {
+    client_id: clientId,
+    date: v('date'),
+    phase: v('phase') || null,
+    poids: num(v('poids')), mesure: num(v('mesure')),
+    fessiers: num(v('fessiers')), cuisses: num(v('cuisses')), mollets: num(v('mollets')),
+    poitrine: num(v('poitrine')), epaules: num(v('epaules')), bras: num(v('bras')),
+  };
+  if (!body.date) { alert('La date est obligatoire.'); return; }
+  try {
+    let res;
+    if (rowId) {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?id=eq.${rowId}`,
+        { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
+    } else {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`,
+        { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) });
+    }
+    if (!res.ok) throw new Error('Supabase ' + res.status + ' — ' + await res.text().catch(()=>''));
+    document.querySelector('.modal-overlay')?.remove();
+    // Invalide le cache et re-charge
+    _ficheMensurationsClientId = null; _ficheMensurations = null;
+    _pageMensurationsRows = [];
+    if (state.nav === 'fiche-client') { const el = document.getElementById('ficheTabContent'); if (el) el.innerHTML = renderFicheMensurationsTab({id:clientId}); }
+    else if (state.nav === 'mensurations') chargerMensurationsSupabase(clientId);
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function supprimerMensuration(rowId, clientId) {
+  if (!confirm('Supprimer cette entrée ?')) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?id=eq.${rowId}`,
+      { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+    if (!res.ok) throw new Error('Supabase ' + res.status);
+    _ficheMensurationsClientId = null; _ficheMensurations = null;
+    _pageMensurationsRows = [];
+    if (state.nav === 'fiche-client') { const el = document.getElementById('ficheTabContent'); if (el) el.innerHTML = renderFicheMensurationsTab({id:clientId}); }
+    else if (state.nav === 'mensurations') chargerMensurationsSupabase(clientId);
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
 // ── Migration helpers ───────────────────────────────────────────────────
 // URL du GAS de production (indépendant du sandbox)
 const GAS_PROD_URL = 'https://script.google.com/macros/s/AKfycbwQiM6ixf-CTIWwcuNHoosFbvrDzWmC056yRUGhTaWv0Nwxbm0dLeK3d5QVgqmS7P9G7A/exec';
@@ -4994,6 +5148,7 @@ function renderMensurationsPage(el) {
           onchange="mensurationsClientId=this.value;renderMensurationsPage(document.getElementById('main'))">
           ${clientOpts}
         </select>
+        <button class="btn primary" onclick="ouvrirModalMensuration(mensurationsClientId,null)">+ Ajouter</button>
         <button class="btn" onclick="migrerMensurations(mensurationsClientId, true)">⬇ Migrer depuis GAS</button>
       </div>
       <div id="mensurationsContent" style="padding:0 20px 16px;">
@@ -5026,7 +5181,7 @@ async function chargerMensurationsSupabase(clientId) {
       ${chart1 ? `<div style="margin-bottom:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);">Poids &amp; Tour de taille</div>${chart1}` : ''}
       ${chart2Section ? `<div style="margin:20px 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);">Autres mensurations</div><div id="pageMensChart2">${chart2Section}</div>` : ''}
       <div class="table-scroll" style="margin-top:20px;"><table class="alim-table">
-        <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th></tr></thead>
+        <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th><th></th></tr></thead>
         <tbody>${rows.map(r=>`<tr>
           <td class="mono">${esc(r.date||'')}</td>
           <td>${esc(r.phase||'—')}</td>
@@ -5038,6 +5193,10 @@ async function chargerMensurationsSupabase(clientId) {
           <td>${r.poitrine!=null?r.poitrine+' cm':'—'}</td>
           <td>${r.epaules!=null?r.epaules+' cm':'—'}</td>
           <td>${r.bras!=null?r.bras+' cm':'—'}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn" style="font-size:11px;padding:3px 8px;" onclick="ouvrirModalMensuration('${esc(mensurationsClientId)}',${r.id})">Éditer</button>
+            <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--critical);margin-left:4px;" onclick="supprimerMensuration(${r.id},'${esc(mensurationsClientId)}')">×</button>
+          </td>
         </tr>`).join('')}</tbody>
       </table></div>`;
   } catch(e) {

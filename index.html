@@ -862,13 +862,31 @@ function _apresChargementHome() {
   // Pas d'appel du tout en mode simplifié (comme le GAS : chargerTop5() n'est
   // même pas invoquée), pas juste un masquage visuel.
   if (!modeSimplifieActif()) {
-    setTimeout(() => {
-      api('listerClassement').then(raw => {
-        const cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    setTimeout(async () => {
+      try {
+        let cl;
+        if (isSupabase()) {
+          const [progRes, profilRes] = await Promise.all([
+            fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=5`, { headers: supaHeaders() }),
+            fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom`, { headers: supaHeaders() }),
+          ]);
+          const progRows = progRes.ok ? await progRes.json() : [];
+          const profils = profilRes.ok ? await profilRes.json() : [];
+          const profilMap = {};
+          profils.forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+          cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
+            id: p.client_id, nom: profilMap[p.client_id],
+            xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+            titreActif: p.titre_actif || null,
+          }));
+        } else {
+          const raw = await api('listerClassement');
+          cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+        }
         S.data.classement = cl;
         const el = document.getElementById('top5Home');
         if (el) el.outerHTML = renderTop5Home(cl);
-      }).catch(() => {});
+      } catch(e) {}
     }, 0);
   }
   // Badges coach : chargés en parallèle en arrière-plan, injectés dans le DOM
@@ -1135,8 +1153,30 @@ function renderHome() {
 async function loadClassement() {
   showLoadingOverlay('Chargement…');
   try {
-    const raw = await api('listerClassement');
-    S.data.classement = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    if (isSupabase()) {
+      // Classement Supabase : uniquement les clients supabase_only
+      const [progRes, profilRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom`, { headers: supaHeaders() }),
+      ]);
+      const progRows = progRes.ok ? await progRes.json() : [];
+      const profils = profilRes.ok ? await profilRes.json() : [];
+      const profilMap = {};
+      profils.forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+      // Garde uniquement les clients supabase_only ayant une progression
+      S.data.classement = progRows
+        .filter(p => profilMap[p.client_id])
+        .map(p => ({
+          id: p.client_id,
+          nom: profilMap[p.client_id],
+          xpTotal: p.xp_total || 0,
+          niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+          titreActif: p.titre_actif || null,
+        }));
+    } else {
+      const raw = await api('listerClassement');
+      S.data.classement = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    }
     hideLoadingOverlay();
     setPage('classement');
   } catch(e) { hideLoadingOverlay(); setPage('home'); }
