@@ -6167,6 +6167,17 @@ function _renderProgGASDetail(feuilleData, supaProgs) {
       </div>`;
   }).join('');
 
+  const supaProgsOpts = (supaProgs||[]).map(p => `<option value="${p.id}">${esc(p.nom)}</option>`).join('');
+  const ajoutBlocHtml = (supaProgs||[]).length === 0 ? '' : `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0 4px;border-top:1px solid var(--hairline);margin-top:4px;">
+      <span style="font-size:11px;color:var(--text-faint);">ou ajouter comme bloc à</span>
+      <select id="migBlocProgSel" style="font-size:12px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);">${supaProgsOpts}</select>
+      <select id="migBlocTypeSel" style="font-size:12px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);">
+        ${BLOCS_TYPES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+      </select>
+      <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="migrerFeuilleCommeBloc()">+ Ajouter comme bloc</button>
+    </div>`;
+
   return `
     <div class="table-card" style="padding:16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
@@ -6174,6 +6185,7 @@ function _renderProgGASDetail(feuilleData, supaProgs) {
           <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
           <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${seances.length} séances · ${semaines.length} semaines</div>
           ${dejaMigre ? `<div style="font-size:11px;color:var(--warning,#f59e0b);margin-top:2px;">⚠ Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
+          ${ajoutBlocHtml}
         </div>
         <button class="btn primary" style="flex-shrink:0;" onclick="migrerProgrammeGAS()">⬇ Importer ce programme</button>
       </div>
@@ -6347,6 +6359,97 @@ async function migrerProgrammeGAS() {
     if (statusEl) statusEl.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur : ${esc(e.message)}</div>`;
     document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = false);
   }
+}
+
+async function migrerFeuilleCommeBloc() {
+  const progSel = document.getElementById('migBlocProgSel');
+  const typeSel = document.getElementById('migBlocTypeSel');
+  const statusEl = document.getElementById('migProgStatus');
+  if (!progSel || !migPreviewFeuilleData || !migPreviewFeuilleSelected) return;
+
+  const progId = parseInt(progSel.value);
+  const type = typeSel?.value || null;
+  const nom = migPreviewFeuilleSelected;
+  const seances = migPreviewFeuilleData.seances || [];
+  const semaines = migPreviewFeuilleData.semaines || [];
+  const totalSemaines = semaines.length || 8;
+  const semaine1 = semaines[0] || 1;
+
+  if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><div class="spin"></div> Import du bloc en cours…</div>`;
+  document.querySelectorAll('#migProgDetail .btn').forEach(b => b.disabled = true);
+
+  try {
+    // Ordre du prochain bloc
+    const blocsRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${progId}&select=ordre&order=ordre.desc&limit=1`, { headers: supaHeaders() });
+    const blocsExist = blocsRes.ok ? await blocsRes.json() : [];
+    const nextOrdre = blocsExist.length > 0 ? (blocsExist[0].ordre + 1) : 0;
+
+    // Créer le bloc
+    const bRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_programme_id: progId, ordre: nextOrdre, type: type || null, nombre_semaines: totalSemaines }) });
+    if (!bRes.ok) throw new Error('bloc ' + bRes.status);
+    const bloc = (await bRes.json())[0];
+
+    // Séances + exercices + logs
+    for (let si = 0; si < seances.length; si++) {
+      const seance = seances[si];
+      const sRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ bloc_id: bloc.id, titre: seance.nom + (seance.type ? ' — ' + seance.type : ''), ordre: si }) });
+      if (!sRes.ok) throw new Error('seance ' + sRes.status);
+      const savedSeance = (await sRes.json())[0];
+
+      try {
+        const seanceData = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: semaine1 });
+        const sd = typeof seanceData === 'string' ? JSON.parse(seanceData) : seanceData;
+        const exercices = (sd && sd.exercices) || [];
+        let savedExercices = [];
+        if (exercices.length) {
+          const exPayload = exercices.map((ex, ei) => ({
+            seance_id: savedSeance.id, nom: ex.nom||'Exercice', ordre: ei,
+            series: ex.series || null, reps: ex.repsCible || ex.reps || null,
+            repos: ex.repos || null, tempo: ex.tempo || null, rir: ex.rirCible || null,
+          }));
+          const exRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,
+            { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify(exPayload) });
+          if (exRes.ok) savedExercices = await exRes.json();
+        }
+        if (savedExercices.length && semaines.length) {
+          const semLogsData = await Promise.all(semaines.map(async sem => {
+            try {
+              const raw = await apiGasProd('chargerSeance', migPreviewClientId, { nomFeuille: nom, ligneSeance: seance.ligne, semaine: sem });
+              const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              return { sem, exercices: (d && d.exercices) || [] };
+            } catch(e) { return { sem, exercices: [] }; }
+          }));
+          const logsPayload = [];
+          semLogsData.forEach(({ sem, exercices: exsSem }) => {
+            exsSem.forEach((ex, ei) => {
+              const exId = savedExercices[ei]?.id;
+              if (!exId) return;
+              (ex.sets || []).forEach((set, si2) => {
+                if (set.charge === '' && set.reps === '' && set.rir === '') return;
+                logsPayload.push({
+                  client_programme_exercice_id: exId, semaine: sem, numero_serie: set.serie,
+                  charge: parseFloat(set.charge) || null, reps: parseInt(set.reps) || null,
+                  rir: set.rir !== '' ? (parseInt(set.rir) ?? null) : null,
+                  commentaire: si2 === 0 && ex.note ? ex.note : null,
+                });
+              });
+            });
+          });
+          if (logsPayload.length) {
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
+              { method:'POST', headers:supaHeaders({ Prefer:'return=minimal,resolution=merge-duplicates' }), body:JSON.stringify(logsPayload) });
+          }
+        }
+      } catch(e2) { /* non critique */ }
+    }
+
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Bloc ajouté (${seances.length} séances · ${semaines.length} semaines de logs).</div>`;
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur : ${esc(e.message)}</div>`;
+  }
+  document.querySelectorAll('#migProgDetail .btn').forEach(b => b.disabled = false);
 }
 
 // ── Migration Preview : Bilans ──────────────────────────────────────────
