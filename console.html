@@ -3300,6 +3300,7 @@ function renderFicheProgTab(c){
         ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
+        <button class="icon-btn del" onclick="event.stopPropagation();supprimerProgrammeClient(${p.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
       </div>`).join('')
     : `<div class="fiche-prog-empty" style="text-align:center;padding:32px;">
@@ -3490,6 +3491,31 @@ function ficheSemaineChanger(delta){
 }
 
 // ── Programmes assignés — actions ────────────────────────────────────
+async function supprimerProgrammeClient(progId, clientId){
+  if (!confirm('Supprimer ce programme et tous ses logs ?\n\nCette action est irréversible.')) return;
+  try {
+    const resArbo = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${progId}` +
+      `&select=id,client_programme_seances(id,client_programme_exercices(id))`,
+      { headers: supaHeaders() }
+    );
+    const blocs = resArbo.ok ? await resArbo.json() : [];
+    const exoIds    = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[]).map(ex=>ex.id)));
+    const seanceIds = blocs.flatMap(b=>(b.client_programme_seances||[]).map(s=>s.id));
+    const blocIds   = blocs.map(b=>b.id);
+    if (exoIds.length) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=in.(${exoIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
+    }
+    if (seanceIds.length) await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=in.(${seanceIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
+    if (blocIds.length)   await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=in.(${blocIds.join(',')})`,   { method:'DELETE', headers:supaHeaders() });
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'DELETE', headers:supaHeaders() });
+    ficheData.tous_programmes = await chargerTousProgrammes(clientId);
+    ficheData.programme = ficheData.tous_programmes.find(p=>p.actif) || null;
+    setFicheTab('programmes');
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
 async function toggleProgrammeActif(progId, isActif, clientId){
   try {
     if (!isActif) {
