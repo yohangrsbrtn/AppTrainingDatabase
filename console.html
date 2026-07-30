@@ -5343,8 +5343,25 @@ async function apiGasProd(action, clientId, params = {}) {
 }
 
 function _parseDateFr(s) {
-  const m = (s||'').match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  s = (s||'').toString().trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` : null;
+}
+
+// La date lue sur une feuille GAS historique correspond au jour où le client a
+// rempli son bilan (souvent le dimanche, mais dépend de jour_bilan) — c'est donc
+// exactement la date de fin de semaine. On en déduit un semaine_label "Du … au …"
+// cohérent avec _supaGetSemaineLabel (bilan.js), au lieu du texte "SEMAINE" brut
+// remonté par GAS pour les vieilles feuilles.
+function _semaineLabelFromSheetDate(iso, jourBilanNom) {
+  if (!iso) return null;
+  const { debut, fin } = _bilanWeekBounds(jourBilanNom, new Date(iso + 'T12:00:00'));
+  const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
+  const fmt = d => d.getDate() + ' ' + MOIS[d.getMonth()];
+  return 'Du ' + fmt(debut) + ' au ' + fmt(fin);
 }
 
 // ── Mensurations ───────────────────────────────────────────────────────
@@ -6628,7 +6645,7 @@ function _renderMigPreviewBilans() {
     const checked = migBilanSel.has(b.ligneTitre);
     return `<tr>
       <td style="width:36px;text-align:center;">
-        <input type="checkbox" ${checked ? 'checked' : ''} ${already ? 'disabled' : ''}
+        <input type="checkbox" ${checked ? 'checked' : ''}
           onchange="toggleBilanSel(${b.ligneTitre}, this.checked)">
       </td>
       <td style="font-size:12px;font-weight:600;">${esc(b.semaine || '—')}</td>
@@ -6636,7 +6653,7 @@ function _renderMigPreviewBilans() {
       <td style="font-size:12px;">${b.dejaEnvoye ? '<span style="color:var(--text-faint);">Clôturé</span>' : '<span style="color:var(--accent);">Ouvert</span>'}</td>
       <td style="font-size:12px;">
         ${already
-          ? `<span class="chip ok" style="font-size:10px;">✓ Migré</span>`
+          ? `<span class="chip ok" style="font-size:10px;" title="Recocher pour ré-importer (écrase les données existantes)">✓ Migré</span>`
           : `<span class="chip off" style="font-size:10px;">À migrer</span>`}
       </td>
     </tr>`;
@@ -6732,10 +6749,12 @@ async function migrerBilansGas(clientId) {
       const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const bilanHisto = (migPreviewData.gasBilans || []).find(b => b.ligneTitre === ligneTitre);
       const dateStr = d.dateValidation || bilanHisto?.date || null;
+      const dateIso = _parseDateFr(dateStr);
+      const jourBilanNom = migPreviewData.supaProfile?.jour_bilan || null;
       const payload = {
         client_id: clientId,
-        date_validation: _parseDateFr(dateStr) || null,
-        semaine_label: bilanHisto?.semaine || null,
+        date_validation: dateIso || null,
+        semaine_label: _semaineLabelFromSheetDate(dateIso, jourBilanNom) || bilanHisto?.semaine || null,
         jours: d.jours || [],
         repas_eval: d.repas || [],
         commentaire_alim: d.commentaireAlim || null,
