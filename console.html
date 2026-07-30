@@ -5521,8 +5521,9 @@ function renderMigrationPage(el) {
   const clientRows = data.clients.map(c => {
     const gasId = _gasId(c.id);
     const badge = gasId !== c.id ? ` <span class="chip off" style="font-size:9px;">GAS: ${gasId}</span>` : '';
+    const supaBadge = c.supabaseOnlyActif ? ` <span class="chip off" style="font-size:9px;">Supabase only</span>` : '';
     return `<tr>
-      <td>${esc(c.nom)}${badge}</td>
+      <td>${esc(c.nom)}${badge}${supaBadge}</td>
       <td class="mono" style="color:var(--text-faint);">${esc(c.id)}</td>
       <td><div id="migStatus_${esc(c.id)}"></div></td>
       <td style="display:flex;gap:6px;">
