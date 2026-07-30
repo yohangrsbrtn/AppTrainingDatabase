@@ -5252,13 +5252,17 @@ async function migrerInfosClient(clientId) {
   if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spin"></div> Lecture GAS prod (${_gasId(clientId)})…</div>`;
   try {
     const infos = await apiGasProd('chargerInfosMigrationClient', clientId);
-    if (!infos || (!infos.jourBilan && !infos.dateDebut)) {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Rien à migrer (jour bilan/date début introuvables dans GAS).</span>`;
+    if (!infos || (!infos.jourBilan && !infos.dateDebut && !infos.taille && !infos.dateNaissance && !infos.stepsCible && !infos.dateCreationCompte)) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Rien à migrer depuis GAS.</span>`;
       return;
     }
     const body = { client_id: clientId };
-    if (infos.jourBilan) body.jour_bilan = infos.jourBilan;
-    if (infos.dateDebut) body.date_debut = infos.dateDebut;
+    if (infos.jourBilan)          body.jour_bilan            = infos.jourBilan;
+    if (infos.dateDebut)          body.date_debut            = infos.dateDebut;
+    if (infos.dateCreationCompte) body.date_creation_compte  = infos.dateCreationCompte;
+    if (infos.taille)             body.taille_cm             = infos.taille;
+    if (infos.dateNaissance)      body.date_naissance        = infos.dateNaissance;
+    if (infos.stepsCible)         body.steps_cible           = infos.stepsCible;
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
@@ -5268,7 +5272,14 @@ async function migrerInfosClient(clientId) {
       const errBody = await res.text().catch(() => '');
       throw new Error('supabase_' + res.status + (errBody ? ' — ' + errBody.slice(0, 200) : ''));
     }
-    const champs = [infos.jourBilan ? 'jour du bilan' : null, infos.dateDebut ? 'date de début' : null].filter(Boolean).join(' + ');
+    const champs = [
+      infos.jourBilan          ? 'jour bilan'         : null,
+      infos.dateDebut          ? 'début coaching'     : null,
+      infos.dateCreationCompte ? 'création compte'    : null,
+      infos.taille             ? 'taille'             : null,
+      infos.dateNaissance      ? 'date naissance'     : null,
+      infos.stepsCible         ? 'pas/jour'           : null,
+    ].filter(Boolean).join(', ');
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${champs} importé(s).</span>`;
     await rafraichir();
   } catch(e) {
@@ -5294,7 +5305,7 @@ function renderMigrationPage(el) {
       <td style="display:flex;gap:6px;">
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="openMigrationPreview('${esc(c.id)}')">Prévisualiser</button>
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerMensurations('${esc(c.id)}', false)">⬇ Migrer</button>
-        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerInfosClient('${esc(c.id)}')" title="Migre le jour du bilan et la date de début depuis GAS">⬇ Jour bilan / Début</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="migrerInfosClient('${esc(c.id)}')" title="Migre depuis Dashboard : taille (D5), naissance (D4), début coaching (D10), jour bilan (D11), pas/jour (H11) — et date création compte depuis feuille Clients col D">⬇ Profil complet</button>
       </td>
     </tr>`;
   }).join('');
