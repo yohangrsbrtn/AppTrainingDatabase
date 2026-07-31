@@ -6279,9 +6279,10 @@ function _renderDieteGASDetail(detail, supaClientDietes) {
   return `
     <div class="table-card" style="padding:16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;">
-        <div>
-          <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
-          <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${repas.length} repas · ${Math.round(kcalTotal)} kcal · P ${Math.round(protTotal)}g · G ${Math.round(gluTotal)}g · L ${Math.round(lipTotal)}g</div>
+        <div style="flex:1;min-width:220px;">
+          <label style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:4px;">Nom dans Supabase</label>
+          <input id="migDieteNomInput" type="text" value="${esc(nom)}" style="font-size:14px;font-weight:700;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);width:100%;max-width:320px;margin-bottom:6px;">
+          <div style="font-size:11px;color:var(--text-faint);">${repas.length} repas · ${Math.round(kcalTotal)} kcal · P ${Math.round(protTotal)}g · G ${Math.round(gluTotal)}g · L ${Math.round(lipTotal)}g</div>
         </div>
         ${dejaMigree
           ? `<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;">Déjà une diète "${esc(nom)}" dans Supabase</span>`
@@ -6321,7 +6322,7 @@ async function migrerDieteGAS() {
   if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><div class="spin"></div> Import en cours…</div>`;
   document.querySelectorAll('#migDieteDetail .btn.primary').forEach(b => b.disabled = true);
   try {
-    const nom = migPreviewDieteSel.nom;
+    const nom = document.getElementById('migDieteNomInput')?.value.trim() || migPreviewDieteSel.nom;
     const repasGAS = migPreviewDieteDetail.repas || [];
 
     // 1. Réutiliser ou créer le template diète
@@ -6408,6 +6409,7 @@ async function migrerDieteGAS() {
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=created_at.desc`, { headers: supaHeaders() });
     migPreviewData.supaClientDietes = r2.ok ? await r2.json() : migPreviewData.supaClientDietes;
 
+    migPreviewDieteSel.nom = nom; // garde le nom personnalisé affiché après import
     if (statusEl) statusEl.innerHTML = `<div style="color:var(--success);font-size:12px;padding:6px 0;">✓ Diète importée et assignée au client.</div>`;
     document.querySelectorAll('#migDieteDetail .btn.primary').forEach(b => b.disabled = false);
     const c = document.getElementById('migDieteDetail');
@@ -6510,16 +6512,27 @@ function _renderProgGASDetail(feuilleData, supaProgs) {
       <select id="migBlocTypeSel" style="font-size:12px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);">
         ${BLOCS_TYPES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
       </select>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" id="migBlocActifCb" checked> Définir actif
+      </label>
       <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="migrerFeuilleCommeBloc()">+ Ajouter comme bloc</button>
     </div>`;
 
   return `
     <div class="table-card" style="padding:16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
-        <div>
-          <div style="font-weight:700;font-size:15px;">${esc(nom)}</div>
-          <div style="font-size:11px;color:var(--text-faint);margin-top:2px;">${seances.length} séances · ${semaines.length} semaines</div>
-          ${dejaMigre ? `<div style="font-size:11px;color:var(--warning,#f59e0b);margin-top:2px;">⚠ Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
+        <div style="flex:1;min-width:220px;">
+          <label style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:4px;">Nom dans Supabase</label>
+          <input id="migProgNomInput" type="text" value="${esc(nom)}" style="font-size:14px;font-weight:700;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);width:100%;max-width:320px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="font-size:11px;color:var(--text-faint);">${seances.length} séances · ${semaines.length} semaines</div>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;">Bloc :
+              <select id="migProgBlocTypeSel" style="font-size:12px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:3px 6px;color:var(--text);">
+                ${BLOCS_TYPES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          ${dejaMigre ? `<div style="font-size:11px;color:var(--warning,#f59e0b);margin-top:6px;">⚠ Un programme "${esc(nom)}" existe déjà dans Supabase</div>` : ''}
           ${ajoutBlocHtml}
         </div>
         <button class="btn primary" style="flex-shrink:0;" onclick="migrerProgrammeGAS()">⬇ Importer ce programme</button>
@@ -6602,7 +6615,9 @@ async function migrerProgrammeGAS() {
   if (statusEl) statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><div class="spin"></div> Chargement des exercices et import…</div>`;
   document.querySelectorAll('#migProgDetail .btn.primary').forEach(b => b.disabled = true);
   try {
-    const nom = migPreviewFeuilleSelected;
+    const nom = migPreviewFeuilleSelected; // nom de la feuille GAS — sert aux appels apiGasProd ci-dessous, ne pas renommer
+    const nomCible = document.getElementById('migProgNomInput')?.value.trim() || nom; // nom voulu côté Supabase
+    const blocType = document.getElementById('migProgBlocTypeSel')?.value || null;
     const seances = migPreviewFeuilleData.seances || [];
     const semaines = migPreviewFeuilleData.semaines || [];
     const totalSemaines = semaines.length || 8;
@@ -6612,15 +6627,17 @@ async function migrerProgrammeGAS() {
     await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(migPreviewClientId)}`,
       { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
     const cpRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_id: migPreviewClientId, nom, actif: true }) });
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_id: migPreviewClientId, nom: nomCible, actif: true }) });
     if (!cpRes.ok) throw new Error('programme ' + cpRes.status);
     const cp = (await cpRes.json())[0];
 
-    // 2. Créer un bloc unique
+    // 2. Créer un bloc unique, typé, et le définir comme bloc actif
     const bRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_programme_id: cp.id, ordre: 0, nombre_semaines: totalSemaines }) });
+      { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_programme_id: cp.id, ordre: 0, type: blocType || null, nombre_semaines: totalSemaines }) });
     if (!bRes.ok) throw new Error('bloc ' + bRes.status);
     const bloc = (await bRes.json())[0];
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,
+      { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ bloc_actif_id: bloc.id }) });
 
     // 3. Pour chaque séance, créer la séance + charger les exercices depuis sem1
     for (let si = 0; si < seances.length; si++) {
@@ -6704,6 +6721,7 @@ async function migrerFeuilleCommeBloc() {
 
   const progId = parseInt(progSel.value);
   const type = typeSel?.value || null;
+  const definirActif = document.getElementById('migBlocActifCb')?.checked;
   const nom = migPreviewFeuilleSelected;
   const seances = migPreviewFeuilleData.seances || [];
   const semaines = migPreviewFeuilleData.semaines || [];
@@ -6724,6 +6742,10 @@ async function migrerFeuilleCommeBloc() {
       { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ client_programme_id: progId, ordre: nextOrdre, type: type || null, nombre_semaines: totalSemaines }) });
     if (!bRes.ok) throw new Error('bloc ' + bRes.status);
     const bloc = (await bRes.json())[0];
+    if (definirActif) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`,
+        { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ bloc_actif_id: bloc.id }) });
+    }
 
     // Séances + exercices + logs
     for (let si = 0; si < seances.length; si++) {
