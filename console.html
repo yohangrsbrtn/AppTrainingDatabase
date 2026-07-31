@@ -608,7 +608,11 @@ async function supprimerSuiviApi(id){
 }
 
 async function chargerTousProgrammes(clientId){
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}` +
+    `&select=*,client_programme_blocs(id,type,nombre_semaines,ordre)&client_programme_blocs.order=ordre.asc&order=created_at.desc`,
+    { headers: supaHeaders() }
+  );
   if (!res.ok) return [];
   return res.json();
 }
@@ -3404,7 +3408,16 @@ function renderFicheProgTab(c){
         <div style="flex:1;min-width:0;">
           <div class="p-nom">${esc(p.nom)}</div>
           <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
-          ${p.objectif ? `<div class="p-meta" style="color:var(--text-muted);font-style:italic;margin-top:2px;">🎯 ${esc(p.objectif)}</div>` : ''}
+          ${(p.client_programme_blocs && p.client_programme_blocs.length) ? `
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;">
+            ${p.client_programme_blocs.map(b => {
+              const color = BLOC_COLOR[b.type] || '#8892a4';
+              const label = BLOC_LABELS_COACH[b.type] || 'Générique';
+              const actif = b.id === p.bloc_actif_id;
+              return `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;${actif?`background:${color};color:#fff;`:`background:${color}18;color:${color};border:1px solid ${color}40;`}">${actif?'⭐ ':''}${esc(label)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem':''}</span>`;
+            }).join('')}
+          </div>` : ''}
+          ${p.objectif ? `<div class="p-meta" style="color:var(--text-muted);font-style:italic;margin-top:5px;">🎯 ${esc(p.objectif)}</div>` : ''}
         </div>
         ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
