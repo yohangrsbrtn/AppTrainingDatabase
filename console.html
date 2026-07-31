@@ -7616,6 +7616,7 @@ async function migrerBilansGas(clientId) {
         envoye_coach: true,
         coach_traite: !!(bilanHisto?.dejaEnvoye),
         gas_ligne_titre: ligneTitre,
+        archive: false,
       };
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/bilans?on_conflict=client_id,gas_ligne_titre`,
