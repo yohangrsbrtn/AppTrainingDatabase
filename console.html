@@ -535,6 +535,9 @@ let data = { clients:[], bilansCoach:[], bilansSupa:[], logs:[], aValider:[] };
 let _dataRefreshing = false;
 let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
 let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
+let _ficheBilansVoirCorbeille = false;
+let _ficheBilansCorbeille = null; // null=non chargé — bilans archivés (archive=true) du client
+let _ficheBilansCorbeilleSel = new Set();
 let _ficheBilansClientId = null;
 let _ficheBilans = null; // null=non chargé, []=vide, [...]
 let _ficheBilansLoading = false;
@@ -692,6 +695,71 @@ function _renderMensurationSousPhoto(m){
   if (m.mesure != null) parts.push(`Taille ${m.mesure}cm`);
   Object.keys(_MENS_LABELS_COURT).forEach(k => { if (m[k] != null) parts.push(`${_MENS_LABELS_COURT[k]} ${m[k]}`); });
   return parts.length ? `<div style="font-size:9px;color:var(--text-faint);text-align:center;margin-top:4px;line-height:1.3;">${parts.join(' · ')}</div>` : '';
+}
+
+// ── Lightbox photo — carrousel plein écran (overlay, pas de nouvel onglet) ──
+// Usage : ouvrirPhotoLightbox(tableauDePhotos, indexDeDepart) où chaque photo a
+// au moins { url } (un champ date_validation ou created_at optionnel sert de légende).
+let _photoLightbox = null; // { photos, index } ou null si fermé
+
+function ouvrirPhotoLightbox(photos, startIndex){
+  _photoLightbox = { photos: photos || [], index: startIndex || 0 };
+  document.addEventListener('keydown', _lightboxKeyHandler);
+  _renderLightboxDom();
+}
+function fermerPhotoLightbox(){
+  _photoLightbox = null;
+  document.removeEventListener('keydown', _lightboxKeyHandler);
+  _renderLightboxDom();
+}
+function lightboxNav(delta){
+  if (!_photoLightbox) return;
+  const ni = _photoLightbox.index + delta;
+  if (ni < 0 || ni >= _photoLightbox.photos.length) return;
+  _photoLightbox.index = ni;
+  _renderLightboxDom();
+}
+function lightboxGoto(i){
+  if (!_photoLightbox) return;
+  _photoLightbox.index = i;
+  _renderLightboxDom();
+}
+function _lightboxKeyHandler(e){
+  if (e.key === 'Escape') fermerPhotoLightbox();
+  else if (e.key === 'ArrowLeft') lightboxNav(-1);
+  else if (e.key === 'ArrowRight') lightboxNav(1);
+}
+function _lightboxDateLabel(p){
+  const iso = (p.bilans && p.bilans.date_validation) || p.date_validation || p.created_at;
+  if (!iso) return '';
+  return iso.slice(0,10).split('-').reverse().join('/');
+}
+function _renderLightboxDom(){
+  const existing = document.getElementById('photoLightboxOverlay');
+  if (!_photoLightbox) { if (existing) existing.remove(); return; }
+  const { photos, index } = _photoLightbox;
+  const label = _lightboxDateLabel(photos[index] || {});
+  const html = `<div id="photoLightboxOverlay" style="position:fixed;inset:0;background:rgba(5,6,10,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;" onclick="if(event.target===this)fermerPhotoLightbox()">
+    <button onclick="fermerPhotoLightbox()" title="Fermer" style="position:absolute;top:16px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:16px;cursor:pointer;">✕</button>
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:960px;padding:0 16px;">
+      <button onclick="event.stopPropagation();lightboxNav(-1)" ${index<=0?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index<=0?'.2':'.8'};">‹</button>
+      <div style="display:flex;align-items:center;justify-content:center;gap:14px;overflow:hidden;flex:1;min-width:0;">
+        ${photos.map((p,i) => {
+          const dist = i - index;
+          if (Math.abs(dist) > 2) return '';
+          const isCur = dist === 0;
+          const scale = isCur ? 1 : (Math.abs(dist)===1 ? 0.7 : 0.5);
+          const opac = isCur ? 1 : (Math.abs(dist)===1 ? 0.4 : 0.18);
+          return `<img src="${esc(p.url)}" onclick="event.stopPropagation();lightboxGoto(${i})"
+            style="max-height:${isCur?'70vh':'46vh'};aspect-ratio:9/16;object-fit:cover;border-radius:12px;cursor:pointer;transform:scale(${scale});opacity:${opac};transition:transform .25s ease,opacity .25s ease;flex-shrink:0;box-shadow:${isCur?'0 12px 40px rgba(0,0,0,.6)':'none'};">`;
+        }).join('')}
+      </div>
+      <button onclick="event.stopPropagation();lightboxNav(1)" ${index>=photos.length-1?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index>=photos.length-1?'.2':'.8'};">›</button>
+    </div>
+    ${label ? `<div style="color:#fff;font-size:13px;margin-top:18px;opacity:.75;">${esc(label)} · ${index+1}/${photos.length}</div>` : `<div style="color:#fff;font-size:13px;margin-top:18px;opacity:.75;">${index+1}/${photos.length}</div>`}
+  </div>`;
+  if (existing) existing.outerHTML = html;
+  else document.body.insertAdjacentHTML('beforeend', html);
 }
 
 async function chargerTousProgrammes(clientId){
@@ -1402,10 +1470,10 @@ function renderBilanDetailPage(el) {
           ${bilanDetailState.photos === null ? `<div style="color:var(--text-faint);font-size:12px;">Chargement…</div>`
             : bilanDetailState.photos.length === 0 ? `<div style="color:var(--text-faint);font-size:12px;">Aucune photo.</div>`
             : `<div style="display:flex;flex-wrap:wrap;gap:14px;">
-                ${bilanDetailState.photos.map(p => `
+                ${bilanDetailState.photos.map((p, idx) => `
                   <div style="width:100px;">
                     <div style="position:relative;width:100px;aspect-ratio:9/16;">
-                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="window.open('${esc(p.url)}','_blank')">
+                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(bilanDetailState.photos,${idx})">
                       <button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>
                     </div>
                     ${_renderMensurationSousPhoto(mProche)}
@@ -3232,6 +3300,9 @@ function renderFicheBilansTab(c){
     _ficheBilans = null;
     _ficheBilansLoading = false;
     _ficheBilansSel = new Set();
+    _ficheBilansVoirCorbeille = false;
+    _ficheBilansCorbeille = null;
+    _ficheBilansCorbeilleSel = new Set();
   }
   if (_ficheBilanPhotosClientId !== c.id) {
     _ficheBilanPhotosClientId = c.id;
@@ -3248,10 +3319,11 @@ function renderFicheBilansTab(c){
       })
       .catch(() => { _ficheBilanPhotosGallery = []; });
   }
+  if (_ficheBilansVoirCorbeille) return _renderFicheBilansCorbeille(c);
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
       _ficheBilansLoading = true;
-      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&order=date_validation.desc`, { headers: supaHeaders() })
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=date_validation.desc`, { headers: supaHeaders() })
         .then(r => r.json())
         .then(rows => {
           _ficheBilans = Array.isArray(rows) ? rows : [];
@@ -3263,8 +3335,9 @@ function renderFicheBilansTab(c){
     }
     return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
   }
+  const corbeilleLinkHtml = `<div style="margin-bottom:10px;"><button class="btn" style="font-size:11px;padding:4px 10px;" onclick="_ficheBilansVoirCorbeille=true;setFicheTab('bilans')">🗑 Voir la corbeille</button></div>`;
   if (_ficheBilans.length === 0) {
-    return `${_renderFicheBilanPhotosGallery(c)}<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
+    return `${_renderFicheBilanPhotosGallery(c)}${corbeilleLinkHtml}<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
   const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
   const selCount = _ficheBilansSel.size;
@@ -3284,7 +3357,7 @@ function renderFicheBilansTab(c){
       <td>${chip}</td>
     </tr>`;
   }).join('');
-  return `${_renderFicheBilanPhotosGallery(c)}<div class="fiche-card" style="overflow-x:auto;">
+  return `${_renderFicheBilanPhotosGallery(c)}${corbeilleLinkHtml}<div class="fiche-card" style="overflow-x:auto;">
     <div class="table-toolbar" style="padding:10px 8px;">
       <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
         <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanSel(this.checked)">
@@ -3296,7 +3369,7 @@ function renderFicheBilansTab(c){
       </button>
       <button class="btn" style="font-size:12px;color:var(--critical);" ${selCount === 0 ? 'disabled' : ''}
         onclick="supprimerFicheBilansSel('${esc(c.id)}')">
-        🗑 Supprimer (${selCount})
+        🗑 Mettre à la corbeille (${selCount})
       </button>
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -3308,6 +3381,113 @@ function renderFicheBilansTab(c){
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+function _renderFicheBilansCorbeille(c){
+  if (_ficheBilansCorbeille === null) {
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.true&order=date_validation.desc`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        _ficheBilansCorbeille = Array.isArray(rows) ? rows : [];
+        const el = document.getElementById('ficheTabContent');
+        if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+      })
+      .catch(() => { _ficheBilansCorbeille = []; });
+    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  }
+  const backBtn = `<button class="btn" style="font-size:11px;padding:4px 10px;margin-bottom:10px;" onclick="_ficheBilansVoirCorbeille=false;setFicheTab('bilans')">← Retour aux bilans</button>`;
+  if (!_ficheBilansCorbeille.length) {
+    return `${backBtn}<div class="fiche-card"><p style="color:var(--text-faint);">Corbeille vide.</p></div>`;
+  }
+  const allSelected = _ficheBilansCorbeille.every(b => _ficheBilansCorbeilleSel.has(b.id));
+  const selCount = _ficheBilansCorbeilleSel.size;
+  const rows = _ficheBilansCorbeille.map(b => {
+    const dateRaw = b.date_validation || '';
+    const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
+    const checked = _ficheBilansCorbeilleSel.has(b.id);
+    return `<tr>
+      <td style="width:32px;text-align:center;">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanCorbeilleSel(${b.id}, this.checked)">
+      </td>
+      <td>${dateFr}</td>
+    </tr>`;
+  }).join('');
+  return `${backBtn}<div class="fiche-card" style="overflow-x:auto;">
+    <div class="table-toolbar" style="padding:10px 8px;">
+      <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanCorbeilleSel(this.checked)">
+        Tout sélectionner
+      </label>
+      <button class="btn" style="font-size:12px;margin-left:auto;" ${selCount === 0 ? 'disabled' : ''}
+        onclick="restaurerFicheBilansSel('${esc(c.id)}')">
+        ↩ Restaurer (${selCount})
+      </button>
+      <button class="btn" style="font-size:12px;color:var(--critical);" ${selCount === 0 ? 'disabled' : ''}
+        onclick="supprimerDefinitivementFicheBilansSel('${esc(c.id)}')">
+        🗑 Supprimer définitivement (${selCount})
+      </button>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
+        <th></th>
+        <th style="text-align:left;padding:6px 8px;">Date</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function toggleFicheBilanCorbeilleSel(id, checked) {
+  if (checked) _ficheBilansCorbeilleSel.add(id);
+  else _ficheBilansCorbeilleSel.delete(id);
+  const el = document.getElementById('ficheTabContent');
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilansClientId);
+  if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+}
+
+function toggleAllFicheBilanCorbeilleSel(checked) {
+  _ficheBilansCorbeilleSel = checked ? new Set((_ficheBilansCorbeille||[]).map(b => b.id)) : new Set();
+  const el = document.getElementById('ficheTabContent');
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilansClientId);
+  if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+}
+
+async function restaurerFicheBilansSel(clientId) {
+  const ids = [..._ficheBilansCorbeilleSel];
+  if (!ids.length) return;
+  const el = document.getElementById('ficheTabContent');
+  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Restauration…</div>`;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ archive: false }) }
+    );
+    if (!res.ok) { const t = await res.text(); alert(`Erreur : ${res.status} — ${t}`); }
+  } catch(e) { alert(`Erreur : ${e.message}`); }
+  _ficheBilansCorbeilleSel = new Set();
+  _ficheBilansCorbeille = null;
+  _ficheBilans = null;
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  if (el) el.innerHTML = renderFicheBilansTab(c);
+}
+
+async function supprimerDefinitivementFicheBilansSel(clientId) {
+  const ids = [..._ficheBilansCorbeilleSel];
+  if (!ids.length) return;
+  if (!confirm(`Supprimer définitivement ${ids.length} bilan(s) ? Cette action est IRRÉVERSIBLE.`)) return;
+  const el = document.getElementById('ficheTabContent');
+  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Suppression…</div>`;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
+      { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) }
+    );
+    if (!res.ok) { const t = await res.text(); alert(`Erreur suppression : ${res.status} — ${t}`); }
+  } catch(e) { alert(`Erreur suppression : ${e.message}`); }
+  _ficheBilansCorbeilleSel = new Set();
+  _ficheBilansCorbeille = null;
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  if (el) el.innerHTML = renderFicheBilansTab(c);
 }
 
 // Galerie de toutes les photos du client, toutes bilans confondus — clique sur
@@ -3328,7 +3508,7 @@ function _renderFicheBilanPhotosGallery(c){
       <div style="display:flex;gap:12px;">
         ${sel.map(id => { const p = findPhoto(id); if (!p) return ''; return `
           <div style="flex:1;text-align:center;min-width:0;max-width:280px;">
-            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
+            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,_ficheBilanPhotosGallery.findIndex(x=>x.id===${p.id}))">
             <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)}</div>
           </div>`; }).join('')}
       </div>
@@ -3380,18 +3560,19 @@ function toggleAllFicheBilanSel(checked) {
 async function supprimerFicheBilansSel(clientId) {
   const ids = [..._ficheBilansSel];
   if (!ids.length) return;
-  if (!confirm(`Supprimer ${ids.length} bilan(s) ? Cette action est irréversible.`)) return;
+  if (!confirm(`Mettre ${ids.length} bilan(s) à la corbeille ? Tu pourras les restaurer depuis la corbeille.`)) return;
   const el = document.getElementById('ficheTabContent');
-  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Suppression…</div>`;
+  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Déplacement vers la corbeille…</div>`;
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
-      { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) }
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ archive: true }) }
     );
-    if (!res.ok) { const t = await res.text(); alert(`Erreur suppression : ${res.status} — ${t}`); }
-  } catch(e) { alert(`Erreur suppression : ${e.message}`); }
+    if (!res.ok) { const t = await res.text(); alert(`Erreur : ${res.status} — ${t}`); }
+  } catch(e) { alert(`Erreur : ${e.message}`); }
   _ficheBilansSel = new Set();
   _ficheBilans = null;
+  _ficheBilansCorbeille = null;
   const c = (data.clients||[]).find(cl => cl.id === clientId);
   if (el) el.innerHTML = renderFicheBilansTab(c);
 }
