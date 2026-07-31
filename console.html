@@ -610,7 +610,7 @@ async function supprimerSuiviApi(id){
 async function chargerTousProgrammes(clientId){
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}` +
-    `&select=*,client_programme_blocs(id,type,nombre_semaines,ordre)&client_programme_blocs.order=ordre.asc&order=created_at.desc`,
+    `&select=*,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines,ordre)&client_programme_blocs.order=ordre.asc&order=created_at.desc`,
     { headers: supaHeaders() }
   );
   if (!res.ok) return [];
