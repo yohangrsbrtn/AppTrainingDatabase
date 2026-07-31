@@ -98,8 +98,54 @@ function renderRoadmapPage() {
       ${enCoursHtml}
       ${avenir.length ? `<div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">À venir</div>${avenir.map(p=>listItem(p,'avenir')).join('')}` : ''}
       ${passees.length ? `<div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin:${avenir.length?'20':'0'}px 0 4px;">Phases passées</div>${passees.slice().reverse().map(p=>listItem(p,'passee')).join('')}` : ''}
+      ${_rmCalendrierHtml(phases)}
     </div>
     ${renderNavBar('roadmap')}
+  </div>`;
+}
+
+// Calendrier mensuel : un bloc par mois couvert par les phases (déborde sur le mois
+// suivant → bloc supplémentaire à côté), chaque jour coloré selon la phase qui le couvre.
+const RM_JOURS_SEMAINE = ['L','M','M','J','V','S','D'];
+function _rmCalendarMonths(phasesAvecDates){
+  const min = phasesAvecDates.reduce((a,p)=> p.date_debut<a?p.date_debut:a, phasesAvecDates[0].date_debut);
+  const max = phasesAvecDates.reduce((a,p)=> p.date_fin>a?p.date_fin:a, phasesAvecDates[0].date_fin);
+  const [y0,m0] = min.split('-').map(Number);
+  const [y1,m1] = max.split('-').map(Number);
+  const months = [];
+  let y=y0, m=m0;
+  while (y<y1 || (y===y1 && m<=m1)) { months.push([y,m]); m++; if (m>12){ m=1; y++; } }
+  return months;
+}
+function _rmCalendrierHtml(phases){
+  const withDates = phases.filter(p => p.date_debut && p.date_fin);
+  if (!withDates.length) return '';
+  const months = _rmCalendarMonths(withDates);
+  const todayStr = new Date().toISOString().slice(0,10);
+  const moisNoms = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const monthsHtml = months.map(([y,m]) => {
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const firstWeekday = (new Date(y, m-1, 1).getDay() + 6) % 7; // lundi=0
+    const cells = [];
+    for (let i=0;i<firstWeekday;i++) cells.push('<div></div>');
+    for (let d=1; d<=daysInMonth; d++) {
+      const dateStr = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const phase = withDates.find(p => p.date_debut<=dateStr && dateStr<=p.date_fin);
+      const t = phase ? _rmType(phase.type) : null;
+      const isToday = dateStr===todayStr;
+      cells.push(`<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:11px;${t?`background:${t.color}26;color:${t.color};font-weight:700;`:'color:#8892a4;'}${isToday?`box-shadow:inset 0 0 0 2px ${t?t.color:'#3ecf8e'};`:''}">${d}</div>`);
+    }
+    return `<div style="flex:1;min-width:150px;">
+      <div style="font-size:12px;font-weight:700;color:#e8eaf0;margin-bottom:8px;text-align:center;">${moisNoms[m-1]} ${y}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;">
+        ${RM_JOURS_SEMAINE.map(j=>`<div style="text-align:center;font-size:9px;color:#8892a4;">${j}</div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">${cells.join('')}</div>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:20px;">
+    <div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Calendrier</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;">${monthsHtml}</div>
   </div>`;
 }
 
