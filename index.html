@@ -1525,6 +1525,18 @@ function ouvrirSettings(tab) {
           <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${modeSimplifieActif() ? '#fff' : '#555e7a'};transform:${modeSimplifieActif() ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
         </div>
       </div>
+      ${localStorage.getItem('at_auth_mode') === 'supabase' ? `
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔔 Notifications</div>
+        <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Reçois une alerte quand ton coach t'envoie un message.</div>
+        <button class="btn-primary" id="btnActiverPushClient" onclick="activerNotifications()" style="width:100%;padding:10px;font-size:13px;">Activer les notifications</button>
+        <div id="pushStatusClient" style="font-size:12px;text-align:center;margin-top:6px;min-height:14px;color:#555e7a;"></div>
+      </div>
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔄 Mise à jour</div>
+        <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
+        <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
+      </div>` : ''}
     </div>
     <div style="display:flex;gap:8px;padding:14px 20px 0;flex-shrink:0;">
       ${tabBtn('guide', 'Fonctionnement', _settingsTab !== 'bug')}
@@ -1539,6 +1551,7 @@ function ouvrirSettings(tab) {
   </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };
   document.body.appendChild(el);
+  setTimeout(_majStatutPushClient, 0);
 }
 
 function switchSettingsTab(tab) { _settingsTab = tab; ouvrirSettings(); }
