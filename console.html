@@ -788,7 +788,24 @@ async function rafraichir(){
 }
 
 // ── Rendu principal ────────────────────────────────────────────────────
+// Mémorise la page courante pour la restaurer après un refresh (F5) — ne
+// couvre pas les sous-pages d'édition/détail transitoires (bilan-detail,
+// éditeurs, prog-logs, migration-preview) : celles-ci nécessitent un état
+// en mémoire trop riche (édition en cours, listes de nav…) pour être
+// reconstruites fidèlement, donc on ne les persiste pas — le refresh
+// retombe alors sur la dernière page "stable" mémorisée.
+function _saveNavState() {
+  try {
+    const payload = { nav: state.nav };
+    if (state.nav === 'fiche-client') payload.selected = state.selected;
+    if (state.nav === 'mensurations') payload.clientId = mensurationsClientId;
+    localStorage.setItem('at_console_lastnav_v1', JSON.stringify(payload));
+  } catch(e) {}
+}
+const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration']);
+
 function renderMain(){
+  if (NAV_RESTORE_SIMPLE.has(state.nav) || state.nav === 'fiche-client' || state.nav === 'mensurations') _saveNavState();
   const el = document.getElementById('main');
   if (state.nav === 'dashboard') { renderDashboard(el); return; }
   if (state.nav === 'clients') { renderClientsPage(el); return; }
@@ -7040,13 +7057,25 @@ function _showShell() {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('shell').style.display   = 'grid';
 }
+// Restaure la page mémorisée par _saveNavState au dernier refresh. Renvoie
+// true si elle a déjà déclenché son propre rendu (fiche-client passe par
+// openPanel, qui fait renderSidebar+renderMain + charge les données) — dans
+// ce cas l'appelant ne doit pas re-render par-dessus.
+function _restoreNavState() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('at_console_lastnav_v1') || 'null'); } catch(e) {}
+  if (!saved || !saved.nav) return false;
+  if (saved.nav === 'fiche-client' && saved.selected) { openPanel(saved.selected); return true; }
+  if (saved.nav === 'mensurations' && saved.clientId) { mensurationsClientId = saved.clientId; state.nav = 'mensurations'; return false; }
+  if (NAV_RESTORE_SIMPLE.has(saved.nav)) { state.nav = saved.nav; return false; }
+  return false;
+}
 (async function boot(){
   const cached = localStorage.getItem('at_console_cache_v2');
   if (cached) {
     try { data = JSON.parse(cached).data; } catch(e) {}
     _showShell();
-    renderSidebar();
-    renderMain();
+    if (!_restoreNavState()) { renderSidebar(); renderMain(); }
     renderNotifMenu();
     // Mise à jour silencieuse en fond — ne bloque jamais l'UI
     _dataRefreshing = true; renderSidebar();
@@ -7070,8 +7099,7 @@ function _showShell() {
     }
   }
   _showShell();
-  renderSidebar();
-  renderMain();
+  if (!_restoreNavState()) { renderSidebar(); renderMain(); }
   renderNotifMenu();
 })();
 </script>
