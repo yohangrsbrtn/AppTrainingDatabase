@@ -538,6 +538,9 @@ let _ficheBilansClientId = null;
 let _ficheBilans = null; // null=non chargé, []=vide, [...]
 let _ficheBilansLoading = false;
 let _ficheBilansSel = new Set(); // ids bilans sélectionnés (fiche client → onglet Bilans)
+let _ficheBilanPhotosClientId = null;
+let _ficheBilanPhotosGallery = null; // null=non chargé — toutes les photos de tous les bilans du client, avec bilans(date_validation)
+let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2)
 let _bilanNavList = null;   // liste Supabase bilans pour nav prev/next
 let _bilanNavIdx  = -1;
 let _bilanNavSource = null; // 'fiche' | 'bilans'
@@ -631,6 +634,63 @@ async function sauverRoadmapApi(clientId, id, phase){
 async function supprimerRoadmapApi(id){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
+// ── Photos bilan (bilan_photos + Supabase Storage bucket "bilans-photos") ──
+async function chargerBilanPhotos(bilanId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?bilan_id=eq.${bilanId}&order=created_at.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function uploaderBilanPhoto(bilanId, clientId, file){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (!res.ok) throw new Error('storage_' + res.status + ' — ' + await res.text().catch(()=>''));
+  const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+  const insRes = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ bilan_id: bilanId, client_id: clientId, url })
+  });
+  if (!insRes.ok) throw new Error('supabase_' + insRes.status);
+  return (await insRes.json())[0];
+}
+async function supprimerBilanPhotoApi(photoId, url){
+  const marker = '/object/public/bilans-photos/';
+  const idx = url.indexOf(marker);
+  if (idx >= 0) {
+    const path = url.slice(idx + marker.length);
+    await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, { method:'DELETE', headers: supaHeaders() }).catch(()=>{});
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?id=eq.${photoId}`, { method:'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
+// Trouve l'entrée mensurations la plus proche dans le temps d'une date donnée —
+// sert à afficher poids/tour de taille/mensurations sous une photo de bilan.
+function _mensurationLaPlusProche(dateIso, mensurations){
+  if (!dateIso || !mensurations || !mensurations.length) return null;
+  const target = new Date(dateIso).getTime();
+  let best = null, bestDiff = Infinity;
+  mensurations.forEach(m => {
+    if (!m.date) return;
+    const diff = Math.abs(new Date(m.date).getTime() - target);
+    if (diff < bestDiff) { bestDiff = diff; best = m; }
+  });
+  return best;
+}
+const _MENS_LABELS_COURT = { fessiers:'Fess.', cuisses:'Cuis.', mollets:'Moll.', poitrine:'Poit.', epaules:'Ép.', bras:'Bras' };
+function _renderMensurationSousPhoto(m){
+  if (!m) return '';
+  const parts = [];
+  if (m.poids != null) parts.push(`${m.poids}kg`);
+  if (m.mesure != null) parts.push(`Taille ${m.mesure}cm`);
+  Object.keys(_MENS_LABELS_COURT).forEach(k => { if (m[k] != null) parts.push(`${_MENS_LABELS_COURT[k]} ${m[k]}`); });
+  return parts.length ? `<div style="font-size:9px;color:var(--text-faint);text-align:center;margin-top:4px;line-height:1.3;">${parts.join(' · ')}</div>` : '';
 }
 
 async function chargerTousProgrammes(clientId){
@@ -1009,10 +1069,22 @@ function openBilanDetailSupabase(bilan) {
     },
     error: null,
     _supabaseBilanId: bilan.id,
+    dateIso,
+    photos: null,
+    mensurations: null,
   };
   state.nav = 'bilan-detail';
   renderSidebar();
   renderMain();
+  if (bilan.id) {
+    chargerBilanPhotos(bilan.id)
+      .then(photos => { bilanDetailState.photos = photos; if (state.nav==='bilan-detail') renderMain(); })
+      .catch(() => { bilanDetailState.photos = []; if (state.nav==='bilan-detail') renderMain(); });
+  }
+  fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(bilan.client_id)}&order=date.asc`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : [])
+    .then(rows => { bilanDetailState.mensurations = rows; if (state.nav==='bilan-detail') renderMain(); })
+    .catch(() => { bilanDetailState.mensurations = []; if (state.nav==='bilan-detail') renderMain(); });
 }
 
 function openFicheBilanDetail(idx) {
@@ -1313,7 +1385,59 @@ function renderBilanDetailPage(el) {
         ${d.commentaireJour?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Journée</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireJour)}</div></div>`:''}
         ${d.commentaireActivite?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Activité</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireActivite)}</div></div>`:''}
       </div>
-    </div>`:''}`;
+    </div>`:''}
+
+    ${bilanDetailState._supabaseBilanId ? (() => {
+      const mProche = _mensurationLaPlusProche(bilanDetailState.dateIso, bilanDetailState.mensurations);
+      return `<div class="table-card" style="margin-bottom:16px;">
+        <div class="table-toolbar">
+          <div class="title">Photos</div>
+          <label class="btn" style="font-size:11px;padding:5px 10px;cursor:pointer;">
+            ${_bilanDetailPhotosUploading?'Envoi…':'+ Ajouter'}
+            <input type="file" accept="image/*" multiple style="display:none;" ${_bilanDetailPhotosUploading?'disabled':''} onchange="onBilanDetailPhotosSelected(event)">
+          </label>
+        </div>
+        <div style="padding:14px 20px;">
+          ${bilanDetailState.photos === null ? `<div style="color:var(--text-faint);font-size:12px;">Chargement…</div>`
+            : bilanDetailState.photos.length === 0 ? `<div style="color:var(--text-faint);font-size:12px;">Aucune photo.</div>`
+            : `<div style="display:flex;flex-wrap:wrap;gap:14px;">
+                ${bilanDetailState.photos.map(p => `
+                  <div style="width:100px;">
+                    <div style="position:relative;width:100px;height:100px;">
+                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="window.open('${esc(p.url)}','_blank')">
+                      <button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>
+                    </div>
+                    ${_renderMensurationSousPhoto(mProche)}
+                  </div>`).join('')}
+              </div>`}
+        </div>
+      </div>`;
+    })() : ''}`;
+}
+
+let _bilanDetailPhotosUploading = false;
+async function onBilanDetailPhotosSelected(e){
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  const bilanId = bilanDetailState._supabaseBilanId;
+  const clientId = bilanDetailState.client;
+  _bilanDetailPhotosUploading = true; renderMain();
+  try {
+    for (const file of files) {
+      const photo = await uploaderBilanPhoto(bilanId, clientId, file);
+      bilanDetailState.photos = (bilanDetailState.photos || []).concat([photo]);
+    }
+  } catch(err) { alert('Erreur envoi photo : ' + err.message); }
+  finally { _bilanDetailPhotosUploading = false; if (state.nav==='bilan-detail') renderMain(); }
+}
+async function supprimerBilanDetailPhoto(photoId, url){
+  if (!confirm('Supprimer cette photo ?')) return;
+  try {
+    await supprimerBilanPhotoApi(photoId, url);
+    bilanDetailState.photos = (bilanDetailState.photos||[]).filter(p=>p.id!==photoId);
+    if (state.nav==='bilan-detail') renderMain();
+  } catch(err) { alert('Erreur : ' + err.message); }
 }
 
 // ── Page Classement ───────────────────────────────────────────────────
@@ -3108,6 +3232,21 @@ function renderFicheBilansTab(c){
     _ficheBilansLoading = false;
     _ficheBilansSel = new Set();
   }
+  if (_ficheBilanPhotosClientId !== c.id) {
+    _ficheBilanPhotosClientId = c.id;
+    _ficheBilanPhotosGallery = null;
+    _ficheBilanPhotosSel = [];
+  }
+  if (_ficheBilanPhotosGallery === null) {
+    fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        _ficheBilanPhotosGallery = Array.isArray(rows) ? rows : [];
+        const el = document.getElementById('ficheTabContent');
+        if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+      })
+      .catch(() => { _ficheBilanPhotosGallery = []; });
+  }
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
       _ficheBilansLoading = true;
@@ -3124,7 +3263,7 @@ function renderFicheBilansTab(c){
     return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
   }
   if (_ficheBilans.length === 0) {
-    return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
+    return `${_renderFicheBilanPhotosGallery(c)}<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
   const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
   const selCount = _ficheBilansSel.size;
@@ -3144,7 +3283,7 @@ function renderFicheBilansTab(c){
       <td>${chip}</td>
     </tr>`;
   }).join('');
-  return `<div class="fiche-card" style="overflow-x:auto;">
+  return `${_renderFicheBilanPhotosGallery(c)}<div class="fiche-card" style="overflow-x:auto;">
     <div class="table-toolbar" style="padding:10px 8px;">
       <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
         <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanSel(this.checked)">
@@ -3168,6 +3307,58 @@ function renderFicheBilansTab(c){
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+// Galerie de toutes les photos du client, toutes bilans confondus — clique sur
+// 2 photos pour les comparer côte à côte (utile pour comparer la progression
+// physique entre deux dates, indépendamment du bilan qui a "reçu" chaque photo).
+function _renderFicheBilanPhotosGallery(c){
+  if (_ficheBilanPhotosGallery === null) return `<div class="fiche-card" style="margin-bottom:14px;"><div style="color:var(--text-faint);font-size:12px;">Chargement des photos…</div></div>`;
+  if (!_ficheBilanPhotosGallery.length) return '';
+  const sel = _ficheBilanPhotosSel;
+  const findPhoto = id => _ficheBilanPhotosGallery.find(p => p.id === id);
+  const dateOf = p => (p.bilans && p.bilans.date_validation) ? p.bilans.date_validation.split('-').reverse().join('/') : '—';
+  const compareHtml = sel.length === 2 ? `
+    <div class="fiche-card" style="margin-bottom:14px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        Comparaison
+        <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="_ficheBilanPhotosSel=[];setFicheTab('bilans')">✕ Réinitialiser</button>
+      </div>
+      <div style="display:flex;gap:12px;">
+        ${sel.map(id => { const p = findPhoto(id); if (!p) return ''; return `
+          <div style="flex:1;text-align:center;min-width:0;">
+            <img src="${esc(p.url)}" style="width:100%;max-height:340px;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
+            <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)}</div>
+          </div>`; }).join('')}
+      </div>
+    </div>` : '';
+  return `${compareHtml}<div class="fiche-card" style="margin-bottom:14px;">
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Photos <span style="font-weight:400;color:var(--text-faint);font-size:11px;">— clique sur 2 photos pour les comparer côte à côte</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;">
+      ${_ficheBilanPhotosGallery.map(p => {
+        const isSel = sel.includes(p.id);
+        return `<div style="width:96px;cursor:pointer;" onclick="toggleFicheBilanPhotoSel(${p.id})">
+          <div style="position:relative;width:96px;height:96px;border-radius:var(--radius-sm);overflow:hidden;${isSel?'box-shadow:0 0 0 3px var(--accent);':''}">
+            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;">
+            ${isSel?`<div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;">✓</div>`:''}
+          </div>
+          <div style="font-size:10px;color:var(--text-faint);text-align:center;margin-top:3px;">${dateOf(p)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function toggleFicheBilanPhotoSel(id){
+  const i = _ficheBilanPhotosSel.indexOf(id);
+  if (i >= 0) { _ficheBilanPhotosSel.splice(i,1); }
+  else {
+    _ficheBilanPhotosSel.push(id);
+    if (_ficheBilanPhotosSel.length > 2) _ficheBilanPhotosSel.shift(); // ne garde que les 2 dernières cliquées
+  }
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilanPhotosClientId);
+  const el = document.getElementById('ficheTabContent');
+  if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
 }
 
 function toggleFicheBilanSel(id, checked) {

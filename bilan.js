@@ -7,6 +7,11 @@ let _bilanMode  = 'current'; // 'current' | 'previous' | 'history-list' | 'histo
 let _bilanId    = null; // Supabase only
 let _bilanJourBilanNom = null; // Supabase only — client_profils.jour_bilan du bilan courant
 
+// ── Photos bilan (Supabase Storage, bucket "bilans-photos") ────────────
+let _bilanPhotos = null;         // photos du bilan actuellement affiché, null = pas encore chargées
+let _bilanPhotosBilanId = null;  // id du bilan pour lequel _bilanPhotos a été chargé
+let _bilanPhotosUploading = false;
+
 // ── Chargement ────────────────────────────────────────────────────────
 
 function _appliquerBilan(data) {
@@ -469,6 +474,11 @@ function _renderBilansEnAttenteListSupa() {
 function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, attenteMode) {
   _bilanData  = data;
   _bilanNotes = {};
+  if (_bilanId && _bilanPhotosBilanId !== _bilanId) {
+    _bilanPhotosBilanId = _bilanId;
+    _bilanPhotos = null;
+    _chargerBilanPhotosClient(_bilanId);
+  }
   (data.repas || []).forEach((r, idx) => {
     if (r.adhesion > 0) _bilanNotes['r'+idx+'_adh'] = r.adhesion;
     if (r.digestion > 0) _bilanNotes['r'+idx+'_dig'] = r.digestion;
@@ -554,6 +564,25 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
     >${esc(data.commentaireActivite)}</textarea>
   </div>`;
 
+  // ── Photos (Supabase Storage) — jointes à ce bilan précis
+  html += `<div class="card">
+    <div class="field-label">📸 PHOTOS</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;">
+      ${_bilanPhotos === null
+        ? `<div style="font-size:12px;color:var(--muted);">Chargement…</div>`
+        : _bilanPhotos.map(p => `
+          <div style="position:relative;width:84px;height:84px;flex-shrink:0;">
+            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onclick="window.open('${esc(p.url)}','_blank')">
+            <button onclick="_supprimerBilanPhotoClient(${p.id},'${esc(p.url)}')" title="Supprimer"
+              style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);border:none;color:#fff;font-size:12px;line-height:1;cursor:pointer;">✕</button>
+          </div>`).join('')}
+    </div>
+    <label class="btn-secondary" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
+      ${_bilanPhotosUploading ? 'Envoi…' : '+ Ajouter une photo'}
+      <input type="file" accept="image/*" multiple style="display:none;" ${_bilanPhotosUploading ? 'disabled' : ''} onchange="_ajouterBilanPhotoClient(event)">
+    </label>
+  </div>`;
+
   // ── Boutons bas
   if (modeHistorique) {
     html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()">📅 Historique des bilans</button>`;
@@ -597,6 +626,61 @@ function _renderToggleSupa(jourIdx, field, elemId, val, label) {
   return `<button id="${elemId}" data-val="${on}" onclick="toggleJourBilanSupa(${jourIdx},'${field}','${elemId}')"
     style="flex:1;padding:10px 6px;background:${on?'#1D9E75':'#2d3142'};border:none;border-radius:8px;color:#e8eaf0;font-size:12px;font-weight:600;cursor:pointer;">
     ${on?'✓ ':''}${label}</button>`;
+}
+
+// ── Photos bilan — chargement/ajout/suppression (Supabase Storage) ─────
+async function _chargerBilanPhotosClient(bilanId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?bilan_id=eq.${bilanId}&order=created_at.asc`, { headers: supaHeaders() });
+    _bilanPhotos = res.ok ? await res.json() : [];
+  } catch(e) { _bilanPhotos = []; }
+  if (_bilanId === bilanId && S.page === 'bilan') render();
+}
+
+async function _ajouterBilanPhotoClient(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length || !_bilanId) return;
+  const bilanId = _bilanId;
+  _bilanPhotosUploading = true; render();
+  try {
+    for (const file of files) {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+        body: file
+      });
+      if (!upRes.ok) throw new Error('Erreur envoi photo.');
+      const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+      const insRes = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos`, {
+        method: 'POST',
+        headers: supaHeaders({ Prefer: 'return=representation' }),
+        body: JSON.stringify({ bilan_id: bilanId, client_id: S.client, url })
+      });
+      if (insRes.ok) { const row = (await insRes.json())[0]; _bilanPhotos = (_bilanPhotos || []).concat([row]); }
+    }
+  } catch(err) {
+    showToast('Erreur : ' + err.message, '#c0392b');
+  } finally {
+    _bilanPhotosUploading = false; render();
+  }
+}
+
+async function _supprimerBilanPhotoClient(photoId, url) {
+  if (!confirm('Supprimer cette photo ?')) return;
+  try {
+    const marker = '/object/public/bilans-photos/';
+    const idx = url.indexOf(marker);
+    if (idx >= 0) {
+      const path = url.slice(idx + marker.length);
+      await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, { method:'DELETE', headers: supaHeaders() }).catch(()=>{});
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?id=eq.${photoId}`, { method:'DELETE', headers: supaHeaders() });
+    _bilanPhotos = (_bilanPhotos || []).filter(p => p.id !== photoId);
+    render();
+  } catch(err) { showToast('Erreur : ' + err.message, '#c0392b'); }
 }
 
 // ── Supabase : envoi ──────────────────────────────────────────────────
