@@ -1144,6 +1144,14 @@ async function envoyerNotification(clientId){
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
+    // Historique persistant (indépendant du push, sert de badge/liste dans l'app
+    // cliente) — une ligne par client ciblé, y compris pour la diffusion "all".
+    const cibles = clientId === 'all' ? data.clients.map(c => c.id) : [clientId];
+    fetch(`${SUPABASE_URL}/rest/v1/client_notifications`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify(cibles.map(id => ({ client_id: id, title: titre, body: corps })))
+    }).catch(() => {});
+
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
@@ -1152,7 +1160,7 @@ async function envoyerNotification(clientId){
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
     document.querySelector('.modal-overlay')?.remove();
-    alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Aucun appareil abonné pour l'instant.");
+    alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
   } catch(e) {
     err.textContent = 'Erreur : ' + e.message; err.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Envoyer';
