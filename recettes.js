@@ -64,7 +64,7 @@ function renderRecetteList() {
       r.portions     ? r.portions + ' portion' + (r.portions > 1 ? 's' : '') : ''
     ].filter(Boolean).join(' · ');
     const macros = (r.kcal_par_portion)
-      ? `<div style="font-size:11px;color:#8892a4;margin-top:3px;">${Math.round(r.kcal_par_portion)} kcal · P ${Math.round(r.prot_par_portion||0)}g · G ${Math.round(r.glu_par_portion||0)}g · L ${Math.round(r.lip_par_portion||0)}g</div>`
+      ? `<div style="font-size:11px;color:#8892a4;margin-top:3px;">${Math.round(r.kcal_par_portion)} kcal · P ${Math.round(r.prot_par_portion||0)}g · G ${Math.round(r.glu_par_portion||0)}g · L ${Math.round(r.lip_par_portion||0)}g <span style="opacity:.7;">/portion</span></div>`
       : '';
     return `
     <div onclick="ouvrirRecette(${id},'${nom.replace(/'/g,"\\'")}')"
@@ -129,6 +129,7 @@ function renderRecetteDetailSupabase(r) {
   const etapes      = Array.isArray(r.etapes)      ? r.etapes      : (typeof r.etapes === 'string'      ? JSON.parse(r.etapes)      : []);
 
   const macrosHtml = r.kcal_par_portion ? `
+    <div style="font-size:11px;color:#8892a4;text-align:center;margin-bottom:6px;">Valeurs pour 1 portion</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:#0f1117;border-radius:10px;padding:12px;margin-bottom:16px;text-align:center;">
       <div><div style="font-size:15px;font-weight:700;color:#f97316;">${Math.round(r.kcal_par_portion)}</div><div style="font-size:10px;color:#8892a4;text-transform:uppercase;">kcal</div></div>
       <div><div style="font-size:15px;font-weight:700;">${Math.round(r.prot_par_portion||0)}g</div><div style="font-size:10px;color:#8892a4;text-transform:uppercase;">prot</div></div>

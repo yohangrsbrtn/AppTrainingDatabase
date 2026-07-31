@@ -150,7 +150,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 <script src="training.js?v=2"></script>
 <script src="diete.js?v=8"></script>
 <script src="mensurations.js?v=4"></script>
-<script src="recettes.js?v=2"></script>
+<script src="recettes.js?v=3"></script>
 <script src="progression.js?v=4"></script>
 <script src="collection.js?v=2"></script>
 <script src="coach.js?v=2"></script>
@@ -692,7 +692,7 @@ function renderHomeSupabase(){
     if (!S.data.prog) S.data.prog = {};
     S.data.prog.nom = (S.data.profil.prenom || '') + ' ' + (S.data.profil.nom || '');
   }
-  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(80px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
 
     ${renderCarteHeader()}
 
@@ -741,6 +741,7 @@ function renderHomeSupabase(){
 
     <div id="top5Home"></div>
 
+  ${renderNavBar('home')}
   </div>`;
 }
 
@@ -1062,7 +1063,7 @@ function renderHome() {
   const p = S.data.prog || {};
   const nBilans = S.data.coachBilansCount || 0;
 
-  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(20px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(80px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
 
     ${renderCarteHeader()}
 
@@ -1152,6 +1153,7 @@ function renderHome() {
 
     <div id="top5Home"></div>
 
+  ${renderNavBar('home')}
   </div>`;
 }
 
