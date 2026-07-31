@@ -6,6 +6,7 @@ const RM_TYPES = {
   prise_masse:   { label:'Prise de masse', color:'#30a46c' },
   maintenance:   { label:'Maintenance',    color:'#3b82f6' },
   recomposition: { label:'Recomposition',  color:'#8b5cf6' },
+  refeed:        { label:'Refeed',         color:'#06b6d4' },
 };
 function _rmType(key) { return RM_TYPES[key] || { label: key || '—', color:'#8892a4' }; }
 
