@@ -5632,7 +5632,7 @@ async function migrerMensurations(clientId, rafraichirPage) {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-muted);">Aucune mensuration dans GAS.</span>`;
       return;
     }
-    const rows = releves
+    const rowsRaw = releves
       .map(r => ({
         client_id: clientId,
         date: _parseDateFr(r.date),
@@ -5647,13 +5647,21 @@ async function migrerMensurations(clientId, rafraichirPage) {
         bras: r.bras != null ? r.bras : null,
       }))
       .filter(r => r.date);
+    // Dédoublonnage par date — voir commentaire dans migrerSelectionMensu
+    // (même bug : deux lignes GAS sur la même date font planter l'upsert en 500).
+    const rowsByDate = new Map();
+    rowsRaw.forEach(r => rowsByDate.set(r.date, r));
+    const rows = [...rowsByDate.values()];
 
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
       body: JSON.stringify(rows),
     });
-    if (!res.ok && res.status !== 409) throw new Error('supabase_' + res.status);
+    if (!res.ok && res.status !== 409) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error('supabase_' + res.status + (errBody ? ' — ' + errBody.slice(0, 300) : ''));
+    }
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--success,#4caf50);">✓ ${rows.length} relevés importés.</span>`;
     if (rafraichirPage) setTimeout(() => chargerMensurationsSupabase(clientId), 600);
   } catch(e) {
@@ -6195,7 +6203,7 @@ async function migrerSelectionMensu() {
       return isNaN(n) ? null : n;
     };
 
-    const rows = selected.map(({ isoDate, raw }, i) => {
+    const rowsRaw = selected.map(({ isoDate, raw }, i) => {
       const d = detailResults[i] || {};
       return {
         client_id: migPreviewClientId,
@@ -6211,12 +6219,23 @@ async function migrerSelectionMensu() {
         bras:     _num(d.bras      ?? raw.bras),
       };
     });
+    // Deux lignes GAS peuvent tomber sur la même date (double saisie) — un
+    // upsert avec deux lignes de même (client_id,date) dans le même batch
+    // fait planter Postgres ("ON CONFLICT DO UPDATE command cannot affect
+    // row a second time", HTTP 500). On dédoublonne par date, la dernière
+    // ligne du sheet gagne (généralement la plus à jour).
+    const rowsByDate = new Map();
+    rowsRaw.forEach(r => rowsByDate.set(r.date, r));
+    const rows = [...rowsByDate.values()];
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
       body: JSON.stringify(rows),
     });
-    if (!res.ok && res.status !== 409) throw new Error('supabase_' + res.status);
+    if (!res.ok && res.status !== 409) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error('supabase_' + res.status + (errBody ? ' — ' + errBody.slice(0, 300) : ''));
+    }
     // Recharger les données Supabase et re-render
     const supaRes = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(migPreviewClientId)}&order=date.desc`, { headers: supaHeaders() });
     migPreviewData.supaMensurations = supaRes.ok ? await supaRes.json() : migPreviewData.supaMensurations;
