@@ -1020,7 +1020,7 @@ function _saveNavState() {
     localStorage.setItem('at_console_lastnav_v1', JSON.stringify(payload));
   } catch(e) {}
 }
-const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration']);
+const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration','parametres']);
 
 function renderMain(){
   if (NAV_RESTORE_SIMPLE.has(state.nav) || state.nav === 'fiche-client' || state.nav === 'mensurations') _saveNavState();
@@ -1042,11 +1042,74 @@ function renderMain(){
   if (state.nav === 'mensurations') { renderMensurationsPage(el); return; }
   if (state.nav === 'migration') { renderMigrationPage(el); return; }
   if (state.nav === 'migration-preview') { renderMigrationPreviewPage(el); return; }
+  if (state.nav === 'parametres') { renderParametresPage(el); return; }
   const label = NAV.flatMap(g=>g.items).find(i=>i.id===state.nav)?.label || '';
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>${label}</h1></div></div>
     <div class="empty-panel"><strong>Pas encore construit</strong>
     "${label}" suivra la même grammaire visuelle qu'Accueil/Clients — cartes, tableau filtrable, panneau de détail latéral.</div>`;
+}
+
+// ── Page Paramètres ─────────────────────────────────────────────────────
+// Notifications push : abonnement Web Push natif (pas de Firebase), déclenché
+// côté base par des triggers Postgres (voir sql/2026-08-01_notifications_push.sql)
+// qui appellent une Edge Function Supabase via pg_net.
+const VAPID_PUBLIC_KEY = 'BMATlCrbt_oBJLCMm3Yahc7gtCSa69t7d9tbzX1IIHimuaMD7rPZRNTkT09X6LQmVbJsMpplnbOdwld6ZLvDFmc';
+const COACH_CLIENT_ID = 'yohanp';
+
+function _urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+function renderParametresPage(el){
+  const supporte = ('serviceWorker' in navigator) && ('PushManager' in window);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  el.innerHTML = `
+    <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Paramètres</h1></div></div>
+    <div class="table-card" style="padding:18px 20px;max-width:520px;">
+      <div style="font-weight:700;margin-bottom:6px;">🔔 Notifications push</div>
+      <p style="color:var(--text-muted);font-size:12.5px;margin:0 0 14px;">Reçois une alerte sur cet appareil quand un client envoie un bilan, valide une séance ou valide sa journée.</p>
+      ${!supporte ? `<div style="color:var(--critical);font-size:12.5px;">Non supporté par ce navigateur.</div>`
+        : !standalone ? `<div style="color:var(--warning);font-size:12.5px;">Sur iPhone, ouvre d'abord l'app depuis l'icône ajoutée à l'écran d'accueil (pas depuis un onglet Safari) pour pouvoir activer les notifications.</div>`
+        : `<button class="btn primary" id="btnActiverPush" onclick="activerNotificationsPush()">Activer les notifications sur cet appareil</button>
+           <div id="pushStatus" style="margin-top:10px;font-size:12px;color:var(--text-faint);"></div>`}
+    </div>`;
+  _majStatutPush();
+}
+
+async function _majStatutPush(){
+  const elS = document.getElementById('pushStatus');
+  if (!elS || !('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    elS.textContent = sub ? '✓ Notifications actives sur cet appareil.' : '';
+  } catch(e) {}
+}
+
+async function activerNotificationsPush(){
+  const btn = document.getElementById('btnActiverPush');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { alert("Permission refusée — tu pourras la réactiver dans les réglages du navigateur."); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+    const j = sub.toJSON();
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?on_conflict=endpoint`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: COACH_CLIENT_ID, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    if (state.nav === 'parametres') renderMain();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Activer les notifications sur cet appareil'; }
+  }
 }
 
 // ── Page Bilans ───────────────────────────────────────────────────────
@@ -7992,6 +8055,8 @@ function _restoreNavState() {
   if (NAV_RESTORE_SIMPLE.has(saved.nav)) { state.nav = saved.nav; return false; }
   return false;
 }
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
 (async function boot(){
   const cached = localStorage.getItem('at_console_cache_v2');
   if (cached) {
