@@ -218,6 +218,17 @@ function setPage(name) {
       banner.innerHTML = `<span style="font-size:12px;font-weight:700;">👁️ Vue de <strong>${esc(nom)}</strong></span><button onclick="exitVueClient()" style="background:rgba(0,0,0,0.2);border:none;color:#1a0e00;font-size:12px;font-weight:700;padding:4px 10px;border-radius:10px;cursor:pointer;">✕ Retour</button>`;
       document.body.appendChild(banner);
     }
+  } else if (S.isCoach && name !== 'loading' && name !== 'login') {
+    // Petit accès rapide "Vue console" pour le coach, visible sur toutes ses pages
+    // mobile tant qu'il n'est pas en train de prévisualiser un client (banner ci-dessus).
+    if (!document.getElementById('coachConsoleBanner')) {
+      const banner = document.createElement('div');
+      banner.id = 'coachConsoleBanner';
+      banner.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom) + 8px);left:50%;transform:translateX(-50%);z-index:8000;background:linear-gradient(135deg,#4f6ef7,#2d4bd6);color:#fff;border-radius:20px;padding:8px 14px;display:flex;align-items:center;gap:6px;box-shadow:0 4px 16px rgba(0,0,0,.5);white-space:nowrap;cursor:pointer;font-size:12px;font-weight:700;';
+      banner.innerHTML = `💻 Vue console`;
+      banner.onclick = () => { window.location.href = 'console.html'; };
+      document.body.appendChild(banner);
+    }
   }
 }
 
