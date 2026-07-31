@@ -543,7 +543,7 @@ let _ficheMensChart2Keys = new Set(['fessiers']);
 let _pageMensChart2Keys  = new Set(['fessiers']);
 let _pageMensurationsRows = [];
 let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
-let progLogsSemaine = 1;
+let progLogsSemaineParBloc = {}; // navigation indépendante par bloc, clé = index du bloc (bi), valeur = semaine LOCALE au bloc
 let _progLogsView = 'semaine'; // 'semaine' | 'progression'
 let _progLogsCollapsed = new Set(); // séances repliées (clé "bi-si"), même logique que _cpCollapsed dans l'éditeur
 function progLogsToggleSeance(bi, si){ const k=bi+'-'+si; _progLogsCollapsed.has(k)?_progLogsCollapsed.delete(k):_progLogsCollapsed.add(k); renderMain(); }
@@ -3943,14 +3943,26 @@ function ouvrirLogsProgramme(progId){
   state.nav = 'prog-logs';
   state.progLogsId = progId;
   progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
-  progLogsSemaine = 1;
+  progLogsSemaineParBloc = {};
   _progLogsView = 'semaine';
   _progLogsCollapsed = new Set();
   renderSidebar();
   renderMain();
   const exLoad = exercicesData === null ? chargerExercices().then(d=>{ exercicesData=d; }).catch(()=>{}) : Promise.resolve();
   Promise.all([chargerProgrammeById(progId), exLoad]).then(([prog]) => {
-    progLogsData = { loaded:true, programme:prog, blocs:prog?prog.blocs:[], logs:prog?prog.logs:{} };
+    const blocs = prog ? prog.blocs : [];
+    const logs = prog ? prog.logs : {};
+    // Nb de semaines "réelles" par bloc pour capper la navigation ‹›: nombre_semaines
+    // déclaré, ou le max effectivement loggué s'il le dépasse (log au-delà du prévu).
+    const exToBloc = {};
+    blocs.forEach((b,bi) => (b.client_programme_seances||[]).forEach(s => (s.client_programme_exercices||[]).forEach(ex => { exToBloc[ex.id]=bi; })));
+    const blocMaxSem = blocs.map(b => b.nombre_semaines || 1);
+    Object.keys(logs).forEach(key => {
+      const parts = key.split('|'); const exId = parts[0], sem = parseInt(parts[1]);
+      const bi = exToBloc[exId];
+      if (bi !== undefined && sem > (blocMaxSem[bi]||0)) blocMaxSem[bi] = sem;
+    });
+    progLogsData = { loaded:true, programme:prog, blocs, logs, blocMaxSem };
     if (state.nav==='prog-logs' && state.progLogsId===progId) renderMain();
   }).catch(e => {
     progLogsData = { loaded:true, programme:null, blocs:[], logs:{}, error:e.message };
@@ -3958,8 +3970,10 @@ function ouvrirLogsProgramme(progId){
   });
 }
 
-function progLogsSemaineChanger(delta){
-  progLogsSemaine = Math.max(1, progLogsSemaine + delta);
+function progLogsSemaineChangerBloc(bi, delta){
+  const max = (progLogsData.blocMaxSem && progLogsData.blocMaxSem[bi]) || 1;
+  const cur = progLogsSemaineParBloc[bi] || 1;
+  progLogsSemaineParBloc[bi] = Math.max(1, Math.min(max, cur + delta));
   renderMain();
 }
 
@@ -3981,12 +3995,7 @@ function renderProgLogsPage(el){
   const prog = progLogsData.programme;
   const blocs = progLogsData.blocs || [];
   const logs = progLogsData.logs || {};
-  const totalSemaines = blocs.reduce((s,b)=>s+(b.nombre_semaines||1),0)||1;
   const nbSeances = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).length,0);
-
-  // Trouver toutes les semaines qui ont au moins un log
-  const semainesAvecLogs = new Set();
-  Object.keys(logs).forEach(k => { const parts=k.split('|'); if(parts[1]) semainesAvecLogs.add(parseInt(parts[1])); });
 
   // Map exId → bloc index (pour offset chronologique)
   const exToBloc = {};
@@ -4040,13 +4049,7 @@ function renderProgLogsPage(el){
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
       <button class="btn ${_progLogsView==='semaine'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='semaine';renderMain()">Vue semaine</button>
       <button class="btn ${_progLogsView==='progression'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='progression';renderMain()">Progression</button>
-      ${_progLogsView==='semaine' ? `
-        <div style="display:flex;align-items:center;gap:8px;margin-left:8px;">
-          <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(-1)">‹</button>
-          <span style="font-size:14px;font-weight:700;min-width:120px;text-align:center;">Semaine ${progLogsSemaine} / ${totalSemaines}</span>
-          <button class="btn" style="padding:5px 12px;" onclick="progLogsSemaineChanger(1)">›</button>
-          ${semainesAvecLogs.size ? `<span style="font-size:11.5px;color:var(--text-faint);">${semainesAvecLogs.size} sem. avec données</span>` : ''}
-        </div>` : ''}
+      ${_progLogsView==='semaine' && blocs.length>1 ? `<span style="font-size:11.5px;color:var(--text-faint);margin-left:4px;">${blocs.length} blocs · chacun a sa propre navigation semaine ci-dessous</span>` : ''}
     </div>
 
     ${_progLogsView === 'progression' ? (() => {
@@ -4089,19 +4092,23 @@ function renderProgLogsPage(el){
       }).join('');
     })() : blocs.map((b,bi)=>{
       const color = BLOC_COLOR[b.type] || 'var(--hairline)';
-      // progLogsSemaine est une semaine GLOBALE (1..totalSemaines, cumulée sur tous
-      // les blocs) ; les logs sont stockés avec une semaine LOCALE au bloc (1..son
-      // propre nombre_semaines, cf. blocOffset calculé plus haut). Sans cette
-      // conversion, les blocs après le premier ne retrouvaient jamais leurs logs.
-      const semLocale = progLogsSemaine - (blocOffset[bi] || 0);
+      // Navigation indépendante par bloc — les logs sont stockés en semaine LOCALE
+      // au bloc, donc la semaine affichée ici EST directement la clé de lookup
+      // (plus de conversion globale→locale, chaque bloc a son propre curseur).
+      const maxSem = (progLogsData.blocMaxSem && progLogsData.blocMaxSem[bi]) || 1;
+      const semLocale = Math.min(maxSem, progLogsSemaineParBloc[bi] || 1);
       return `
       <div style="margin-bottom:18px;border-left:3px solid ${color};border-radius:0 var(--radius) var(--radius) 0;overflow:hidden;">
-        ${(b.type || b.nombre_semaines) ? `
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:${color}14;">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:${color}14;flex-wrap:wrap;">
           <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
           <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${color};">${esc(BLOC_LABELS_COACH[b.type]||b.type||'Générique')}</span>
           ${b.nombre_semaines ? `<span style="font-size:11px;color:var(--text-faint);">· ${b.nombre_semaines} sem.</span>` : ''}
-        </div>` : ''}
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+            <button class="btn" style="padding:3px 9px;font-size:12px;" onclick="progLogsSemaineChangerBloc(${bi},-1)">‹</button>
+            <span style="font-size:12.5px;font-weight:700;min-width:70px;text-align:center;">Sem. ${semLocale}${maxSem>1?' / '+maxSem:''}</span>
+            <button class="btn" style="padding:3px 9px;font-size:12px;" onclick="progLogsSemaineChangerBloc(${bi},1)">›</button>
+          </div>
+        </div>
         <div style="padding:10px 10px 0;">
         ${(b.client_programme_seances||[]).map((s,si)=>{
           const collapsed = !_progLogsCollapsed.has(bi+'-'+si);
