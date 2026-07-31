@@ -3437,6 +3437,10 @@ function renderFicheProfilTab(c){
         <div class="fiche-field"><label>Séances / semaine</label><input id="fSeancesCible" type="number" min="0" max="14" value="${esc(p.seances_cible||'')}"></div>
       </div>
       <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
+      <h3 style="margin-top:16px;">Facturation</h3>
+      <div class="fiche-field"><label>Échéance de paiement</label><input id="fDatePaiement" type="date" value="${esc(p.date_paiement||'')}">
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Date du prochain prélèvement/paiement — visible coach uniquement.</div>
+      </div>
       <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
     </div>`;
 }
@@ -4451,6 +4455,7 @@ async function sauvegarderFicheSandbox(clientId){
     steps_cible: parseInt(document.getElementById('fStepsCible').value)||null,
     seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
     cardio_consigne: document.getElementById('fCardioConsigne').value.trim() || null,
+    date_paiement: document.getElementById('fDatePaiement').value || null,
     updated_at: new Date().toISOString(),
   };
   try {

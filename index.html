@@ -676,7 +676,7 @@ async function _completerConnexion(json) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -1236,6 +1236,17 @@ function renderProfil() {
   const titreHtml = titreDef ? `<div style="margin-top:6px;display:flex;justify-content:center;">${renderTitrePill(titreDef, false)}</div>` : '';
   const isSupabaseAuth = localStorage.getItem('at_auth_mode') === 'supabase';
   const profilData = S.data.profil || {};
+  const infosHtml = !isSupabaseAuth ? '' : `
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:10px;">Mes informations</div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Date de naissance</label>
+        <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Taille (cm)</label>
+        <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
+        ${profilData.date_debut ? `<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">📅 Coaching débuté le ${new Date(profilData.date_debut).toLocaleDateString('fr-FR')}</div>` : ''}
+        <button class="btn-primary" onclick="doSauverInfosProfil()">Enregistrer</button>
+        <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
+      </div>`;
   const compteHtml = !isSupabaseAuth ? '' : `
       <div class="card">
         <div style="font-weight:700;margin-bottom:10px;">Mon email</div>
@@ -1263,6 +1274,7 @@ function renderProfil() {
         <div style="font-size:13px;color:${tc.c1};font-weight:600;">Niveau ${niveau}</div>
         ${titreHtml}
       </div>
+      ${infosHtml}
       ${compteHtml}
       <div class="card">
         <div class="list-item" onclick="deconnexion()" style="color:var(--red);">
@@ -1273,6 +1285,30 @@ function renderProfil() {
     </div>
     ${renderNavBar('profil')}
   </div>`;
+}
+
+async function doSauverInfosProfil() {
+  const msg = document.getElementById('pf-infos-msg');
+  const dateNaissance = document.getElementById('pf-naissance').value || null;
+  const tailleRaw = document.getElementById('pf-taille').value;
+  const taille = tailleRaw ? parseInt(tailleRaw, 10) : null;
+  msg.style.color = '';
+  msg.textContent = '…';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, date_naissance: dateNaissance, taille_cm: taille })
+    });
+    if (!res.ok) throw new Error('Erreur serveur.');
+    S.data.profil = S.data.profil || {};
+    S.data.profil.date_naissance = dateNaissance;
+    S.data.profil.taille_cm = taille;
+    msg.textContent = 'Enregistré ✓';
+  } catch(e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = e.message || 'Erreur serveur.';
+  }
 }
 
 async function doSauverEmailProfil() {
