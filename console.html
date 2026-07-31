@@ -333,6 +333,11 @@
   .repas-head { display:flex; align-items:center; gap:8px; padding:10px 14px; font-weight:700; font-size:13px; border-bottom:1px solid var(--hairline); }
   .aliment-row { display:flex; align-items:center; gap:8px; padding:7px 14px; border-top:1px solid var(--hairline); font-size:12.5px; }
   .aliment-row .a-nom { flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .aliment-row.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+  .a-qte { width:56px; background:var(--surface-2); border:1px solid transparent; border-radius:6px; padding:5px 7px; color:var(--text); font-size:12px; font-family:inherit; box-sizing:border-box; text-align:right; flex-shrink:0; }
+  .a-qte:focus { border-color:var(--hairline); }
+  .a-unite { font-size:11px; color:var(--text-faint); flex-shrink:0; }
+  .repas-group.drag-over { box-shadow: inset 0 2px 0 var(--accent); border-radius:var(--radius-sm); }
   .macro-pills { display:flex; gap:6px; font-size:11px; color:var(--text-faint); font-family:var(--font-mono); flex-shrink:0; }
   .macro-band { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:12px 14px; background:var(--surface-3); border-top:1px solid var(--hairline); text-align:center; }
   .macro-band .mn { font-family:var(--font-mono); font-size:14px; font-weight:700; }
@@ -4948,9 +4953,14 @@ function _renderAlimListHtml(ri) {
   const repasM = macrosDiete([{ repas_aliments: r.aliments }]);
   return `
     ${r.aliments.map((a,ai) => `
-      <div class="aliment-row">
+      <div class="aliment-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="alimOnDrop(event,${ri},${ai})">
+        <span class="drag-handle" draggable="true" ondragstart="alimOnDragStart(event,${ri},${ai})" ondragend="alimOnDragEnd()" title="Glisser pour réordonner">⠿</span>
         <span class="a-nom">${esc(a.nom)}</span>
-        <span class="macro-pills">${a.quantite_g}${a.unite&&a.unite!=='g'?' '+a.unite:'g'} · ${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+        <input type="number" class="a-qte" inputmode="decimal" min="0" step="1" value="${a.quantite_g!=null?a.quantite_g:''}"
+          onchange="alimChangerQuantite(${ri},${ai},this.value)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+        <span class="a-unite">${a.unite&&a.unite!=='g'?esc(a.unite):'g'}</span>
+        <span class="macro-pills">${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
         <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
       </div>`).join('')}
     ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}">
@@ -4989,7 +4999,7 @@ function renderEditeurDietePage(el) {
   });
   const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
 
-  const repasHtml = ordres.map(ordre => {
+  const repasHtml = ordres.map((ordre, gi) => {
     const variants = grouped[ordre];
     const blocksHtml = variants.map(r => {
       const ri = r._ri;
@@ -4997,7 +5007,7 @@ function renderEditeurDietePage(el) {
       return `
       <div class="repas-block" style="${isVariante ? 'margin-left:16px;border-left:3px solid var(--accent-soft);padding-left:4px;' : ''}">
         <div class="repas-head">
-          ${isVariante ? `<span style="font-size:11px;color:var(--accent);font-weight:700;margin-right:6px;flex-shrink:0;">≡</span>` : ''}
+          ${isVariante ? `<span style="font-size:11px;color:var(--accent);font-weight:700;margin-right:6px;flex-shrink:0;">≡</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi})" ondragend="repasOnDragEnd()" title="Glisser pour réordonner ce repas">⠿</span>`}
           <input type="text" value="${esc(r.nom)}" onchange="dieteTplEnEdition.repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri})">${iTrash()}</button>
         </div>
@@ -5007,8 +5017,11 @@ function renderEditeurDietePage(el) {
         </div>
       </div>`;
     }).join('');
-    return blocksHtml + `<div style="padding:0 0 10px ${variants.length>1?'16':'0'}px;">
-      <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--accent);" onclick="ajouterVarianteRepas(${ordre})">≡ + Variante</button>
+    return `<div class="repas-group" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="repasOnDrop(event,${gi})">
+      ${blocksHtml}
+      <div style="padding:0 0 10px ${variants.length>1?'16':'0'}px;">
+        <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--accent);" onclick="ajouterVarianteRepas(${ordre})">≡ + Variante</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -5069,8 +5082,54 @@ function supprimerRepas(ri){
   setNav('editeur-diete');
 }
 
+// Réordonner les repas (groupes ordre, variantes comprises) par glisser-déposer
+// de la poignée du repas principal. gi = index dans le tableau `ordres` trié au
+// moment du render — recalculé ici à l'identique pour rester valide après un drop.
+let _dietDragRepasSource = null;
+function repasOnDragStart(e, gi){ _dietDragRepasSource = gi; e.dataTransfer.effectAllowed = 'move'; }
+function repasOnDragEnd(){ _dietDragRepasSource = null; }
+function repasOnDrop(e, targetGi){
+  e.preventDefault();
+  const srcGi = _dietDragRepasSource; _dietDragRepasSource = null;
+  if (srcGi == null || srcGi === targetGi) { setNav('editeur-diete'); return; }
+  const tpl = dieteTplEnEdition;
+  const grouped = {};
+  tpl.repas.forEach((r,ri) => { const o = r.ordre != null ? r.ordre : ri; (grouped[o]=grouped[o]||[]).push(ri); });
+  const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
+  const [movedOrdre] = ordres.splice(srcGi, 1);
+  ordres.splice(srcGi < targetGi ? targetGi - 1 : targetGi, 0, movedOrdre);
+  // Renumérote 0..N-1 dans le nouvel ordre — tous les repas d'un même groupe
+  // (variantes incluses) reçoivent le même nouvel ordre pour rester ensemble.
+  ordres.forEach((oldOrdre, i) => { grouped[oldOrdre].forEach(ri => { tpl.repas[ri].ordre = i; }); });
+  setNav('editeur-diete');
+}
+
 function supprimerAlimentDiete(ri, ai){
   dieteTplEnEdition.repas[ri].aliments.splice(ai,1);
+  _updateAlimentsDom(ri);
+}
+
+// Grammage éditable inline — parseFloat avec remplacement virgule→point (clavier
+// iOS en locale FR insère une virgule comme séparateur décimal, cf. programme-client.js).
+function alimChangerQuantite(ri, ai, valeur){
+  const q = parseFloat((valeur+'').replace(',','.'));
+  dieteTplEnEdition.repas[ri].aliments[ai].quantite_g = isNaN(q) ? 0 : q;
+  _updateAlimentsDom(ri);
+}
+
+// Réordonner les aliments d'un repas par glisser-déposer — même pattern que
+// cpOnDragStartExo/cpOnDropExo (éditeur programme), limité à l'intérieur d'un
+// même repas (pas de drag entre deux repas différents).
+let _dietDragAlimSource = null;
+function alimOnDragStart(e, ri, ai){ _dietDragAlimSource = {ri, ai}; e.dataTransfer.effectAllowed = 'move'; }
+function alimOnDragEnd(){ _dietDragAlimSource = null; }
+function alimOnDrop(e, ri, ai){
+  e.preventDefault();
+  const src = _dietDragAlimSource; _dietDragAlimSource = null;
+  if (!src || src.ri !== ri || src.ai === ai) { _updateAlimentsDom(ri); return; }
+  const arr = dieteTplEnEdition.repas[ri].aliments;
+  const [moved] = arr.splice(src.ai, 1);
+  arr.splice(src.ai < ai ? ai - 1 : ai, 0, moved);
   _updateAlimentsDom(ri);
 }
 
