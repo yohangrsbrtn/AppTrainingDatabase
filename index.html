@@ -717,7 +717,7 @@ async function _completerConnexion(json) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,date_paiement`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -1338,7 +1338,7 @@ function renderProfil() {
         ${profilData.date_debut ? `<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">📅 Coaching débuté le ${new Date(profilData.date_debut).toLocaleDateString('fr-FR')}</div>` : ''}
         <button class="btn-primary" onclick="doSauverInfosProfil()">Enregistrer</button>
         <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-        ${profilData.date_paiement ? `<div style="font-size:13px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">💳 Prochaine échéance de paiement : ${new Date(profilData.date_paiement).toLocaleDateString('fr-FR')}</div>` : ''}
+        ${profilData.jour_paiement ? `<div style="font-size:13px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">💳 Facturation le ${profilData.jour_paiement} de chaque mois</div>` : ''}
       </div>`;
   const compteHtml = !isSupabaseAuth ? '' : `
       <div class="card">
@@ -1667,6 +1667,7 @@ function ouvrirGererRappels() {
       </div>
       <div style="flex:1;overflow-y:auto;padding:4px 20px calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;">
         ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 21h30 si tu n'as pas encore validé ta journée")}
+        ${toggleRow('rappel_paiement', 'Rappel de paiement', "3 jours après la date de facturation de ton coach")}
       </div>
     </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };

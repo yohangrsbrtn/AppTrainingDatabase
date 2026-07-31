@@ -4022,8 +4022,10 @@ function renderFicheProfilTab(c){
       </div>
       <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
       <h3 style="margin-top:16px;">Facturation</h3>
-      <div class="fiche-field"><label>Échéance de paiement</label><input id="fDatePaiement" type="date" value="${esc(p.date_paiement||'')}">
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Date du prochain prélèvement/paiement — visible coach uniquement.</div>
+      <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
+        <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
+        <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Jour du mois où le client doit payer (1-31) — visible coach uniquement. Un rappel automatique part 3 jours après si rien n'est réglé.</div>
       </div>
       <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
     </div>`;
@@ -5085,7 +5087,7 @@ async function sauvegarderFicheSandbox(clientId){
     steps_cible: parseInt(document.getElementById('fStepsCible').value)||null,
     seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
     cardio_consigne: document.getElementById('fCardioConsigne').value.trim() || null,
-    date_paiement: document.getElementById('fDatePaiement').value || null,
+    jour_paiement: parseInt(document.getElementById('fJourPaiement').value) || null,
     updated_at: new Date().toISOString(),
   };
   try {
