@@ -234,7 +234,10 @@ function setPage(name) {
       banner.id = 'coachConsoleBanner';
       banner.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom) + 8px);left:50%;transform:translateX(-50%);z-index:8000;background:linear-gradient(135deg,#4f6ef7,#2d4bd6);color:#fff;border-radius:20px;padding:8px 14px;display:flex;align-items:center;gap:6px;box-shadow:0 4px 16px rgba(0,0,0,.5);white-space:nowrap;cursor:pointer;font-size:12px;font-weight:700;';
       banner.innerHTML = `💻 Vue console`;
-      banner.onclick = () => { window.location.href = 'console.html'; };
+      // Cache-buster : évite qu'un PWA installé sur écran d'accueil (pas de
+      // pull-to-refresh, pas de barre d'adresse) reste bloqué sur une version
+      // de console.html mise en cache par le navigateur/CDN (10 min de TTL).
+      banner.onclick = () => { window.location.href = 'console.html?t=' + Date.now(); };
       document.body.appendChild(banner);
     }
   }
@@ -2040,7 +2043,7 @@ if (S.token && S.client) {
   } else if (S.isCoach && !_forceMobile && window.innerWidth >= 900) {
     // Coach sur grand écran → la console desktop est plus adaptée que l'appli mobile.
     // ?mobile=1 (utilisé par "Retour à l'app" depuis console.html) contourne cette redirection.
-    window.location.replace('console.html');
+    window.location.replace('console.html?t=' + Date.now());
   } else {
     loadHome();
   }

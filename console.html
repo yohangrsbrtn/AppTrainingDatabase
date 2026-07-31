@@ -409,7 +409,7 @@
       <input id="searchInput" type="text" placeholder="Rechercher un client…" oninput="onSearch(this.value)" />
     </div>
     <div class="topbar-actions">
-      <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="window.location.href='index.html?mobile=1'" title="Basculer vers la vue application mobile">📱 Vue mobile</button>
+      <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="window.location.href='index.html?mobile=1&t='+Date.now()" title="Basculer vers la vue application mobile">📱 Vue mobile</button>
       <div class="dropdown">
         <button class="icon-btn" onclick="toggleMenu(event,'notif')" aria-label="Notifications">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
@@ -421,7 +421,7 @@
         <div class="avatar" onclick="toggleMenu(event,'account')">YG</div>
         <div class="menu" id="menu-account">
           <div class="menu-label">Yohan · Coach</div>
-          <button class="menu-item" onclick="window.location.href='index.html?mobile=1'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Retour à l'app</button>
+          <button class="menu-item" onclick="window.location.href='index.html?mobile=1&t='+Date.now()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Retour à l'app</button>
           <div class="menu-sep"></div>
           <button class="menu-item danger" onclick="logoutConsole()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>Déconnexion</button>
         </div>
