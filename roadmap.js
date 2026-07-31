@@ -1,0 +1,117 @@
+// ── Roadmap page (client) — phases datées cut/reverse/prise de masse/... ──
+
+const RM_TYPES = {
+  cut:           { label:'Cut',            color:'#e5484d' },
+  reverse:       { label:'Reverse',        color:'#f5a623' },
+  prise_masse:   { label:'Prise de masse', color:'#30a46c' },
+  maintenance:   { label:'Maintenance',    color:'#3b82f6' },
+  recomposition: { label:'Recomposition',  color:'#8b5cf6' },
+};
+function _rmType(key) { return RM_TYPES[key] || { label: key || '—', color:'#8892a4' }; }
+
+let _rmPhases = [];
+
+async function loadRoadmap() {
+  setPage('roadmap-loading');
+  try {
+    const clientId = (_viewAsClientOverride != null) ? _viewAsClientOverride : getClient();
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() });
+    _rmPhases = res.ok ? await res.json() : [];
+    setPage('roadmap');
+  } catch(e) { setPage('home'); }
+}
+
+function renderRoadmapPage() {
+  if (S.page === 'roadmap-loading') {
+    return `<div id="app">${renderHeader('Roadmap','',false)}<div class="page">${renderSpinner()}</div>${renderNavBar('roadmap')}</div>`;
+  }
+
+  const today = new Date().toISOString().slice(0,10);
+  const phases = _rmPhases || [];
+  const enCoursIdx = phases.findIndex(p => p.date_debut <= today && p.date_fin >= today);
+  const enCours = enCoursIdx >= 0 ? phases[enCoursIdx] : null;
+
+  if (!phases.length) {
+    return `<div id="app">
+      ${renderHeader('Roadmap', '', false)}
+      <div class="page"><div class="empty"><div class="empty-icon">🗺️</div><div class="empty-text">Ton coach n'a pas encore défini de roadmap.</div></div></div>
+      ${renderNavBar('roadmap')}
+    </div>`;
+  }
+
+  // Timeline segmentée : largeur de chaque segment proportionnelle à sa durée (flex-grow = nb de jours).
+  const timelineHtml = `
+    <div style="display:flex;border-radius:8px;overflow:hidden;height:10px;margin-bottom:6px;">
+      ${phases.map(p => {
+        const t = _rmType(p.type);
+        return `<div style="flex:${_rmJours(p)};background:${t.color};min-width:3px;"></div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+      ${Object.keys(RM_TYPES).filter(k => phases.some(p=>p.type===k)).map(k => `
+        <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#8892a4;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${RM_TYPES[k].color};display:inline-block;"></span>${RM_TYPES[k].label}
+        </div>`).join('')}
+    </div>`;
+
+  const enCoursHtml = enCours ? (() => {
+    const t = _rmType(enCours.type);
+    const jours = _rmJours(enCours);
+    const ecoules = Math.min(jours, Math.max(0, _rmJoursEcoules(enCours.date_debut)));
+    const pct = Math.round((ecoules/jours)*100);
+    return `
+    <div style="background:#1a1d29;border-radius:14px;padding:18px;margin-bottom:20px;border-left:4px solid ${t.color};">
+      <div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Phase actuelle</div>
+      <div style="font-size:20px;font-weight:700;color:${t.color};margin-bottom:8px;">${esc(t.label)}</div>
+      <div style="font-size:12px;color:#8892a4;margin-bottom:10px;">${_rmDateFr(enCours.date_debut)} → ${_rmDateFr(enCours.date_fin)}</div>
+      <div style="background:#0f1117;border-radius:6px;height:8px;overflow:hidden;margin-bottom:6px;">
+        <div style="height:100%;width:${pct}%;background:${t.color};border-radius:6px;"></div>
+      </div>
+      <div style="font-size:11px;color:#8892a4;margin-bottom:${enCours.objectif?'10':'0'}px;">Jour ${ecoules} / ${jours} (${pct}%)</div>
+      ${enCours.objectif ? `<div style="font-size:13px;color:#c8d0e0;line-height:1.6;">${esc(enCours.objectif)}</div>` : ''}
+    </div>`;
+  })() : '';
+
+  const listItem = (p, statut) => {
+    const t = _rmType(p.type);
+    const opac = statut === 'passee' ? '0.5' : '1';
+    return `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #23262f;opacity:${opac};">
+      <span style="width:10px;height:10px;border-radius:50%;background:${t.color};flex-shrink:0;"></span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">${esc(t.label)}</div>
+        <div style="font-size:11px;color:#8892a4;">${_rmDateFr(p.date_debut)} → ${_rmDateFr(p.date_fin)}</div>
+        ${p.objectif ? `<div style="font-size:11.5px;color:#8892a4;margin-top:2px;line-height:1.4;">${esc(p.objectif)}</div>` : ''}
+      </div>
+      ${statut === 'passee' ? '<span style="font-size:14px;color:#3ecf8e;">✓</span>' : ''}
+    </div>`;
+  };
+
+  const passees = phases.filter(p => p.date_fin < today);
+  const avenir  = phases.filter(p => p.date_debut > today);
+
+  return `<div id="app">
+    ${renderHeader('Roadmap', '', false)}
+    <div class="page">
+      ${timelineHtml}
+      ${enCoursHtml}
+      ${avenir.length ? `<div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">À venir</div>${avenir.map(p=>listItem(p,'avenir')).join('')}` : ''}
+      ${passees.length ? `<div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin:${avenir.length?'20':'0'}px 0 4px;">Phases passées</div>${passees.slice().reverse().map(p=>listItem(p,'passee')).join('')}` : ''}
+    </div>
+    ${renderNavBar('roadmap')}
+  </div>`;
+}
+
+function _rmJours(p) {
+  const d = new Date(p.date_debut), f = new Date(p.date_fin);
+  return Math.max(1, Math.round((f-d)/86400000) + 1);
+}
+function _rmJoursEcoules(dateDebut) {
+  const d = new Date(dateDebut), today = new Date();
+  d.setHours(0,0,0,0); today.setHours(0,0,0,0);
+  return Math.round((today-d)/86400000) + 1;
+}
+function _rmDateFr(iso) {
+  if (!iso) return '—';
+  return iso.split('-').reverse().join('/');
+}

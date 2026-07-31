@@ -609,6 +609,25 @@ async function supprimerSuiviApi(id){
   if (!res.ok) throw new Error('supabase_' + res.status);
 }
 
+// ── Roadmap client (client_roadmap) — phases datées cut/reverse/... ──
+async function chargerRoadmap(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function sauverRoadmapApi(clientId, id, phase){
+  const body = { client_id: clientId, type: phase.type, date_debut: phase.date_debut, date_fin: phase.date_fin, objectif: phase.objectif || null };
+  const res = id
+    ? await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) })
+    : await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('supabase_' + res.status + ' — ' + await res.text().catch(()=>''));
+  return res.json();
+}
+async function supprimerRoadmapApi(id){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
 async function chargerTousProgrammes(clientId){
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}` +
@@ -2939,27 +2958,28 @@ async function openPanel(id){
   state.selected = id;
   ficheTab = 'profil';
   _ficheProgVoirArchives = false;
-  ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, suivi:null, xpData:null };
+  ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, suivi:null, roadmap:null, xpData:null };
   state.nav = 'fiche-client';
   renderSidebar();
   renderMain();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
   try {
-    const [profil, tous_programmes, tous_dietes, progression, suivi, xpData] = await Promise.all([
+    const [profil, tous_programmes, tous_dietes, progression, suivi, roadmap, xpData] = await Promise.all([
       chargerFiche(id).catch(()=>({})),
       chargerTousProgrammes(id).catch(()=>[]),
       chargerTousDietes(id).catch(()=>[]),
       chargerProgression(id).catch(()=>[]),
       chargerSuivi(id).catch(()=>[]),
+      chargerRoadmap(id).catch(()=>[]),
       chargerClientProgressionXP(id).catch(()=>null),
     ]);
     const programme = tous_programmes.find(p=>p.actif) || null;
     const diete = tous_dietes.find(d=>d.actif) || null;
-    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, suivi, xpData };
+    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, suivi, roadmap, xpData };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   } catch(e) {
-    ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], suivi:[], xpData:null, error:e.message };
+    ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], suivi:[], roadmap:[], xpData:null, error:e.message };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   }
 }
@@ -3044,6 +3064,7 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Suivi</button>
       <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
       <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
+      <button class="fiche-tab ${ficheTab==='roadmap'?'active':''}" onclick="setFicheTab('roadmap')">Roadmap</button>
     </div>
 
     <div id="ficheTabContent">${renderFicheTabContent(c)}</div>`;
@@ -3069,6 +3090,7 @@ function renderFicheTabContent(c){
   if (ficheTab === 'notes')       return renderFicheSuiviTab(c);
   if (ficheTab === 'bilans')        return renderFicheBilansTab(c);
   if (ficheTab === 'mensurations')  return renderFicheMensurationsTab(c);
+  if (ficheTab === 'roadmap')       return renderFicheRoadmapTab(c);
   return '';
 }
 
@@ -3668,6 +3690,115 @@ async function supprimerSuiviEntry(id, clientId) {
 
 const BLOC_LABELS_COACH = { metabolique:'Métabolique', mecanique:'Mécanique', force:'Force' };
 let ficheSemaine = 1;
+
+// ── Roadmap client — phases datées (types fixes, couleur assignée) ──────
+const ROADMAP_TYPES = [
+  { key:'cut',           label:'Cut',            color:'#e5484d' },
+  { key:'reverse',       label:'Reverse',        color:'#f5a623' },
+  { key:'prise_masse',   label:'Prise de masse', color:'#30a46c' },
+  { key:'maintenance',   label:'Maintenance',    color:'#3b82f6' },
+  { key:'recomposition', label:'Recomposition',  color:'#8b5cf6' },
+];
+function _roadmapType(key){ return ROADMAP_TYPES.find(t=>t.key===key) || { key, label:key||'—', color:'#8892a4' }; }
+
+function renderFicheRoadmapTab(c){
+  const phases = (Array.isArray(ficheData.roadmap) ? ficheData.roadmap : []).slice().sort((a,b)=>(a.date_debut||'').localeCompare(b.date_debut||''));
+  const today = new Date().toISOString().slice(0,10);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${phases.length} phase${phases.length>1?'s':''}</div>
+      <button class="btn primary" onclick="ouvrirModalRoadmap('${c.id}')">+ Ajouter une phase</button>
+    </div>
+    ${phases.length ? `
+      <div style="display:flex;border-radius:8px;overflow:hidden;margin-bottom:16px;height:10px;">
+        ${phases.map(p=>{
+          const t=_roadmapType(p.type);
+          return `<div style="flex:1;background:${t.color};" title="${esc(t.label)}"></div>`;
+        }).join('')}
+      </div>
+      ${phases.map(p => {
+        const t = _roadmapType(p.type);
+        const enCours = p.date_debut<=today && p.date_fin>=today;
+        return `
+        <div class="fiche-card" style="margin-bottom:10px;border-left:3px solid ${t.color};">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-weight:700;font-size:13px;color:${t.color};">${esc(t.label)}</span>
+              ${enCours?'<span class="chip ok"><span class="dot"></span>En cours</span>':''}
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirModalRoadmap('${c.id}',${p.id})">Éditer</button>
+              <button class="icon-btn del" onclick="supprimerRoadmapPhase(${p.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:${p.objectif?'6':'0'}px;">
+            ${p.date_debut?p.date_debut.split('-').reverse().join('/'):'—'} → ${p.date_fin?p.date_fin.split('-').reverse().join('/'):'—'}
+          </div>
+          ${p.objectif ? `<div style="font-size:13px;line-height:1.5;">${esc(p.objectif)}</div>` : ''}
+        </div>`;
+      }).join('')}
+    ` : `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune phase de roadmap pour ce client.</p></div>`}`;
+}
+
+function ouvrirModalRoadmap(clientId, id) {
+  const phases = Array.isArray(ficheData.roadmap) ? ficheData.roadmap : [];
+  const row = id ? (phases.find(x=>x.id===id) || {}) : {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:480px;width:100%;">
+      <h3 style="margin:0 0 16px;">${id ? 'Modifier' : 'Ajouter'} une phase de roadmap</h3>
+      <div class="fiche-field">
+        <label>Type</label>
+        <select id="rm-type" style="font-size:16px;">
+          ${ROADMAP_TYPES.map(t=>`<option value="${t.key}" ${row.type===t.key?'selected':''}>${esc(t.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <div class="fiche-field" style="flex:1;">
+          <label>Date de début</label>
+          <input id="rm-debut" type="date" value="${row.date_debut || ''}" style="font-size:16px;">
+        </div>
+        <div class="fiche-field" style="flex:1;">
+          <label>Date de fin</label>
+          <input id="rm-fin" type="date" value="${row.date_fin || ''}" style="font-size:16px;">
+        </div>
+      </div>
+      <div class="fiche-field">
+        <label>Objectif</label>
+        <textarea id="rm-objectif" placeholder="ex: perte de gras progressive, maintien de la force…" style="font-size:14px;">${esc(row.objectif||'')}</textarea>
+      </div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauvegarderRoadmap('${clientId}',${id||'null'})">Enregistrer</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function sauvegarderRoadmap(clientId, id) {
+  const v = k => document.getElementById('rm-'+k)?.value || '';
+  const type = v('type'), date_debut = v('debut'), date_fin = v('fin');
+  if (!type || !date_debut || !date_fin) { alert('Type, date de début et date de fin sont obligatoires.'); return; }
+  if (date_fin < date_debut) { alert('La date de fin doit être après la date de début.'); return; }
+  const phase = { type, date_debut, date_fin, objectif: v('objectif').trim() };
+  try {
+    await sauverRoadmapApi(clientId, id, phase);
+    document.querySelector('.modal-overlay')?.remove();
+    ficheData.roadmap = await chargerRoadmap(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function supprimerRoadmapPhase(id, clientId) {
+  if (!confirm('Supprimer cette phase de roadmap ?')) return;
+  try {
+    await supprimerRoadmapApi(id);
+    ficheData.roadmap = await chargerRoadmap(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
 
 function renderFicheProgDetail(prog){
   const blocs = prog.blocs || [];
