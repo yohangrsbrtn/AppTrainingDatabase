@@ -852,89 +852,106 @@ function filteredSortedClients(){
 }
 
 // ── Chargement des données réelles ────────────────────────────────────
+// 100% Supabase — plus aucun appel GAS ici (seul l'outil de migration, apiGasProd(),
+// est autorisé à parler à GAS). Un client sans ligne client_profils n'existe simplement
+// pas dans la console tant qu'il n'a pas été migré/créé.
 async function chargerDonnees(){
-  const [clientsRaw, bilansCoach, logsRes, aValider] = await Promise.all([
-    api('listerClientsAvecNiveaux').catch(()=>[]),
-    api('listerBilansCoach').catch(()=>[]),
-    api('chargerTousLesLogs').catch(()=>({logs:[]})),
-    api('listerAlimentsCommunauteAValider').catch(()=>[]),
+  const [profilsRes, progressionRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_progression`, { headers: supaHeaders() }),
   ]);
-  const clients = (typeof clientsRaw === 'string' ? JSON.parse(clientsRaw) : clientsRaw).filter(c => c.id !== 'yohan');
-  const retards = await Promise.all(
-    clients.map(c => apiAs('verifierRetardBilan', c.id).catch(()=>({enRetard:false})))
-  );
-  // verifierRetardBilan() répond "si j'envoyais MAINTENANT, serait-ce en retard ?" — utile au moment
-  // de l'envoi côté client (bilan.js), mais ça dit "en retard" pour tout le monde une fois la fenêtre
-  // de la semaine passée, MÊME si le client a déjà envoyé son bilan à temps. On corrige ici en
-  // vérifiant si un envoi (listerBilansCoach) existe déjà dans les ~6 derniers jours pour ce client.
-  const parseTsFr = s => { const m = (s||'').match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/); return m ? new Date(+m[3], +m[2]-1, +m[1], +m[4], +m[5]) : null; };
-  const dernierEnvoi = {};
-  bilansCoach.forEach(b => { const d = parseTsFr(b.ts); if (d && (!dernierEnvoi[b.client] || d > dernierEnvoi[b.client])) dernierEnvoi[b.client] = d; });
-  const maintenant = new Date();
-  clients.forEach((c,i) => {
-    const raw = !!(retards[i] && retards[i].enRetard);
-    const dernier = dernierEnvoi[c.id];
-    const soumisRecemment = dernier && (maintenant - dernier) < 6*24*60*60*1000;
-    c.enRetard = raw && !soumisRecemment;
+  const profils = profilsRes.ok ? await profilsRes.json() : [];
+  const progressionRows = progressionRes.ok ? await progressionRes.json() : [];
+  const progByClient = {};
+  progressionRows.forEach(p => { progByClient[p.client_id] = p; });
+
+  const clients = profils.filter(p => p.client_id !== 'yohan').map(p => {
+    const prog = progByClient[p.client_id] || {};
+    const xpTotal = prog.xp_total || 0;
+    return {
+      id: p.client_id,
+      nom: [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id,
+      niveau: Math.max(1, Math.floor(xpTotal/50) + 1),
+      titreActif: prog.titre_actif || null,
+      chimieActif: !!p.chimie_actif,
+      chimieActifSupa: !!p.chimie_actif,
+      verrouile: false,
+      verrouilleApp: !!p.verrouille_app,
+      dernConnexion: null,
+      derniereConnexionSupa: p.derniere_connexion || null,
+      _hasSupaProfil: true,
+      supabaseOnlyActif: !!p.supabase_only,
+      statut: p.statut || 'actif',
+      enRetard: false,
+    };
   });
 
-  // Fusionne les fiches Supabase (client_profils) — un client peut n'exister que dans Supabase
-  // (créé depuis la console, pas encore dans la feuille Clients) : on l'ajoute comme entrée
-  // synthétique pour qu'il apparaisse dans le tableau/panneau, avec un badge "pas de connexion possible".
-  let profils = [];
+  // Retard : même logique de ponctualité que côté client (_supaCalculerRetard, déjà
+  // Supabase-native) pour tout le monde désormais, plus de distinction GAS/Supabase.
+  const retards = await Promise.all(clients.map(c => _supaCalculerRetard(c.id).catch(()=>false)));
+  clients.forEach((c,i) => { c.enRetard = retards[i]; });
+
+  const clientsById = {};
+  clients.forEach(c => { clientsById[c.id] = c.nom; });
+
+  let bilansAll = [];
   try {
-    const resProfils = await fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { headers: supaHeaders() });
-    if (resProfils.ok) profils = await resProfils.json();
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?order=created_at.desc&limit=500`, { headers: supaHeaders() });
+    if (res.ok) bilansAll = await res.json();
   } catch(e) {}
-  const idsExistants = new Set(clients.map(c=>c.id));
-  profils.forEach(p => {
-    if (!idsExistants.has(p.client_id)) {
-      clients.push({
-        id: p.client_id,
-        nom: [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id,
-        niveau: null, enRetard: false, chimieActif: false, verrouile: false,
-        dernConnexion: null, titreActif: null,
-        _supabaseOnly: true,
-        supabaseOnlyActif: !!p.supabase_only,
-      });
-    }
-  });
+  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 
-  // Pour les clients supabase_only, le retard GAS (verifierRetardBilan) n'a pas de sens —
-  // on le recalcule directement sur les données Supabase, avec la même logique de
-  // ponctualité que côté client (_bilanEstPonctuel, api.js) plutôt qu'un badge figé à false.
-  const clientsSupaOnly = profils.filter(p => p.supabase_only);
-  const retardsSupa = await Promise.all(clientsSupaOnly.map(p => _supaCalculerRetard(p.client_id)));
-  clientsSupaOnly.forEach((p, i) => {
-    const c = clients.find(cl => cl.id === p.client_id);
-    if (c) c.enRetard = retardsSupa[i];
-  });
-
-  // Protocole chimie Supabase — distinct du chimieActif GAS legacy (c.chimieActif) :
-  // tout client ayant une fiche client_profils peut avoir un protocole créé depuis la
-  // console (indépendamment de supabase_only), donc _hasSupaProfil couvre tout le monde.
-  profils.forEach(p => {
-    const c = clients.find(cl => cl.id === p.client_id);
-    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; c.statut = p.statut || 'actif'; c.derniereConnexionSupa = p.derniere_connexion || null; c.verrouilleApp = !!p.verrouille_app; }
-  });
-
-  // Bilans Supabase en attente de traitement par le coach (soumis par clients supabase_only)
-  let bilansSupa = [];
+  let aValiderRows = [];
   try {
-    const bsRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&coach_traite=eq.false&select=id,client_id,created_at,semaine_label&order=created_at.desc`, { headers: supaHeaders() });
-    if (bsRes.ok) bilansSupa = await bsRes.json();
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?valide=eq.false&order=created_at.desc`, { headers: supaHeaders() });
+    if (res.ok) aValiderRows = await res.json();
   } catch(e) {}
+  const aValider = aValiderRows.map(a => ({ nom: a.nom, ajoutePar: clientsById[a.created_by] || a.created_by || '?' }));
 
-  data = { clients, bilansCoach, bilansSupa, logs: (logsRes && logsRes.logs) || [], aValider };
+  const logs = await _chargerActiviteRecente(clientsById).catch(()=>[]);
+
+  // bilansCoach (ancien format GAS ts/client/coachTraite) conservé vide pour compat —
+  // tout ce qui l'utilisait lit maintenant bilansAll/bilansSupa directement.
+  data = { clients, bilansCoach: [], bilansSupa, bilansAll, logs, aValider };
   // Persist pour stale-while-revalidate au prochain chargement
   try {
     localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data }));
   } catch(e) {
-    // QuotaExceeded : réessayer sans les logs (potentiellement volumineux)
+    // QuotaExceeded : réessayer sans les logs/bilans (potentiellement volumineux)
     try {
-      localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data: { ...data, logs: data.logs.slice(0, 50) } }));
+      localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data: { ...data, logs: data.logs.slice(0, 50), bilansAll: data.bilansAll.slice(0, 100) } }));
     } catch(e2) {}
   }
+}
+
+// Activité récente (dashboard) : fusion bilans envoyés + séries loggées en séance,
+// triés par date desc. Remplace l'ancien chargerTousLesLogs (GAS).
+async function _chargerActiviteRecente(clientsById){
+  const fmtTs = iso => { const d = new Date(iso); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); };
+  const [logsRes, bilansRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?order=updated_at.desc&limit=30&select=updated_at,semaine,client_programme_exercices(client_programme_seances(titre,client_programme_blocs(client_programmes!client_programme_blocs_client_programme_id_fkey(nom,client_id))))`, { headers: supaHeaders() }).catch(()=>null),
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&order=created_at.desc&limit=30&select=client_id,created_at,semaine_label`, { headers: supaHeaders() }).catch(()=>null),
+  ]);
+  const logsRows = (logsRes && logsRes.ok) ? await logsRes.json() : [];
+  const bilansRows = (bilansRes && bilansRes.ok) ? await bilansRes.json() : [];
+
+  const fromLogs = logsRows.map(l => {
+    const seance = l.client_programme_exercices && l.client_programme_exercices.client_programme_seances;
+    const bloc = seance && seance.client_programme_blocs;
+    const prog = bloc && bloc.client_programmes;
+    const clientId = prog && prog.client_id;
+    const nom = clientId ? (clientsById[clientId] || null) : null;
+    if (!nom) return null; // client sans profil (pas encore migré) — pas d'activité affichée
+    return { nom, tms: l.updated_at, ts: fmtTs(l.updated_at), semaine: l.semaine, programme: (prog.nom||'') + '|' + (seance.titre||'') };
+  }).filter(Boolean);
+
+  const fromBilans = bilansRows.map(b => ({
+    nom: clientsById[b.client_id] || b.client_id,
+    tms: b.created_at, ts: fmtTs(b.created_at),
+    type: 'bilanEnvoye', semaine: b.semaine_label,
+  }));
+
+  return [...fromLogs, ...fromBilans].sort((a,b) => (b.tms||'').localeCompare(a.tms||'')).slice(0,30);
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
@@ -1041,81 +1058,17 @@ function openBilanHistoClient(clientId) {
   bilansHistoClientId = clientId;
   bilansHistoData = { loaded: false, error: null, bilans: [] };
   renderMain();
-  apiAs('chargerHistoriqueBilans', clientId).then(raw => {
-    if (bilansHistoClientId !== clientId) return;
-    bilansHistoData = { loaded: true, error: null, bilans: raw || [] };
-    if (state.nav === 'bilans') renderMain();
-  }).catch(e => {
-    if (bilansHistoClientId !== clientId) return;
-    bilansHistoData = { loaded: true, error: e.message, bilans: [] };
-    if (state.nav === 'bilans') renderMain();
-  });
-}
-
-async function openBilanDetail(client, ligneTitre, ts, coachTraite) {
-  _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
-  bilanDetailState = { loaded: false, client, ligneTitre, ts: ts||null, coachTraite: !!coachTraite, data: null, error: null };
-  state.nav = 'bilan-detail';
-  renderSidebar();
-  renderMain();
-  try {
-    const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre });
-    bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
-  } catch(e) {
-    bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
-  }
-  if (state.nav === 'bilan-detail') renderMain();
-}
-
-async function openBilanDetailFromLog(client, ts, coachTraite) {
-  _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
-  bilanDetailState = { loaded: false, client, ligneTitre: null, ts, coachTraite: !!coachTraite, data: null, error: null };
-  state.nav = 'bilan-detail';
-  renderSidebar();
-  renderMain();
-
-  // 1. Essai GAS sandbox
-  try {
-    const historique = await apiAs('chargerHistoriqueBilans', client);
-    const tsMs = _parseTsMs(ts);
-    const match = Array.isArray(historique) ? historique.find(h => {
-      const hMs = _parseTsMs(h.date);
-      return hMs && tsMs && Math.abs(hMs - tsMs) <= 3*86400000;
-    }) : null;
-    if (match) {
-      bilanDetailState.ligneTitre = match.ligneTitre;
-      const raw = await apiAs('chargerBilanParLigne', client, { ligneTitre: match.ligneTitre });
-      bilanDetailState = { ...bilanDetailState, loaded: true, data: typeof raw === 'string' ? JSON.parse(raw) : raw };
-      if (state.nav === 'bilan-detail') renderMain();
-      return;
-    }
-  } catch(e) { /* GAS indisponible ou bilan absent — fallback Supabase */ }
-
-  // 2. Fallback Supabase
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(client)}&order=date_validation.desc`,
-      { headers: supaHeaders() }
-    );
-    const supaBilans = res.ok ? await res.json() : [];
-    const tsMs = _parseTsMs(ts);
-    const supMatch = supaBilans.find(b => {
-      if (!b.date_validation) return false;
-      const bMs = new Date(b.date_validation).getTime();
-      return tsMs && Math.abs(bMs - tsMs) <= 7*86400000;
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=date_validation.desc`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('supabase_' + r.status)))
+    .then(rows => {
+      if (bilansHistoClientId !== clientId) return;
+      bilansHistoData = { loaded: true, error: null, bilans: rows || [] };
+      if (state.nav === 'bilans') renderMain();
+    }).catch(e => {
+      if (bilansHistoClientId !== clientId) return;
+      bilansHistoData = { loaded: true, error: e.message, bilans: [] };
+      if (state.nav === 'bilans') renderMain();
     });
-    if (supMatch) {
-      _bilanNavList = supaBilans;
-      _bilanNavIdx  = supaBilans.indexOf(supMatch);
-      _bilanNavSource = 'bilans';
-      openBilanDetailSupabase(supMatch);
-      return;
-    }
-    throw new Error('Bilan introuvable dans GAS et dans Supabase.');
-  } catch(e) {
-    bilanDetailState = { ...bilanDetailState, loaded: true, error: e.message };
-  }
-  if (state.nav === 'bilan-detail') renderMain();
 }
 
 function openBilanDetailSupabase(bilan) {
@@ -1170,9 +1123,7 @@ function bilanNavGo(delta) {
   const newIdx = _bilanNavIdx + delta;
   if (newIdx < 0 || newIdx >= _bilanNavList.length) return;
   _bilanNavIdx = newIdx;
-  const b = _bilanNavList[newIdx];
-  if (b._supabaseBilan !== false) openBilanDetailSupabase(b);
-  else openBilanDetail(b.client_id, b.gas_ligne_titre, b.ts, b.coach_traite);
+  openBilanDetailSupabase(_bilanNavList[newIdx]);
 }
 
 function _weekRange(dateFr) {
@@ -1186,7 +1137,7 @@ function _weekRange(dateFr) {
 }
 
 function renderBilansPage(el) {
-  const pendingCount = data.bilansCoach.filter(b => !b.coachTraite).length;
+  const pendingCount = (data.bilansAll||[]).filter(b => b.envoye_coach && !b.coach_traite).length;
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Bilans</h1></div>
@@ -1207,20 +1158,28 @@ function _renderBilansTabContent() {
 
 function _renderBilansRecents() {
   const now = Date.now();
-  const pending = data.bilansCoach.filter(b => !b.coachTraite).sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
-  const recentTraited = data.bilansCoach.filter(b => {
-    if (!b.coachTraite) return false;
-    const ms = _parseTsMs(b.ts);
-    return ms && (now - ms) <= 15*24*60*60*1000;
-  }).sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+  const all = data.bilansAll || [];
+  const envoyes = all.filter(b => b.envoye_coach);
+  const pending = envoyes.filter(b => !b.coach_traite).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  const recentTraited = envoyes.filter(b => {
+    if (!b.coach_traite) return false;
+    const iso = b.date_validation || b.created_at;
+    const t = iso ? new Date(iso).getTime() : null;
+    return t && (now - t) <= 15*24*60*60*1000;
+  }).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
 
+  const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
+  const dateFrOf = b => {
+    const iso = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : '');
+    return iso ? iso.split('-').reverse().join('/') : '—';
+  };
   const rowHtml = (b, showBtn) => `
-    <tr style="cursor:pointer;" onclick="openBilanDetailFromLog('${b.client}','${esc(b.ts)}',${!!b.coachTraite})">
-      <td><div class="cell-name"><div class="mini-avatar">${initials(b.nom)}</div>${esc(b.nom)}</div></td>
-      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine||'')}</td>
-      <td class="mono" style="color:var(--text-faint);font-size:12px;">${esc(b.ts||'')}</td>
-      <td>${b.coachTraite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
-      <td class="row-actions" onclick="event.stopPropagation();">${showBtn ? `<button class="btn" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">Marquer traité</button>` : ''}</td>
+    <tr style="cursor:pointer;" onclick="openBilanByIdFromRecents(${b.id})">
+      <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine_label||'')}</td>
+      <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
+      <td>${b.coach_traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
+      <td class="row-actions" onclick="event.stopPropagation();">${showBtn ? `<button class="btn" onclick="marquerBilanSupaTraite(${b.id})">Marquer traité</button>` : ''}</td>
     </tr>`;
 
   return `
@@ -1244,17 +1203,20 @@ function _renderBilansRecents() {
 
 function _renderBilansHistorique() {
   if (!bilansHistoClientId) {
-    const clientBilanCount = {}, clientLastTs = {};
-    data.bilansCoach.forEach(b => {
-      clientBilanCount[b.client] = (clientBilanCount[b.client]||0) + 1;
-      if (!clientLastTs[b.client] || b.ts > clientLastTs[b.client]) clientLastTs[b.client] = b.ts;
+    const all = data.bilansAll || [];
+    const clientBilanCount = {}, clientLastDate = {};
+    all.forEach(b => {
+      clientBilanCount[b.client_id] = (clientBilanCount[b.client_id]||0) + 1;
+      const d = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : null);
+      if (d && (!clientLastDate[b.client_id] || d > clientLastDate[b.client_id])) clientLastDate[b.client_id] = d;
     });
     const rows = data.clients.map(c => {
       const nb = clientBilanCount[c.id]||0;
+      const lastFr = clientLastDate[c.id] ? clientLastDate[c.id].split('-').reverse().join('/') : '';
       return `<tr style="cursor:pointer;" onclick="openBilanHistoClient('${c.id}')">
         <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
         <td style="font-size:12px;">${nb} bilan${nb>1?'s':''}</td>
-        <td class="mono" style="color:var(--text-faint);font-size:12px;">${esc(clientLastTs[c.id]||'')}</td>
+        <td class="mono" style="color:var(--text-faint);font-size:12px;">${esc(lastFr)}</td>
         <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
       </tr>`;
     }).join('');
@@ -1277,15 +1239,12 @@ function _renderBilansHistorique() {
   if (bilansHistoData.error) return `${backBtn}<div style="color:var(--critical);padding:16px;">Erreur : ${esc(bilansHistoData.error)}</div>`;
   if (!bilansHistoData.bilans.length) return `${backBtn}<div class="table-card" style="padding:20px 24px;color:var(--text-faint);">Aucun bilan validé pour ${esc(nom)}.</div>`;
 
-  const rows = bilansHistoData.bilans.map(h => {
-    const dateMs = _parseTsMs(h.date);
-    const logEntry = dateMs ? data.bilansCoach.find(b => b.client===bilansHistoClientId && Math.abs((_parseTsMs(b.ts)||0)-dateMs)<=3*86400000) : null;
-    const coachTraite = logEntry ? logEntry.coachTraite : false;
-    const ts = logEntry ? logEntry.ts : null;
-    return `<tr style="cursor:pointer;" onclick="openBilanDetail('${bilansHistoClientId}',${h.ligneTitre},'${esc(ts||'')}',${coachTraite})">
-      <td class="mono" style="font-size:12px;">${esc(_semaineFromDate(h.date))}</td>
-      <td class="mono" style="font-size:12px;color:var(--text-faint);">${esc(h.date||'')}</td>
-      <td>${coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(ts?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)}</td>
+  const rows = bilansHistoData.bilans.map((h, idx) => {
+    const dateFr = h.date_validation ? h.date_validation.split('-').reverse().join('/') : '—';
+    return `<tr style="cursor:pointer;" onclick="openBilanFromHistorique(${idx})">
+      <td class="mono" style="font-size:12px;">${esc(h.semaine_label||dateFr)}</td>
+      <td class="mono" style="font-size:12px;color:var(--text-faint);">${dateFr}</td>
+      <td>${h.coach_traite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(h.envoye_coach?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)}</td>
       <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
     </tr>`;
   }).join('');
@@ -1973,10 +1932,7 @@ async function rechercherOpenFoodFacts(query){
 
 // ── Page Protocole ─────────────────────────────────────────────────────
 function renderProtocolePage(el){
-  const actifs = data.clients.filter(c=>c.chimieActif);
-  // Tout client peut recevoir un protocole créé depuis la console, qu'il ait déjà
-  // ou non une fiche client_profils — un client GAS legacy n'en a pas forcément
-  // (la plupart n'en ont pas), ce n'est pas une condition pour créer un protocole.
+  const actifs = data.clients.filter(c=>c.chimieActifSupa);
   const supaClients = data.clients;
   el.innerHTML = `
     <div class="page-head">
@@ -1984,22 +1940,6 @@ function renderProtocolePage(el){
       <div class="meta">${actifs.length} actif${actifs.length>1?'s':''}</div>
     </div>
     <div class="table-card">
-      <div class="table-toolbar"><div class="title">Clients avec le protocole chimie activé (legacy GAS)</div></div>
-      <div class="table-scroll"><table class="clients">
-        <thead><tr><th>Client</th><th>Niveau</th><th></th></tr></thead>
-        <tbody>
-          ${actifs.map(c => `
-            <tr>
-              <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
-              <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
-              <td class="row-actions"><button class="btn" onclick="toggleChimie('${c.id}',true)">Désactiver</button></td>
-            </tr>`).join('') || `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun protocole actif.</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-    <div style="margin-top:14px;font-size:11.5px;color:var(--text-faint);">Pour activer le protocole d'un nouveau client, utilise le menu ⋯ depuis la page Clients.</div>
-
-    <div class="table-card" style="margin-top:22px;">
       <div class="table-toolbar"><div class="title">Créer / gérer un protocole (tous clients)</div></div>
       <div class="table-scroll"><table class="clients">
         <thead><tr><th>Client</th><th>Visible côté client</th><th></th></tr></thead>
@@ -2993,27 +2933,23 @@ function renderDashboard(el){
     </div>`;
 }
 
-async function marquerTraite(client, ts){
-  if (bilanDetailState._supabaseBilanId) {
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
-        { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
-      );
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      bilanDetailState.coachTraite = true;
-      if (_ficheBilans) {
-        const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
-        if (b) b.coach_traite = true;
-      }
-      if (state.nav === 'bilan-detail') renderMain();
-    } catch(e) { alert('Erreur : ' + e.message); }
-  } else {
-    try {
-      await apiAs('marquerBilanTraiteServeur', client, { ts });
-      await rafraichir();
-    } catch(e) { alert('Erreur : ' + e.message); }
-  }
+async function marquerTraite(){
+  if (!bilanDetailState._supabaseBilanId) return;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
+    );
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    bilanDetailState.coachTraite = true;
+    if (_ficheBilans) {
+      const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
+      if (b) b.coach_traite = true;
+    }
+    const ba = (data.bilansAll || []).find(b => b.id === bilanDetailState._supabaseBilanId);
+    if (ba) ba.coach_traite = true;
+    if (state.nav === 'bilan-detail') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 async function marquerBilanSupaTraite(bilanId) {
@@ -3023,8 +2959,24 @@ async function marquerBilanSupaTraite(bilanId) {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     data.bilansSupa = (data.bilansSupa || []).filter(b => b.id !== bilanId);
-    if (state.nav === 'dashboard') renderMain();
+    const ba = (data.bilansAll || []).find(b => b.id === bilanId);
+    if (ba) ba.coach_traite = true;
+    if (state.nav === 'dashboard' || state.nav === 'bilans') renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function openBilanByIdFromRecents(id){
+  const b = (data.bilansAll||[]).find(x=>x.id===id);
+  if (!b) return;
+  _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
+  openBilanDetailSupabase(b);
+}
+
+function openBilanFromHistorique(idx){
+  const b = bilansHistoData.bilans[idx];
+  if (!b) return;
+  _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
+  openBilanDetailSupabase(b);
 }
 
 async function changerStatutClient(clientId, statut) {
@@ -3120,7 +3072,7 @@ function renderTable(){
           <div class="menu" id="menu-row${c.id}">
             <button class="menu-item" onclick="event.stopPropagation();openPanel('${c.id}')">${iUsers()}Voir la fiche</button>
             <button class="menu-item" onclick="event.stopPropagation();window.location.href='index.html?viewAs=${encodeURIComponent(c.id)}'">${iGrid()}Ouvrir en vue client</button>
-            <button class="menu-item" onclick="event.stopPropagation();toggleChimie('${c.id}',${!!c.chimieActif})">${iFlask()}${c.chimieActif?'Désactiver':'Activer'} le protocole</button>
+            <button class="menu-item" onclick="event.stopPropagation();toggleChimieActifSupa('${c.id}',${!!c.chimieActifSupa})">${iFlask()}${c.chimieActifSupa?'Désactiver':'Activer'} le protocole</button>
             <div class="menu-sep"></div>
             ${!c.supabaseOnlyActif ? `<button class="menu-item" onclick="event.stopPropagation();togglerSupabaseOnly('${c.id}')">${iGrid()}Passer en Supabase only</button>` : ''}
             <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)})">${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)?iUnlock():iLock()}${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)?'Déverrouiller':'Verrouiller'} l'accès</button>
@@ -3135,10 +3087,6 @@ function renderTable(){
   `).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun client ne correspond.</td></tr>`;
 }
 
-async function toggleChimie(id, actif){
-  try { await apiAs('definirChimieActif', id, { actif: !actif }); await rafraichir(); if (state.nav==='clients') renderTable(); }
-  catch(e) { alert('Erreur : ' + e.message); }
-}
 // Pour un client supabase_only, "Verrouiller l'accès" coupe désormais sa connexion à
 // l'app (client_profils.verrouille_app) — plus la même chose que l'ancien verrouillage
 // GAS (verrouilerAccesClient), qui touche les Google Sheets et reste utilisé tel quel
