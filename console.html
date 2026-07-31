@@ -1403,7 +1403,7 @@ function renderBilanDetailPage(el) {
             : `<div style="display:flex;flex-wrap:wrap;gap:14px;">
                 ${bilanDetailState.photos.map(p => `
                   <div style="width:100px;">
-                    <div style="position:relative;width:100px;aspect-ratio:3/4;">
+                    <div style="position:relative;width:100px;aspect-ratio:9/16;">
                       <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="window.open('${esc(p.url)}','_blank')">
                       <button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>
                     </div>
@@ -3327,7 +3327,7 @@ function _renderFicheBilanPhotosGallery(c){
       <div style="display:flex;gap:12px;">
         ${sel.map(id => { const p = findPhoto(id); if (!p) return ''; return `
           <div style="flex:1;text-align:center;min-width:0;max-width:280px;">
-            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:3/4;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
+            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
             <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)}</div>
           </div>`; }).join('')}
       </div>
@@ -3338,7 +3338,7 @@ function _renderFicheBilanPhotosGallery(c){
       ${_ficheBilanPhotosGallery.map(p => {
         const isSel = sel.includes(p.id);
         return `<div style="width:84px;cursor:pointer;" onclick="toggleFicheBilanPhotoSel(${p.id})">
-          <div style="position:relative;width:84px;aspect-ratio:3/4;border-radius:var(--radius-sm);overflow:hidden;${isSel?'box-shadow:0 0 0 3px var(--accent);':''}">
+          <div style="position:relative;width:84px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isSel?'box-shadow:0 0 0 3px var(--accent);':''}">
             <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;">
             ${isSel?`<div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;">✓</div>`:''}
           </div>

@@ -571,7 +571,7 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
       ${_bilanPhotos === null
         ? `<div style="font-size:12px;color:var(--muted);">Chargement…</div>`
         : _bilanPhotos.map(p => `
-          <div style="position:relative;width:84px;aspect-ratio:3/4;flex-shrink:0;">
+          <div style="position:relative;width:84px;aspect-ratio:9/16;flex-shrink:0;">
             <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onclick="window.open('${esc(p.url)}','_blank')">
             <button onclick="_supprimerBilanPhotoClient(${p.id},'${esc(p.url)}')" title="Supprimer"
               style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);border:none;color:#fff;font-size:12px;line-height:1;cursor:pointer;">✕</button>
