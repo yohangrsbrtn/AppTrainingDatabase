@@ -3119,7 +3119,11 @@ function renderFicheBilansTab(c){
         <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanSel(this.checked)">
         Tout sélectionner
       </label>
-      <button class="btn" style="font-size:12px;color:var(--critical);margin-left:auto;" ${selCount === 0 ? 'disabled' : ''}
+      <button class="btn" style="font-size:12px;margin-left:auto;" ${selCount === 0 ? 'disabled' : ''}
+        onclick="marquerFicheBilansSelTraite('${esc(c.id)}')">
+        ✓ Marquer traité (${selCount})
+      </button>
+      <button class="btn" style="font-size:12px;color:var(--critical);" ${selCount === 0 ? 'disabled' : ''}
         onclick="supprimerFicheBilansSel('${esc(c.id)}')">
         🗑 Supprimer (${selCount})
       </button>
@@ -3163,6 +3167,24 @@ async function supprimerFicheBilansSel(clientId) {
     );
     if (!res.ok) { const t = await res.text(); alert(`Erreur suppression : ${res.status} — ${t}`); }
   } catch(e) { alert(`Erreur suppression : ${e.message}`); }
+  _ficheBilansSel = new Set();
+  _ficheBilans = null;
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  if (el) el.innerHTML = renderFicheBilansTab(c);
+}
+
+async function marquerFicheBilansSelTraite(clientId) {
+  const ids = [..._ficheBilansSel];
+  if (!ids.length) return;
+  const el = document.getElementById('ficheTabContent');
+  if (el) el.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-faint);">Mise à jour…</div>`;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
+    );
+    if (!res.ok) { const t = await res.text(); alert(`Erreur : ${res.status} — ${t}`); }
+  } catch(e) { alert(`Erreur : ${e.message}`); }
   _ficheBilansSel = new Set();
   _ficheBilans = null;
   const c = (data.clients||[]).find(cl => cl.id === clientId);
