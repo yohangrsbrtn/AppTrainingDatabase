@@ -915,7 +915,7 @@ async function chargerDonnees(){
   // console (indépendamment de supabase_only), donc _hasSupaProfil couvre tout le monde.
   profils.forEach(p => {
     const c = clients.find(cl => cl.id === p.client_id);
-    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; c.statut = p.statut || 'actif'; }
+    if (c) { c._hasSupaProfil = true; c.chimieActifSupa = !!p.chimie_actif; c.supabaseOnlyActif = !!p.supabase_only; c.statut = p.statut || 'actif'; c.derniereConnexionSupa = p.derniere_connexion || null; c.verrouilleApp = !!p.verrouille_app; }
   });
 
   // Bilans Supabase en attente de traitement par le coach (soumis par clients supabase_only)
@@ -3087,6 +3087,18 @@ function renderClientsPage(el){
 
 function arrow(key){ return state.sortKey===key ? (state.sortDir===1?'▲':'▼') : '▲'; }
 
+// Dernière connexion : pour un client basculé en Supabase only, on affiche sa
+// vraie dernière connexion Supabase (écrite à chaque login réussi côté client_profils.derniere_connexion)
+// plutôt que l'ancienne donnée GAS (obsolète dès qu'il ne se connecte plus via l'app GAS).
+function _fmtDerniereConnexion(c){
+  if (c.supabaseOnlyActif) {
+    if (!c.derniereConnexionSupa) return 'Jamais connecté';
+    const d = new Date(c.derniereConnexionSupa);
+    return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  }
+  return c.dernConnexion || 'Jamais connecté';
+}
+
 function renderTable(){
   const list = filteredSortedClients();
   const countEl = document.getElementById('clientCount');
@@ -3096,10 +3108,10 @@ function renderTable(){
   body.innerHTML = list.map(c => `
     <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
       <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c.supabaseOnlyActif ? ' <span class="chip off" style="font-size:9px;">Supabase only</span>' : (c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : '')}</div></td>
-      <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${c.verrouile ? ` <span class="chip off">🔒</span>` : ''}</td>
+      <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile) ? ` <span class="chip off">🔒</span>` : ''}${c.chimieActifSupa ? ` <span class="chip ok" title="Protocole chimie actif">⚗️</span>` : ''}</td>
       <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
       <td>${esc(c.titreActif||'—')}</td>
-      <td class="mono" style="color:var(--text-faint);">${esc(c.dernConnexion||'Jamais connecté')}</td>
+      <td class="mono" style="color:var(--text-faint);">${esc(_fmtDerniereConnexion(c))}</td>
       <td class="row-actions">
         <div class="dropdown">
           <button class="icon-btn" onclick="event.stopPropagation();toggleMenu(event,'row${c.id}')">
@@ -3111,7 +3123,7 @@ function renderTable(){
             <button class="menu-item" onclick="event.stopPropagation();toggleChimie('${c.id}',${!!c.chimieActif})">${iFlask()}${c.chimieActif?'Désactiver':'Activer'} le protocole</button>
             <div class="menu-sep"></div>
             ${!c.supabaseOnlyActif ? `<button class="menu-item" onclick="event.stopPropagation();togglerSupabaseOnly('${c.id}')">${iGrid()}Passer en Supabase only</button>` : ''}
-            <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!c.verrouile})">${c.verrouile?iUnlock():iLock()}${c.verrouile?'Déverrouiller':'Verrouiller'} l'accès</button>
+            <button class="menu-item" onclick="event.stopPropagation();toggleVerrou('${c.id}',${!!(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)})">${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)?iUnlock():iLock()}${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile)?'Déverrouiller':'Verrouiller'} l'accès</button>
             <div class="menu-sep"></div>
             ${(c.statut||'actif')!=='actif'?`<button class="menu-item" onclick="event.stopPropagation();changerStatutClient('${c.id}','actif')">✅ Marquer actif</button>`:''}
             ${(c.statut||'actif')!=='pause'?`<button class="menu-item" onclick="event.stopPropagation();changerStatutClient('${c.id}','pause')">⏸ Mettre en pause</button>`:''}
@@ -3127,9 +3139,23 @@ async function toggleChimie(id, actif){
   try { await apiAs('definirChimieActif', id, { actif: !actif }); await rafraichir(); if (state.nav==='clients') renderTable(); }
   catch(e) { alert('Erreur : ' + e.message); }
 }
+// Pour un client supabase_only, "Verrouiller l'accès" coupe désormais sa connexion à
+// l'app (client_profils.verrouille_app) — plus la même chose que l'ancien verrouillage
+// GAS (verrouilerAccesClient), qui touche les Google Sheets et reste utilisé tel quel
+// pour les clients encore sur l'ancien système. Bascule manuelle, client par client.
 async function toggleVerrou(id, verrouille){
-  try { await apiAs(verrouille ? 'deverrouilerAccesClient' : 'verrouilerAccesClient', id); await rafraichir(); if (state.nav==='clients') renderTable(); }
-  catch(e) { alert('Erreur : ' + e.message); }
+  const c = (data.clients||[]).find(cl => cl.id === id);
+  try {
+    if (c && c.supabaseOnlyActif) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ verrouille_app: !verrouille })
+      });
+      if (!res.ok) throw new Error('supabase_' + res.status);
+    } else {
+      await apiAs(verrouille ? 'deverrouilerAccesClient' : 'verrouilerAccesClient', id);
+    }
+    await rafraichir(); if (state.nav==='clients') renderTable();
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 // Bascule client_profils.supabase_only à true — dernière étape de la migration : la
 // connexion du client passera entièrement par Supabase (plus GAS). Upsert car un client
@@ -4876,7 +4902,7 @@ function panelTabContent(c, t){
   if (t === 'fiche') return renderFicheTab();
   return `
     <div class="panel-row"><span class="l">Statut bilan</span><span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span></div>
-    <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(c.dernConnexion||'Jamais connecté')}</span></div>
+    <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(_fmtDerniereConnexion(c))}</span></div>
     <div class="panel-row"><span class="l">Accès feuille</span><span class="v">${c.verrouile ? '🔒 Verrouillé' : 'Libre'}</span></div>
     <div class="panel-row"><span class="l">Protocole chimie</span><span class="v">${c.chimieActif ? 'Actif' : 'Inactif'}</span></div>`;
 }

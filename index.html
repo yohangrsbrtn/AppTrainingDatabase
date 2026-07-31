@@ -611,6 +611,21 @@ async function doCreerMotDePasseSupabase() {
 }
 
 async function _completerConnexionSupabase(session) {
+  // Verrouillage app (coach) — vérifié AVANT de finaliser la connexion, même avec
+  // le bon mot de passe : un client verrouillé ne doit jamais atteindre l'accueil.
+  try {
+    const lockRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}&select=verrouille_app`, { headers: supaHeaders() });
+    const lockRows = lockRes.ok ? await lockRes.json() : [];
+    if (lockRows[0] && lockRows[0].verrouille_app) {
+      await sbAuth.auth.signOut();
+      const err = document.getElementById('l-err');
+      if (err) err.textContent = 'Application verrouillée par le coach.';
+      const btn = document.getElementById('l-btn');
+      if (btn) { btn.disabled = false; btn.textContent = 'Se connecter'; }
+      return;
+    }
+  } catch(e) { /* échec de la vérif réseau : on laisse passer plutôt que de bloquer tout le monde par erreur */ }
+
   localStorage.setItem('at_client', _loginClient);
   localStorage.setItem('at_token', session.access_token);
   localStorage.setItem('at_coach', '0');
@@ -623,6 +638,10 @@ async function _completerConnexionSupabase(session) {
   _loginAuthMode = 'gas';
   _loginAuthEmail = '';
   _loginEmailConfirme = false;
+  // Trace la dernière connexion réelle (fire-and-forget, ne bloque jamais le login).
+  fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}`, {
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ derniere_connexion: new Date().toISOString() })
+  }).catch(() => {});
   await loadHomeSupabase();
 }
 
@@ -898,7 +917,7 @@ function _apresChargementHome() {
         let cl;
         if (isSupabase()) {
           const [progRes, profilRes] = await Promise.all([
-            fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=5`, { headers: supaHeaders() }),
+            fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
             fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom`, { headers: supaHeaders() }),
           ]);
           const progRows = progRes.ok ? await progRes.json() : [];
@@ -1008,10 +1027,9 @@ function renderTop5Home(liste) {
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #1e2235;">
       <span style="font-size:20px;">🏆</span>
       <div>
-        <div style="font-size:14px;font-weight:800;background:linear-gradient(90deg,#fde68a,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Top 5</div>
+        <div style="font-size:14px;font-weight:800;background:linear-gradient(90deg,#fde68a,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Top 10</div>
         <div style="font-size:10px;color:#555e7a;text-transform:uppercase;letter-spacing:1.5px;">Classement</div>
       </div>
-      <button onclick="loadClassement()" style="margin-left:auto;background:transparent;border:none;color:#555e7a;font-size:12px;cursor:pointer;padding:4px 8px;">Voir tout ›</button>
     </div>
     ${rows}
   </div>`;
