@@ -545,6 +545,8 @@ let _pageMensurationsRows = [];
 let progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
 let progLogsSemaine = 1;
 let _progLogsView = 'semaine'; // 'semaine' | 'progression'
+let _progLogsCollapsed = new Set(); // séances repliées (clé "bi-si"), même logique que _cpCollapsed dans l'éditeur
+function progLogsToggleSeance(bi, si){ const k=bi+'-'+si; _progLogsCollapsed.has(k)?_progLogsCollapsed.delete(k):_progLogsCollapsed.add(k); renderMain(); }
 let clientProgEnEdition = null;
 let _origClientProgBlocIds = [];
 let _origClientProgSeanceIds = [];
@@ -3759,6 +3761,7 @@ function ouvrirLogsProgramme(progId){
   progLogsData = { loaded:false, programme:null, blocs:[], logs:{} };
   progLogsSemaine = 1;
   _progLogsView = 'semaine';
+  _progLogsCollapsed = new Set();
   renderSidebar();
   renderMain();
   const exLoad = exercicesData === null ? chargerExercices().then(d=>{ exercicesData=d; }).catch(()=>{}) : Promise.resolve();
@@ -3900,41 +3903,62 @@ function renderProgLogsPage(el){
           </svg>` : `<div style="font-size:12px;color:var(--text-faint);">1 donnée — sem. ${pts[0][0]} : ${charges[0]} kg</div>`}
         </div>`;
       }).join('');
-    })() : blocs.map(b=>`
-      ${b.type ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:16px 0 6px;">${esc(BLOC_LABELS_COACH[b.type]||b.type)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem.':''}</div>` : ''}
-      ${(b.client_programme_seances||[]).map(s=>`
-        <div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow-sm);">
-          <div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);">${esc(s.titre)}</div>
-          ${(s.client_programme_exercices||[]).map(ex=>{
-            const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
-            const groupe = exData ? exData.groupe_musculaire : null;
-            const nbSeries = ex.series||1;
-            let setsHtml = '';
-            for(let sr=1;sr<=nbSeries;sr++){
-              const l = logs[ex.id+'|'+progLogsSemaine+'|'+sr]||{};
-              const hasLog = l.charge!=null||l.reps!=null;
-              setsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
-                <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
-                <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);font-style:italic;'}">
-                  ${hasLog ? [(l.charge!=null?l.charge+'kg':''), (l.reps!=null?l.reps+' reps':''), (l.rir?'RIR '+l.rir:'')].filter(Boolean).join(' · ') : '—'}
-                </span>
-              </div>`;
-            }
-            const firstLog = logs[ex.id+'|'+progLogsSemaine+'|1']||{};
-            return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
-                <div>
-                  <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
-                  ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+    })() : blocs.map((b,bi)=>{
+      const color = BLOC_COLOR[b.type] || 'var(--hairline)';
+      return `
+      <div style="margin-bottom:18px;border-left:3px solid ${color};border-radius:0 var(--radius) var(--radius) 0;overflow:hidden;">
+        ${(b.type || b.nombre_semaines) ? `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:${color}14;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+          <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${color};">${esc(BLOC_LABELS_COACH[b.type]||b.type||'Générique')}</span>
+          ${b.nombre_semaines ? `<span style="font-size:11px;color:var(--text-faint);">· ${b.nombre_semaines} sem.</span>` : ''}
+        </div>` : ''}
+        <div style="padding:10px 10px 0;">
+        ${(b.client_programme_seances||[]).map((s,si)=>{
+          const collapsed = !_progLogsCollapsed.has(bi+'-'+si);
+          const exoCount = (s.client_programme_exercices||[]).length;
+          return `
+          <div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow-sm);">
+            <div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--hairline);cursor:pointer;display:flex;align-items:center;gap:8px;" onclick="progLogsToggleSeance(${bi},${si})">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
+              <span style="flex:1;">${esc(s.titre)}</span>
+              ${collapsed ? `<span style="font-size:11px;font-weight:400;color:var(--text-faint);">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
+            </div>
+            <div style="display:${collapsed?'none':'block'};">
+            ${(s.client_programme_exercices||[]).map(ex=>{
+              const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+              const groupe = exData ? exData.groupe_musculaire : null;
+              const nbSeries = ex.series||1;
+              let setsHtml = '';
+              for(let sr=1;sr<=nbSeries;sr++){
+                const l = logs[ex.id+'|'+progLogsSemaine+'|'+sr]||{};
+                const hasLog = l.charge!=null||l.reps!=null;
+                setsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
+                  <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
+                  <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);font-style:italic;'}">
+                    ${hasLog ? [(l.charge!=null?l.charge+'kg':''), (l.reps!=null?l.reps+' reps':''), (l.rir?'RIR '+l.rir:'')].filter(Boolean).join(' · ') : '—'}
+                  </span>
+                </div>`;
+              }
+              const firstLog = logs[ex.id+'|'+progLogsSemaine+'|1']||{};
+              return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+                  <div>
+                    <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+                    ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+                  </div>
+                  <div style="font-size:11px;color:var(--text-faint);">Cible: ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · '+esc(ex.repos):''}${ex.rir?' · RIR '+ex.rir:''}</div>
                 </div>
-                <div style="font-size:11px;color:var(--text-faint);">Cible: ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · '+esc(ex.repos):''}${ex.rir?' · RIR '+ex.rir:''}</div>
-              </div>
-              ${setsHtml}
-              ${firstLog.commentaire ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-style:italic;">"${esc(firstLog.commentaire)}"</div>` : ''}
-            </div>`;
-          }).join('')||`<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
-        </div>`).join('')}
-    `).join('') || `<div class="empty-panel"><strong>Programme vide</strong>Aucune séance dans ce programme.</div>`}`;
+                ${setsHtml}
+                ${firstLog.commentaire ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-style:italic;">"${esc(firstLog.commentaire)}"</div>` : ''}
+              </div>`;
+            }).join('')||`<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
+            </div>
+          </div>`;
+        }).join('')}
+        </div>
+      </div>`;
+    }).join('') || `<div class="empty-panel"><strong>Programme vide</strong>Aucune séance dans ce programme.</div>`}`;
 }
 
 function retourFicheClient(){
