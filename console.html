@@ -3240,6 +3240,7 @@ function renderTable(){
           <div class="menu" id="menu-row${c.id}">
             <button class="menu-item" onclick="event.stopPropagation();openPanel('${c.id}')">${iUsers()}Voir la fiche</button>
             <button class="menu-item" onclick="event.stopPropagation();window.location.href='index.html?viewAs=${encodeURIComponent(c.id)}'">${iGrid()}Ouvrir en vue client</button>
+            <button class="menu-item" onclick="event.stopPropagation();ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}')">🔔 Notifier</button>
             <button class="menu-item" onclick="event.stopPropagation();toggleChimieActifSupa('${c.id}',${!!c.chimieActifSupa})">${iFlask()}${c.chimieActifSupa?'Désactiver':'Activer'} le protocole</button>
             <div class="menu-sep"></div>
             ${!c.supabaseOnlyActif ? `<button class="menu-item" onclick="event.stopPropagation();togglerSupabaseOnly('${c.id}')">${iGrid()}Passer en Supabase only</button>` : ''}
