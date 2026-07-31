@@ -2938,6 +2938,7 @@ let panelFiche = null;
 async function openPanel(id){
   state.selected = id;
   ficheTab = 'profil';
+  _ficheProgVoirArchives = false;
   ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, suivi:null, xpData:null };
   state.nav = 'fiche-client';
   renderSidebar();
@@ -3011,7 +3012,7 @@ function renderFicheClientPage(el){
     return;
   }
 
-  const nbProgs = (ficheData.tous_programmes||[]).length;
+  const nbProgs = (ficheData.tous_programmes||[]).filter(p=>!p.archive).length;
   const activeDiete = ficheData.diete;
 
   el.innerHTML = `
@@ -3417,17 +3418,10 @@ function renderFicheProfilTab(c){
     </div>`;
 }
 
-function renderFicheProgTab(c){
-  const progs = ficheData.tous_programmes || [];
+let _ficheProgVoirArchives = false;
+
+function _ficheProgRow(p, c, archived){
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
-      <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn" onclick="ouvrirCreerProgrammePourClient('${c.id}')">+ Créer</button>
-        <button class="btn primary" onclick="setNav('programmes')">+ Assigner un template</button>
-      </div>
-    </div>
-    ${progs.length ? progs.map(p=>`
       <div class="prog-row ${p.actif?'':'inactif'}" onclick="ouvrirLogsProgramme(${p.id})">
         <div style="flex:1;min-width:0;">
           <div class="p-nom">${esc(p.nom)}</div>
@@ -3443,16 +3437,40 @@ function renderFicheProgTab(c){
           </div>` : ''}
           ${p.objectif ? `<div class="p-meta" style="color:var(--text-muted);font-style:italic;margin-top:5px;">🎯 ${esc(p.objectif)}</div>` : ''}
         </div>
-        ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
+        ${archived ? '<span class="chip off" style="flex-shrink:0;">Archivé</span>' : (p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>')}
+        ${archived
+          ? `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();desarchiverProgrammeClient(${p.id},'${c.id}')">↩ Désarchiver</button>`
+          : `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
-        <button class="icon-btn del" onclick="event.stopPropagation();supprimerProgrammeClient(${p.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
+        <button class="icon-btn del" onclick="event.stopPropagation();archiverProgrammeClient(${p.id},'${c.id}')" title="Archiver">${iTrash()}</button>`}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>`).join('')
+      </div>`;
+}
+
+function renderFicheProgTab(c){
+  const all = ficheData.tous_programmes || [];
+  const progs = all.filter(p => !p.archive);
+  const archives = all.filter(p => p.archive);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="ouvrirCreerProgrammePourClient('${c.id}')">+ Créer</button>
+        <button class="btn primary" onclick="setNav('programmes')">+ Assigner un template</button>
+      </div>
+    </div>
+    ${progs.length ? progs.map(p=>_ficheProgRow(p, c, false)).join('')
     : `<div class="fiche-prog-empty" style="text-align:center;padding:32px;">
         <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucun programme assigné</div>
         <button class="btn primary" onclick="setNav('programmes')">→ Aller aux programmes</button>
-      </div>`}`;
+      </div>`}
+    ${archives.length ? `
+    <div style="margin-top:18px;">
+      <button class="btn" style="font-size:12px;" onclick="_ficheProgVoirArchives=!_ficheProgVoirArchives;renderMain();">
+        ${_ficheProgVoirArchives ? 'Masquer' : 'Voir'} les programmes archivés (${archives.length})
+      </button>
+      ${_ficheProgVoirArchives ? `<div style="margin-top:10px;">${archives.map(p=>_ficheProgRow(p, c, true)).join('')}</div>` : ''}
+    </div>` : ''}`;
 }
 
 function renderFicheDieteTab(c){
@@ -3702,27 +3720,20 @@ function ficheSemaineChanger(delta){
 }
 
 // ── Programmes assignés — actions ────────────────────────────────────
-async function supprimerProgrammeClient(progId, clientId){
-  if (!confirm('Supprimer ce programme et tous ses logs ?\n\nCette action est irréversible.')) return;
+async function archiverProgrammeClient(progId, clientId){
+  if (!confirm('Archiver ce programme ?\n\nIl sera masqué de la liste mais ses logs restent conservés — récupérable via "Voir les programmes archivés".')) return;
   try {
-    const resArbo = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${progId}` +
-      `&select=id,client_programme_seances(id,client_programme_exercices(id))`,
-      { headers: supaHeaders() }
-    );
-    const blocs = resArbo.ok ? await resArbo.json() : [];
-    const exoIds    = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[]).map(ex=>ex.id)));
-    const seanceIds = blocs.flatMap(b=>(b.client_programme_seances||[]).map(s=>s.id));
-    const blocIds   = blocs.map(b=>b.id);
-    if (exoIds.length) {
-      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
-      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=in.(${exoIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
-    }
-    if (seanceIds.length) await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=in.(${seanceIds.join(',')})`, { method:'DELETE', headers:supaHeaders() });
-    if (blocIds.length)   await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=in.(${blocIds.join(',')})`,   { method:'DELETE', headers:supaHeaders() });
-    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'DELETE', headers:supaHeaders() });
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ archive:true, actif:false }) });
     ficheData.tous_programmes = await chargerTousProgrammes(clientId);
     ficheData.programme = ficheData.tous_programmes.find(p=>p.actif) || null;
+    setFicheTab('programmes');
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+async function desarchiverProgrammeClient(progId, clientId){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ archive:false }) });
+    ficheData.tous_programmes = await chargerTousProgrammes(clientId);
     setFicheTab('programmes');
   } catch(e){ alert('Erreur : ' + e.message); }
 }
