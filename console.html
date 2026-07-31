@@ -3841,6 +3841,10 @@ function renderFicheProgDetail(prog){
   const totalSemaines = blocs.reduce((s,b)=>s+(b.nombre_semaines||1),0)||1;
   const nbSeances = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).length,0);
   const nbExo = blocs.reduce((s,b)=>s+(b.client_programme_seances||[]).reduce((s2,se)=>s2+(se.client_programme_exercices||[]).length,0),0);
+  // ficheSemaine est une semaine GLOBALE (1..totalSemaines, cumulée sur tous les blocs) ;
+  // les logs sont stockés avec une semaine LOCALE au bloc — même conversion que
+  // renderProgLogsPage, sinon les blocs après le premier ne retrouvent jamais leurs logs.
+  const blocOffset = blocs.map((_, bi) => { let off=0; for(let i=0;i<bi;i++) off += (blocs[i].nombre_semaines||1); return off; });
   return `
     <div class="fiche-prog">
       <div class="nom">${esc(prog.nom||'Programme sans nom')}</div>
@@ -3851,7 +3855,9 @@ function renderFicheProgDetail(prog){
       <span style="font-size:13px;font-weight:700;">Semaine ${ficheSemaine}${totalSemaines>1?' / '+totalSemaines:''}</span>
       <button class="btn" style="padding:5px 11px;" onclick="ficheSemaineChanger(1)">›</button>
     </div>
-    ${blocs.map(b=>`
+    ${blocs.map((b,bi)=>{
+      const semLocale = ficheSemaine - (blocOffset[bi]||0);
+      return `
       ${b.type?`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:10px 0 4px;">${esc(BLOC_LABELS_COACH[b.type]||b.type)}${b.nombre_semaines?' · '+b.nombre_semaines+' sem.':''}</div>`:''}
       ${(b.client_programme_seances||[]).map(s=>`
         <div style="background:var(--surface-2);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;">
@@ -3860,7 +3866,7 @@ function renderFicheProgDetail(prog){
             const nbSeries = ex.series||1;
             let seriesHtml='';
             for(let sr=1;sr<=nbSeries;sr++){
-              const l=logs[ex.id+'|'+ficheSemaine+'|'+sr]||{};
+              const l=logs[ex.id+'|'+semLocale+'|'+sr]||{};
               const hasLog = l.charge!=null||l.reps!=null;
               seriesHtml+=`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:2px 0;">
                 <span style="color:var(--text-faint);width:16px;">#${sr}</span>
@@ -3873,11 +3879,12 @@ function renderFicheProgDetail(prog){
               <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">${esc(ex.nom)}</div>
               <div style="font-size:11px;color:var(--text-faint);margin-bottom:6px;">Cible : ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · repos '+esc(ex.repos):''}${ex.rir?' · RIR '+esc(ex.rir):''}</div>
               ${seriesHtml}
-              ${(()=>{const cl=logs[ex.id+'|'+ficheSemaine+'|1'];return cl&&cl.commentaire?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">${esc(cl.commentaire)}</div>`:'';})()}
+              ${(()=>{const cl=logs[ex.id+'|'+semLocale+'|1'];return cl&&cl.commentaire?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">${esc(cl.commentaire)}</div>`:'';})()}
             </div>`;
           }).join('')||`<div style="padding:8px 12px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
         </div>`).join('')}
-    `).join('')||`<div class="fiche-prog-empty">Aucune séance dans ce programme.</div>`}`;
+    `;
+    }).join('')||`<div class="fiche-prog-empty">Aucune séance dans ce programme.</div>`}`;
 }
 
 function ficheSemaineChanger(delta){
