@@ -6,28 +6,37 @@ function getClient() { return localStorage.getItem('at_client') || ''; }
 // Quand le coach navigue en "vue client", toutes les requêtes api() utilisent ce client
 let _viewAsClientOverride = null;
 
+// Timeout de secours sur les appels GAS — sans ça, un appel qui reste bloqué
+// (GAS lent/muet) ne résout ni ne rejette jamais, ce qui bloque indéfiniment
+// tout spinner/Promise.all en attente (vécu : "Mise à jour…" qui ne s'arrête
+// jamais dans la console coach au refresh, chargerDonnees() fait un appel par
+// client en parallèle). Même pattern que apiGasProd (console.html).
+async function _fetchGasAvecTimeout(url, body) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    return await res.json();
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 async function api(action, params = {}) {
   const clientId = (_viewAsClientOverride != null) ? _viewAsClientOverride : getClient();
-  const body = { action, token: getToken(), client: clientId, params };
-  const res = await fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(body)
-  });
-  const json = await res.json();
+  const json = await _fetchGasAvecTimeout(GAS_URL, { action, token: getToken(), client: clientId, params });
   if (!json.ok) throw new Error(json.error || 'erreur_api');
   return json.data;
 }
 
 // Pour le coach : même chose mais avec un client cible différent
 async function apiAs(action, clientId, params = {}) {
-  const body = { action, token: getToken(), client: clientId, params };
-  const res = await fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(body)
-  });
-  const json = await res.json();
+  const json = await _fetchGasAvecTimeout(GAS_URL, { action, token: getToken(), client: clientId, params });
   if (!json.ok) throw new Error(json.error || 'erreur_api');
   return json.data;
 }

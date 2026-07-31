@@ -411,7 +411,7 @@
 <div class="overlay" id="overlay" onclick="closePanel()"></div>
 <div class="panel" id="panel"></div>
 
-<script src="api.js?v=3"></script>
+<script src="api.js?v=4"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -7443,9 +7443,15 @@ function _restoreNavState() {
     _showShell();
     if (!_restoreNavState()) { renderSidebar(); renderMain(); }
     renderNotifMenu();
-    // Mise à jour silencieuse en fond — ne bloque jamais l'UI
+    // Mise à jour silencieuse en fond — ne bloque jamais l'UI. Timeout de secours :
+    // chargerDonnees() fait des dizaines d'appels GAS en parallèle (un par client pour
+    // verifierRetardBilan) sans AbortController côté api.js — si un seul reste bloqué
+    // (GAS lent/muet), le Promise.all ne se résout ni ne rejette jamais et le spinner
+    // "Mise à jour…" tournait indéfiniment. Le timeout ne annule pas l'appel réseau
+    // sous-jacent (juste ignoré), mais garantit que l'UI se débloque toujours.
     _dataRefreshing = true; renderSidebar();
-    chargerDonnees()
+    const bgTimeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout_refresh_fond')), 20000));
+    Promise.race([chargerDonnees(), bgTimeout])
       .catch(() => {})
       .finally(() => { _dataRefreshing = false; renderSidebar(); renderMain(); });
     return;
