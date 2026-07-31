@@ -3905,6 +3905,11 @@ function renderProgLogsPage(el){
       }).join('');
     })() : blocs.map((b,bi)=>{
       const color = BLOC_COLOR[b.type] || 'var(--hairline)';
+      // progLogsSemaine est une semaine GLOBALE (1..totalSemaines, cumulée sur tous
+      // les blocs) ; les logs sont stockés avec une semaine LOCALE au bloc (1..son
+      // propre nombre_semaines, cf. blocOffset calculé plus haut). Sans cette
+      // conversion, les blocs après le premier ne retrouvaient jamais leurs logs.
+      const semLocale = progLogsSemaine - (blocOffset[bi] || 0);
       return `
       <div style="margin-bottom:18px;border-left:3px solid ${color};border-radius:0 var(--radius) var(--radius) 0;overflow:hidden;">
         ${(b.type || b.nombre_semaines) ? `
@@ -3931,7 +3936,7 @@ function renderProgLogsPage(el){
               const nbSeries = ex.series||1;
               let setsHtml = '';
               for(let sr=1;sr<=nbSeries;sr++){
-                const l = logs[ex.id+'|'+progLogsSemaine+'|'+sr]||{};
+                const l = logs[ex.id+'|'+semLocale+'|'+sr]||{};
                 const hasLog = l.charge!=null||l.reps!=null;
                 setsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
                   <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
@@ -3940,7 +3945,7 @@ function renderProgLogsPage(el){
                   </span>
                 </div>`;
               }
-              const firstLog = logs[ex.id+'|'+progLogsSemaine+'|1']||{};
+              const firstLog = logs[ex.id+'|'+semLocale+'|1']||{};
               return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
                   <div>
