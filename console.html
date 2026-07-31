@@ -551,6 +551,9 @@ let _bilanNavSource = null; // 'fiche' | 'bilans'
 let _ficheMensurationsClientId = null;
 let _ficheMensurations = null;
 let _ficheMensurationsLoading = false;
+let _ficheProtocoleClientId = null;
+let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
+let _ficheProtocoleLoading = false;
 let _ficheMensChart2Keys = new Set(['fessiers']);
 let _pageMensChart2Keys  = new Set(['fessiers']);
 let _pageMensurationsRows = [];
@@ -1978,11 +1981,13 @@ async function toggleChimieActifSupa(clientId, actif){
 // (protocole.js).
 let protocoleEnEdition = null; // { id, client_id, clientNom, date_debut, duree_semaines, objectif, molecules:[...] }
 let _protocolePreview  = null; // résultat de _protocoleCalculer après génération/enregistrement
+let _protocoleNavBack  = 'protocole'; // où revenir après l'éditeur : 'protocole' | 'fiche-client'
 
-async function ouvrirEditeurProtocole(clientId, clientNom){
+async function ouvrirEditeurProtocole(clientId, clientNom, navBack){
   // protocoleEnEdition doit être assigné AVANT setNav : setNav déclenche renderMain()
   // synchronement, et renderEditeurProtocolePage rebondit vers 'protocole' si l'état
   // est encore vide (garde anti-crash) — l'inverser cassait l'ouverture de l'éditeur.
+  _protocoleNavBack = navBack || 'protocole';
   protocoleEnEdition = { id: null, client_id: clientId, clientNom: clientNom || clientId, date_debut: new Date().toISOString().slice(0,10), duree_semaines: 12, objectif: '', molecules: [] };
   _protocolePreview = null;
   setNav('editeur-protocole');
@@ -2050,8 +2055,13 @@ async function sauvegarderProtocole(){
     }
 
     _protocolePreview = _protocoleCalculer(body, molsBody);
+    _ficheProtocole = undefined; // force rechargement de l'onglet fiche client au retour
     renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function retourDepuisEditeurProtocole(){
+  setNav(_protocoleNavBack || 'protocole');
 }
 
 // Dernier jour du cycle = date début + (durée en semaines × 7 − 1) jours,
@@ -2100,7 +2110,7 @@ function renderEditeurProtocolePage(el){
     </div>`).join('');
 
   el.innerHTML = `
-    <button class="fiche-back" onclick="setNav('protocole')">← Protocole</button>
+    <button class="fiche-back" onclick="retourDepuisEditeurProtocole()">← ${_protocoleNavBack==='fiche-client' ? 'Fiche client' : 'Protocole'}</button>
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Protocole — ${esc(p.clientNom)}</h1></div>
     </div>
@@ -3237,6 +3247,7 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
       <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
       <button class="fiche-tab ${ficheTab==='roadmap'?'active':''}" onclick="setFicheTab('roadmap')">Roadmap</button>
+      ${c.chimieActifSupa ? `<button class="fiche-tab ${ficheTab==='protocole'?'active':''}" onclick="setFicheTab('protocole')">Protocole</button>` : ''}
     </div>
 
     <div id="ficheTabContent">${renderFicheTabContent(c)}</div>`;
@@ -3254,6 +3265,58 @@ function setFicheTab(tab){
   if (tab === 'roadmap') rmAutoGrowAll();
 }
 
+function renderFicheProtocoleTab(c){
+  if (!c) return '';
+  if (_ficheProtocoleClientId !== c.id) {
+    _ficheProtocoleClientId = c.id;
+    _ficheProtocole = undefined;
+    _ficheProtocoleLoading = false;
+  }
+  if (_ficheProtocole === undefined) {
+    if (!_ficheProtocoleLoading) {
+      _ficheProtocoleLoading = true;
+      fetch(`${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(c.id)}&order=created_at.desc&limit=1&select=*,client_protocole_molecules(*)`, { headers: supaHeaders() })
+        .then(r => r.json())
+        .then(rows => {
+          _ficheProtocole = Array.isArray(rows) && rows.length ? rows[0] : null;
+          _ficheProtocoleLoading = false;
+          const el = document.getElementById('ficheTabContent');
+          if (el && ficheTab === 'protocole') el.innerHTML = renderFicheProtocoleTab(c);
+        })
+        .catch(() => { _ficheProtocole = null; _ficheProtocoleLoading = false; });
+    }
+    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  }
+
+  const nomEsc = esc(c.nom).replace(/'/g, "\\'");
+
+  if (!_ficheProtocole) {
+    return `<div class="fiche-card">
+      <p style="color:var(--text-faint);margin-bottom:14px;">Aucun protocole enregistré pour ce client.</p>
+      <button class="btn primary" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">+ Créer un protocole</button>
+    </div>`;
+  }
+
+  const p = _ficheProtocole;
+  const mols = (p.client_protocole_molecules || []).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
+  const catColor = cat => cat==='Injectable' ? '#e05c5c' : cat==='Oral' ? '#4f8ef7' : '#a78bfa';
+
+  return `<div class="fiche-card">
+    <div class="field-grid" style="margin-bottom:14px;">
+      <div class="field-row"><label>Date début</label><div>${p.date_debut ? new Date(p.date_debut+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</div></div>
+      <div class="field-row"><label>Durée</label><div>${p.duree_semaines ? p.duree_semaines+' semaines' : '—'}</div></div>
+      <div class="field-row"><label>Fin de cycle</label><div>${_protocoleDateFinFmt(p.date_debut, p.duree_semaines)}</div></div>
+      <div class="field-row" style="grid-column:span 2;"><label>Objectif</label><div>${esc(p.objectif||'—')}</div></div>
+    </div>
+    ${mols.length ? mols.map(m=>`
+      <div class="panel-row">
+        <span class="l" style="color:${catColor(m.categorie)};font-weight:600;">${esc(m.nom)}</span>
+        <span class="v">${esc(m.categorie||'')}${m.unite?' · '+esc(m.unite):''}</span>
+      </div>`).join('') : `<p style="color:var(--text-faint);margin-bottom:14px;">Aucune molécule.</p>`}
+    <button class="btn primary" style="margin-top:14px;" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">✎ Éditer le protocole</button>
+  </div>`;
+}
+
 function renderFicheTabContent(c){
   if (!c) c = data.clients.find(x=>x.id===state.selected);
   if (ficheTab === 'profil')      return renderFicheProfilTab(c);
@@ -3264,6 +3327,7 @@ function renderFicheTabContent(c){
   if (ficheTab === 'bilans')        return renderFicheBilansTab(c);
   if (ficheTab === 'mensurations')  return renderFicheMensurationsTab(c);
   if (ficheTab === 'roadmap')       return renderFicheRoadmapTab(c);
+  if (ficheTab === 'protocole')     return renderFicheProtocoleTab(c);
   return '';
 }
 
