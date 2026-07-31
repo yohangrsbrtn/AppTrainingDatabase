@@ -1090,6 +1090,56 @@ async function _majStatutPush(){
   } catch(e) {}
 }
 
+// ── Envoyer une notification push à un client (ou tous) ────────────────
+function ouvrirModalNotifier(clientId, clientNom){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:440px;width:100%;">
+      <h3 style="margin:0 0 16px;">🔔 Notifier ${esc(clientNom)}</h3>
+      <div class="fiche-field">
+        <label>Titre</label>
+        <input id="ntf-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;">
+      </div>
+      <div class="fiche-field">
+        <label>Message</label>
+        <textarea id="ntf-corps" placeholder="Écris ton message…" style="font-size:14px;"></textarea>
+      </div>
+      <div id="ntf-err" style="color:var(--critical);font-size:12px;display:none;margin-bottom:6px;"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" id="ntf-btn" onclick="envoyerNotification('${clientId}')">Envoyer</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  document.getElementById('ntf-titre').focus();
+}
+
+async function envoyerNotification(clientId){
+  const titre = document.getElementById('ntf-titre').value.trim();
+  const corps = document.getElementById('ntf-corps').value.trim();
+  const err = document.getElementById('ntf-err');
+  const btn = document.getElementById('ntf-btn');
+  if (!titre || !corps) { err.textContent = 'Titre et message obligatoires.'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Envoi…';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ title: titre, body: corps, client_id: clientId })
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
+    document.querySelector('.modal-overlay')?.remove();
+    alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Aucun appareil abonné pour l'instant.");
+  } catch(e) {
+    err.textContent = 'Erreur : ' + e.message; err.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Envoyer';
+  }
+}
+
 async function activerNotificationsPush(){
   const btn = document.getElementById('btnActiverPush');
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
@@ -3106,6 +3156,7 @@ function renderClientsPage(el){
       <div><div class="eyebrow">Console coach</div><h1>Clients</h1></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="meta" id="clientCount"></div>
+        <button class="btn" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
         <button class="btn primary" onclick="ouvrirNouveauClient()">+ Nouveau client</button>
       </div>
     </div>
@@ -3323,6 +3374,7 @@ function renderFicheClientPage(el){
           ${c._supabaseOnly ? '<span class="chip off">Supabase only</span>' : ''}
         </div>
       </div>
+      <button class="btn" style="flex-shrink:0;font-size:12px;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}')">🔔 Notifier</button>
       ${!c._supabaseOnly ? `<a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Vue client</a>` : ''}
     </div>
 

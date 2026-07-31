@@ -150,8 +150,6 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 </head>
 <body>
 <div id="app"></div>
-<script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=4"></script>
 <script src="bilan.js?v=5"></script>
@@ -315,7 +313,7 @@ function render() {
     case 'roadmap':
     case 'roadmap-loading': document.body.innerHTML = renderRoadmapPage(); break;
     case 'classement':           app.innerHTML = renderClassement();           break;
-    case 'profil':               app.innerHTML = renderProfil();               break;
+    case 'profil':               app.innerHTML = renderProfil(); setTimeout(_majStatutPushClient, 0); break;
     case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
     case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
     case 'centre-bilans':        document.body.innerHTML = renderCentreBilans();         break;
@@ -1306,6 +1304,12 @@ function renderProfil() {
         <input id="pf-mdp2" type="password" placeholder="Répète le nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
         <button class="btn-primary" onclick="doChangerMotDePasse()">Changer mon mot de passe</button>
         <div id="pf-mdp-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">🔔 Notifications</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Reçois une alerte sur cet appareil quand ton coach t'envoie un message.</div>
+        <button class="btn-primary" id="btnActiverPushClient" onclick="activerNotifications()">Activer les notifications</button>
+        <div id="pushStatusClient" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;color:var(--muted);"></div>
       </div>`;
   return `
   <div id="app">
@@ -1406,41 +1410,33 @@ async function doChangerMotDePasse() {
   }
 }
 
-// ── Notifications push (Firebase Cloud Messaging) ───────────────────────
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCNi28-nmp12JWdkp2I5HzXSJ7II1at4W8",
-  authDomain: "apptraining-push-95e0d.firebaseapp.com",
-  projectId: "apptraining-push-95e0d",
-  storageBucket: "apptraining-push-95e0d.firebasestorage.app",
-  messagingSenderId: "305834460978",
-  appId: "1:305834460978:web:e1031a87209b0bdff8392b"
-};
-const FCM_VAPID_KEY = "BHh2EJzrbN6O88VLoUJAryv3tgTdVfsgIkFXnwTLEGtjCi9ePpqB2RFe8frPJYaDVhVFIlnGcXGjSz6XMLKPN38";
+// ── Notifications push (Web Push natif, sans Firebase) ──────────────────
+// Chaque client peut s'abonner pour recevoir les notifications envoyées par
+// le coach (voir console.html → fiche client → "Envoyer une notification").
+// Même mécanisme que côté coach (console.html) pour recevoir les alertes
+// bilan/séance/journée — voir sql/2026-08-01_notifications_push.sql.
+const VAPID_PUBLIC_KEY = 'BMATlCrbt_oBJLCMm3Yahc7gtCSa69t7d9tbzX1IIHimuaMD7rPZRNTkT09X6LQmVbJsMpplnbOdwld6ZLvDFmc';
 
 function _urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
-let _fcmMessaging = null;
-function _getFcmMessaging() {
-  if (_fcmMessaging) return _fcmMessaging;
-  if (typeof firebase === 'undefined') return null;
-  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-  _fcmMessaging = firebase.messaging();
-  return _fcmMessaging;
-}
-
-function notificationsActivees() {
-  return localStorage.getItem('at_push_enabled') === '1' && Notification.permission === 'granted';
+async function _majStatutPushClient() {
+  const el = document.getElementById('pushStatusClient');
+  if (!el || !('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    el.textContent = sub ? '✓ Notifications activées sur cet appareil.' : '';
+  } catch(e) {}
 }
 
 async function activerNotifications() {
-  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+  const btn = document.getElementById('btnActiverPushClient');
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     showToast('Notifications non supportées sur cet appareil.', '#c0392b'); return;
   }
   // iOS n'autorise les notifications web QUE pour une PWA installée à l'écran d'accueil
@@ -1450,59 +1446,28 @@ async function activerNotifications() {
     showToast('Ajoute d\'abord l\'app à ton écran d\'accueil pour activer les notifications.', '#c0392b');
     return;
   }
-  let etape = 'permission';
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
   try {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') { showToast('Permission refusée.', '#c0392b'); return; }
-
-    etape = 'sw-ready';
     const reg = await navigator.serviceWorker.ready;
-
-    etape = 'subscribe-natif';
-    // Pré-abonnement natif avec un Uint8Array correctement typé : contourne
-    // un bug connu de Safari où le getToken() de Firebase échoue sur la
-    // validation de la clé VAPID ("applicationServerKey must contain a
-    // valid P-256 public key") à cause de sa propre conversion interne.
-    // Si un abonnement existe déjà, Firebase le réutilise directement.
-    const keyArr = _urlBase64ToUint8Array(FCM_VAPID_KEY);
-    const toHex = b => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
-    etape = 'subscribe-natif (clé: len=' + keyArr.length + ' début=' + toHex(keyArr.slice(0,4)) + ' fin=' + toHex(keyArr.slice(-4)) + ')';
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: keyArr
-      });
-    }
-
-    etape = 'firebase-init';
-    const messaging = _getFcmMessaging();
-    if (!messaging) { showToast('Erreur d\'initialisation Firebase.', '#c0392b'); return; }
-
-    etape = 'get-token';
-    const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
-    if (!token) { showToast('Jeton vide (étape get-token).', '#c0392b'); return; }
-
-    etape = 'enregistrement-serveur';
-    await api('enregistrerPushToken', { fcmToken: token });
-
-    localStorage.setItem('at_push_enabled', '1');
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+    const j = sub.toJSON();
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?on_conflict=endpoint`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth })
+    });
+    if (!res.ok) throw new Error(await res.text());
     showToast('🔔 Notifications activées', '#1D9E75');
-    ouvrirSettings();
+    _majStatutPushClient();
   } catch(e) {
-    showToast('[' + etape + '] ' + e.name + ' : ' + e.message, '#c0392b');
+    showToast(e.message || 'Erreur', '#c0392b');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Activer les notifications'; }
   }
-}
-
-async function desactiverNotifications() {
-  try {
-    const messaging = _getFcmMessaging();
-    if (messaging) await messaging.deleteToken();
-    await api('enregistrerPushToken', { fcmToken: '' });
-  } catch(e) {}
-  localStorage.removeItem('at_push_enabled');
-  showToast('🔕 Notifications désactivées', '#8892a4');
-  ouvrirSettings();
 }
 
 // ── Paramètres ────────────────────────────────────────────────────────
