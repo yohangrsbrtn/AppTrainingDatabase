@@ -588,6 +588,25 @@ async function supprimerNoteApi(id){
   if (!res.ok) throw new Error('supabase_' + res.status);
 }
 
+// ── Suivi coach (client_suivi) — journal daté des ajustements post-bilan ──
+async function chargerSuivi(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc,id.desc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+async function sauverSuiviApi(clientId, id, entry){
+  const body = { client_id: clientId, date: entry.date, nutrition: entry.nutrition || null, entrainement: entry.entrainement || null, commentaire_general: entry.commentaire_general || null };
+  const res = id
+    ? await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) })
+    : await fetch(`${SUPABASE_URL}/rest/v1/client_suivi`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('supabase_' + res.status + ' — ' + await res.text().catch(()=>''));
+  return res.json();
+}
+async function supprimerSuiviApi(id){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
 async function chargerTousProgrammes(clientId){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
   if (!res.ok) return [];
@@ -2913,27 +2932,27 @@ let panelFiche = null;
 async function openPanel(id){
   state.selected = id;
   ficheTab = 'profil';
-  ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null, xpData:null };
+  ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, suivi:null, xpData:null };
   state.nav = 'fiche-client';
   renderSidebar();
   renderMain();
   const c = data.clients.find(x=>x.id===id);
   if (!c) return;
   try {
-    const [profil, tous_programmes, tous_dietes, progression, notes, xpData] = await Promise.all([
+    const [profil, tous_programmes, tous_dietes, progression, suivi, xpData] = await Promise.all([
       chargerFiche(id).catch(()=>({})),
       chargerTousProgrammes(id).catch(()=>[]),
       chargerTousDietes(id).catch(()=>[]),
       chargerProgression(id).catch(()=>[]),
-      chargerNotes(id).catch(()=>[]),
+      chargerSuivi(id).catch(()=>[]),
       chargerClientProgressionXP(id).catch(()=>null),
     ]);
     const programme = tous_programmes.find(p=>p.actif) || null;
     const diete = tous_dietes.find(d=>d.actif) || null;
-    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, notes, xpData };
+    ficheData = { loaded:true, profil, tous_programmes, programme, tous_dietes, diete, progression, suivi, xpData };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   } catch(e) {
-    ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], notes:[], xpData:null, error:e.message };
+    ficheData = { loaded:true, profil:{}, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:[], suivi:[], xpData:null, error:e.message };
     if (state.nav==='fiche-client' && state.selected===id) renderMain();
   }
 }
@@ -3015,7 +3034,7 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='programmes'?'active':''}" onclick="setFicheTab('programmes')">Programmes ${nbProgs?`<span style="background:var(--surface-3);color:var(--text-faint);padding:1px 6px;border-radius:999px;font-size:10px;margin-left:3px;">${nbProgs}</span>`:''}</button>
       <button class="fiche-tab ${ficheTab==='diete'?'active':''}" onclick="setFicheTab('diete')">Diète</button>
       <button class="fiche-tab ${ficheTab==='progression'?'active':''}" onclick="setFicheTab('progression')">Progression</button>
-      <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Notes</button>
+      <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Suivi</button>
       <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
       <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
     </div>
@@ -3040,7 +3059,7 @@ function renderFicheTabContent(c){
   if (ficheTab === 'programmes')  return renderFicheProgTab(c);
   if (ficheTab === 'diete')       return renderFicheDieteTab(c);
   if (ficheTab === 'progression') return renderFicheProgressionTab();
-  if (ficheTab === 'notes')       return renderFicheNotesTab(c);
+  if (ficheTab === 'notes')       return renderFicheSuiviTab(c);
   if (ficheTab === 'bilans')        return renderFicheBilansTab(c);
   if (ficheTab === 'mensurations')  return renderFicheMensurationsTab(c);
   return '';
@@ -3385,6 +3404,7 @@ function renderFicheProgTab(c){
         <div style="flex:1;min-width:0;">
           <div class="p-nom">${esc(p.nom)}</div>
           <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+          ${p.objectif ? `<div class="p-meta" style="color:var(--text-muted);font-style:italic;margin-top:2px;">🎯 ${esc(p.objectif)}</div>` : ''}
         </div>
         ${p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>'}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
@@ -3509,21 +3529,86 @@ function renderFicheProgressionTab(){
     </div>`;
 }
 
-function renderFicheNotesTab(c){
-  const notes = Array.isArray(ficheData.notes) ? ficheData.notes : [];
+const SUIVI_CHAMPS = [
+  { key:'nutrition', label:'Nutrition', icon:'🥗' },
+  { key:'entrainement', label:'Entraînement', icon:'🏋️' },
+  { key:'commentaire_general', label:'Commentaire général', icon:'📝' },
+];
+
+function renderFicheSuiviTab(c){
+  const entries = Array.isArray(ficheData.suivi) ? ficheData.suivi : [];
   return `
-    <div class="fiche-card">
-      <h3>Notes coach</h3>
-      <div class="note-form" style="margin-bottom:14px;">
-        <textarea id="ficheNoteInput" placeholder="Écrire une note privée sur ce client…" style="font-size:16px;"></textarea>
-        <button class="btn primary" style="margin-top:8px;" onclick="soumettreNoteFiche('${c.id}')">Ajouter la note</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:12.5px;color:var(--text-muted);">${entries.length} entrée${entries.length>1?'s':''}</div>
+      <button class="btn primary" onclick="ouvrirModalSuivi('${c.id}')">+ Ajouter une entrée</button>
+    </div>
+    ${entries.length ? entries.map(e => `
+      <div class="fiche-card" style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-weight:700;font-size:13px;">${e.date ? e.date.split('-').reverse().join('/') : '—'}</div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirModalSuivi('${c.id}',${e.id})">Éditer</button>
+            <button class="icon-btn del" onclick="supprimerSuiviEntry(${e.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
+          </div>
+        </div>
+        ${SUIVI_CHAMPS.map(f => e[f.key] ? `<div style="font-size:13px;margin-bottom:6px;line-height:1.5;"><span style="color:var(--text-faint);">${f.icon} ${f.label} —</span> ${esc(e[f.key])}</div>` : '').join('')}
+      </div>`).join('')
+    : `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune entrée de suivi pour ce client.</p></div>`}`;
+}
+
+function ouvrirModalSuivi(clientId, id) {
+  const entries = Array.isArray(ficheData.suivi) ? ficheData.suivi : [];
+  const row = id ? (entries.find(x=>x.id===id) || {}) : {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:480px;width:100%;">
+      <h3 style="margin:0 0 16px;">${id ? 'Modifier' : 'Ajouter'} une entrée de suivi</h3>
+      <div class="fiche-field">
+        <label>Date</label>
+        <input id="su-date" type="date" value="${row.date || new Date().toISOString().slice(0,10)}" style="font-size:16px;">
       </div>
-      ${notes.length ? notes.map(n=>`
-        <div class="note-item">
-          <div class="txt">${esc(n.contenu)}</div>
-          <div class="meta"><span class="date">${fmtDateNote(n.created_at)}</span><button class="del" onclick="supprimerNoteFiche(${n.id},'${c.id}')">Supprimer</button></div>
-        </div>`).join('') : `<div style="color:var(--text-faint);font-size:12.5px;">Aucune note pour ce client.</div>`}
+      <div class="fiche-field">
+        <label>Nutrition</label>
+        <textarea id="su-nutrition" placeholder="ex: +150 kcal, glucides autour de l'entraînement…" style="font-size:14px;">${esc(row.nutrition||'')}</textarea>
+      </div>
+      <div class="fiche-field">
+        <label>Entraînement</label>
+        <textarea id="su-entrainement" placeholder="ex: +1 série sur les tirages, deload semaine prochaine…" style="font-size:14px;">${esc(row.entrainement||'')}</textarea>
+      </div>
+      <div class="fiche-field">
+        <label>Commentaire général</label>
+        <textarea id="su-commentaire" placeholder="Contexte, ressenti du client, points d'attention…" style="font-size:14px;">${esc(row.commentaire_general||'')}</textarea>
+      </div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" onclick="sauvegarderSuivi('${clientId}',${id||'null'})">Enregistrer</button>
+      </div>
     </div>`;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function sauvegarderSuivi(clientId, id) {
+  const v = k => document.getElementById('su-'+k)?.value || '';
+  const date = v('date');
+  if (!date) { alert('La date est obligatoire.'); return; }
+  const entry = { date, nutrition: v('nutrition').trim(), entrainement: v('entrainement').trim(), commentaire_general: v('commentaire').trim() };
+  try {
+    await sauverSuiviApi(clientId, id, entry);
+    document.querySelector('.modal-overlay')?.remove();
+    ficheData.suivi = await chargerSuivi(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function supprimerSuiviEntry(id, clientId) {
+  if (!confirm('Supprimer cette entrée de suivi ?')) return;
+  try {
+    await supprimerSuiviApi(id);
+    ficheData.suivi = await chargerSuivi(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 const BLOC_LABELS_COACH = { metabolique:'Métabolique', mecanique:'Mécanique', force:'Force' };
@@ -3830,7 +3915,7 @@ async function ouvrirEditeurProgrammeClient(progId){
   const prog = await chargerProgrammeById(progId);
   if (!prog) { alert('Programme introuvable'); return; }
   clientProgEnEdition = {
-    id: prog.id, client_id: prog.client_id, nom: prog.nom, actif: prog.actif, bloc_actif_id: prog.bloc_actif_id || null,
+    id: prog.id, client_id: prog.client_id, nom: prog.nom, objectif: prog.objectif || '', actif: prog.actif, bloc_actif_id: prog.bloc_actif_id || null,
     blocs: (prog.blocs||[]).map(b => ({
       id: b.id, type: b.type||null, nombre_semaines: b.nombre_semaines||null,
       seances: (b.client_programme_seances||[]).map(s => ({
@@ -3863,6 +3948,10 @@ function renderEditeurProgrammeClient(el){
         <div class="eyebrow">Éditeur programme</div>
         <input id="cpNom" type="text" value="${esc(cp.nom)}" oninput="clientProgEnEdition.nom=this.value" style="font-size:22px;font-weight:800;background:transparent;border:none;color:var(--text);font-family:var(--font-display);width:100%;padding:0;" placeholder="Nom du programme">
       </div>
+    </div>
+    <div class="fiche-field" style="margin-bottom:16px;">
+      <label>Objectif <span style="font-weight:400;color:var(--text-faint);">— note perso, visible coach uniquement</span></label>
+      <textarea oninput="clientProgEnEdition.objectif=this.value" placeholder="ex: augmenter le volume sur haut du corps, préparer un bloc de force…" style="font-size:14px;min-height:54px;">${esc(cp.objectif||'')}</textarea>
     </div>
     <div id="cpBlocsContainer"></div>
     <button class="btn" style="width:100%;margin-bottom:16px;" onclick="cpAjouterBloc()">+ Ajouter un bloc de périodisation</button>
@@ -4042,7 +4131,7 @@ async function sauvegarderProgrammeClient(){
   if(btn){btn.disabled=true;btn.textContent='Enregistrement…';}
   if(errEl) errEl.style.display='none';
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,bloc_actif_id:cp.bloc_actif_id||null})});
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,objectif:cp.objectif||null,bloc_actif_id:cp.bloc_actif_id||null})});
     const newBlocIds=[],newSeanceIds=[],newExoIds=[];
     for(let bi=0;bi<cp.blocs.length;bi++){
       const b=cp.blocs[bi];
@@ -4120,25 +4209,6 @@ async function sauvegarderFicheSandbox(clientId){
     ficheData.profil = (await res.json())[0];
     if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
   } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
-}
-
-async function soumettreNoteFiche(clientId){
-  const el = document.getElementById('ficheNoteInput');
-  const contenu = (el?.value||'').trim();
-  if (!contenu) return;
-  try {
-    await ajouterNote(clientId, contenu);
-    ficheData.notes = await chargerNotes(clientId);
-    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
-  } catch(e){ alert('Erreur : '+e.message); }
-}
-
-async function supprimerNoteFiche(noteId, clientId){
-  try {
-    await supprimerNoteApi(noteId);
-    ficheData.notes = await chargerNotes(clientId);
-    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
-  } catch(e){ alert('Erreur : '+e.message); }
 }
 
 async function setPanelTab(t){
