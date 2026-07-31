@@ -5395,13 +5395,21 @@ async function apiGasProd(action, clientId, params = {}) {
   }
 }
 
+const _MOIS_EN = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+
 function _parseDateFr(s) {
   s = (s||'').toString().trim();
   if (!s) return null;
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  return m ? `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` : null;
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  // Format Date.toString() natif JS renvoyé par le GAS historique bilans,
+  // ex: "Sun Jul 26 2026 09:00:00 GMT+0200 (heure d'été d'Europe centrale)"
+  // — on extrait le jour/mois/année en texte, pas de conversion de fuseau.
+  const en = s.match(/^\w{3} (\w{3}) (\d{1,2}) (\d{4})/);
+  if (en && _MOIS_EN[en[1]]) return `${en[3]}-${_MOIS_EN[en[1]]}-${en[2].padStart(2,'0')}`;
+  return null;
 }
 
 // La date lue sur une feuille GAS historique correspond au jour où le client a
