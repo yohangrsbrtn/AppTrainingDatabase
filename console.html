@@ -2010,6 +2010,11 @@ async function ouvrirEditeurProtocole(clientId, clientNom, navBack){
   renderMain();
 }
 
+function _majDateFinProtocole(){
+  const el = document.getElementById('protoDateFin');
+  if (el) el.value = _protocoleDateFinFmt(protocoleEnEdition.date_debut, protocoleEnEdition.duree_semaines);
+}
+
 function ajouterMoleculeProtocole(){
   const p = protocoleEnEdition;
   p.molecules.push({ nom:'', categorie:'Injectable', unite:'mg/ml', par_jour_semaine:'Semaine', dosage_produit:'', dosage_prise:'', semaine_debut:1, semaine_fin: p.duree_semaines || 12, intervalle:3.5, ordre: p.molecules.length });
@@ -2116,9 +2121,9 @@ function renderEditeurProtocolePage(el){
     </div>
     <div class="table-card" style="padding:18px 20px;">
       <div class="field-grid">
-        <div class="field-row"><label>Date début du cycle</label><input type="date" value="${p.date_debut}" onchange="protocoleEnEdition.date_debut=this.value; renderMain();"></div>
-        <div class="field-row"><label>Durée (semaines)</label><input type="number" value="${p.duree_semaines}" onchange="protocoleEnEdition.duree_semaines=parseInt(this.value)||12; renderMain();"></div>
-        <div class="field-row"><label>Date de fin du cycle</label><input type="text" value="${_protocoleDateFinFmt(p.date_debut, p.duree_semaines)}" disabled style="opacity:.7;"></div>
+        <div class="field-row"><label>Date début du cycle</label><input type="date" value="${p.date_debut}" onchange="protocoleEnEdition.date_debut=this.value; _majDateFinProtocole();"></div>
+        <div class="field-row"><label>Durée (semaines)</label><input type="number" value="${p.duree_semaines}" onchange="protocoleEnEdition.duree_semaines=parseInt(this.value)||12; _majDateFinProtocole();"></div>
+        <div class="field-row"><label>Date de fin du cycle</label><input type="text" id="protoDateFin" value="${_protocoleDateFinFmt(p.date_debut, p.duree_semaines)}" disabled style="opacity:.7;"></div>
         <div class="field-row" style="grid-column:span 2;"><label>Objectif</label><input type="text" value="${esc(p.objectif||'')}" onchange="protocoleEnEdition.objectif=this.value"></div>
       </div>
     </div>
