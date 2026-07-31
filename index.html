@@ -613,8 +613,9 @@ async function doCreerMotDePasseSupabase() {
 async function _completerConnexionSupabase(session) {
   // Verrouillage app (coach) — vérifié AVANT de finaliser la connexion, même avec
   // le bon mot de passe : un client verrouillé ne doit jamais atteindre l'accueil.
+  let estCoach = false;
   try {
-    const lockRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}&select=verrouille_app`, { headers: supaHeaders() });
+    const lockRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}&select=verrouille_app,est_coach`, { headers: supaHeaders() });
     const lockRows = lockRes.ok ? await lockRes.json() : [];
     if (lockRows[0] && lockRows[0].verrouille_app) {
       await sbAuth.auth.signOut();
@@ -624,15 +625,16 @@ async function _completerConnexionSupabase(session) {
       if (btn) { btn.disabled = false; btn.textContent = 'Se connecter'; }
       return;
     }
+    estCoach = !!(lockRows[0] && lockRows[0].est_coach);
   } catch(e) { /* échec de la vérif réseau : on laisse passer plutôt que de bloquer tout le monde par erreur */ }
 
   localStorage.setItem('at_client', _loginClient);
   localStorage.setItem('at_token', session.access_token);
-  localStorage.setItem('at_coach', '0');
+  localStorage.setItem('at_coach', estCoach ? '1' : '0');
   localStorage.setItem('at_auth_mode', 'supabase');
   S.client = _loginClient;
   S.token = session.access_token;
-  S.isCoach = false;
+  S.isCoach = estCoach;
   _loginStep = 'identifiant';
   _loginClient = '';
   _loginAuthMode = 'gas';
