@@ -1310,6 +1310,11 @@ function renderProfil() {
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Reçois une alerte sur cet appareil quand ton coach t'envoie un message.</div>
         <button class="btn-primary" id="btnActiverPushClient" onclick="activerNotifications()">Activer les notifications</button>
         <div id="pushStatusClient" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;color:var(--muted);"></div>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:6px;">🔄 Mise à jour</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
+        <button class="btn-primary" onclick="forcerMiseAJour()">Vérifier les mises à jour</button>
       </div>`;
   return `
   <div id="app">
@@ -1422,6 +1427,20 @@ function _urlBase64ToUint8Array(base64String) {
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base64);
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function forcerMiseAJour(){
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch(e) {}
+  window.location.href = window.location.pathname + '?t=' + Date.now();
 }
 
 async function _majStatutPushClient() {

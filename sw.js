@@ -1,4 +1,4 @@
-const CACHE = 'apptrainingdatabase-v3';
+const CACHE = 'apptrainingdatabase-v4';
 const ASSETS = ['/AppTrainingDatabase/', '/AppTrainingDatabase/index.html', '/AppTrainingDatabase/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -15,6 +15,18 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Les pages HTML (index.html, console.html) ne doivent JAMAIS être servies
+  // depuis le cache HTTP local — une PWA installée sur écran d'accueil iOS
+  // peut sinon rester bloquée sur une ancienne version pendant longtemps,
+  // même après fermeture complète de l'app (vécu : mises à jour invisibles
+  // malgré plusieurs relances, corrigé uniquement en supprimant/réajoutant
+  // l'icône). "no-store" force une requête réseau fraîche à chaque ouverture.
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request, { cache: 'no-store' }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );
