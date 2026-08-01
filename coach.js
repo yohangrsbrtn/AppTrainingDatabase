@@ -8,6 +8,15 @@ function coachColor(clientId) {
   return COACH_PALETTE[h % COACH_PALETTE.length];
 }
 
+// Retour à l'accueil coach, conscient du mode d'auth — loadHome() (GAS) rend
+// un template qui n'a jamais eu les tuiles coach/Protocole en mode Supabase
+// (vécu : un échec réseau sur une page coach retombait sur setPage('home'),
+// faisant "disparaître" la tuile Protocole jusqu'à la prochaine réouverture).
+function _retourAccueilCoach() {
+  if (typeof isSupabase === 'function' && isSupabase()) loadHomeSupabase();
+  else loadHome();
+}
+
 function formatTsCoach(ts) {
   const jours = ['dim.','lun.','mar.','mer.','jeu.','ven.','sam.'];
   const mois  = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
@@ -29,7 +38,7 @@ async function loadMesClients() {
     _mesClients = typeof raw === 'string' ? JSON.parse(raw) : raw;
     hideLoadingOverlay();
     setPage('mes-clients');
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); _retourAccueilCoach(); }
 }
 
 // Comme en GAS (allerVersClient) : cliquer sur un client bascule directement
@@ -119,7 +128,7 @@ function renderMesClients() {
     ${renderHeader('Mes clients', `${clients.length} client${clients.length > 1 ? 's' : ''}`, false)}
     <div class="page">
       ${rows.length ? rows.join('') : '<div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Aucun client trouvé.</div></div>'}
-      <button class="btn-secondary" onclick="loadHome()" style="margin-top:8px;">← Mon accueil</button>
+      <button class="btn-secondary" onclick="_retourAccueilCoach()" style="margin-top:8px;">← Mon accueil</button>
     </div>
   </div>`;
 }
@@ -140,7 +149,7 @@ async function loadCentreBilans() {
     _coachBilansCount = (_centreBilansData || []).filter(b => !b.coachTraite).length;
     hideLoadingOverlay();
     setPage('centre-bilans');
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); _retourAccueilCoach(); }
 }
 
 async function marquerTraiteCoach(clientId, ts) {
@@ -163,7 +172,7 @@ function renderCentreBilans() {
         <div class="empty">
           <div class="empty-text">Aucun bilan reçu pour l'instant.<br><span style="font-size:12px;color:#555e7a;margin-top:8px;display:block;">Les bilans envoyés par tes clients apparaîtront ici.</span></div>
         </div>
-        <button class="btn-secondary" onclick="loadHome()">← Retour</button>
+        <button class="btn-secondary" onclick="_retourAccueilCoach()">← Retour</button>
       </div>
     </div>`;
   }
@@ -245,7 +254,7 @@ function renderCentreBilans() {
     <div class="page">
       ${html}
       <button class="btn-secondary" onclick="loadCentreBilans()" style="margin-bottom:8px;">↻ Rafraîchir</button>
-      <button class="btn-secondary" onclick="loadHome()">← Retour</button>
+      <button class="btn-secondary" onclick="_retourAccueilCoach()">← Retour</button>
     </div>
   </div>`;
 }
@@ -264,7 +273,7 @@ async function loadNotificationsCoach() {
     S.data.notifsNonLues = 0;
     hideLoadingOverlay();
     setPage('notifications-coach');
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); _retourAccueilCoach(); }
 }
 
 function renderNotificationsCoach() {
@@ -340,13 +349,13 @@ function renderNotificationsCoach() {
     ${renderHeader('Notifications', '7 derniers jours', false)}
     <div class="page">
       <div style="display:flex;gap:8px;margin-bottom:14px;">
-        <button class="btn-secondary" onclick="loadHome()" style="margin:0;flex:1;">← Retour</button>
+        <button class="btn-secondary" onclick="_retourAccueilCoach()" style="margin:0;flex:1;">← Retour</button>
         <button class="btn-secondary" onclick="loadNotificationsCoach()" style="margin:0;flex:1;">↻ Rafraîchir</button>
       </div>
       ${filtresHtml}
       ${logsHtml}
       <button class="btn-secondary" onclick="loadNotificationsCoach()" style="margin-bottom:8px;">↻ Rafraîchir</button>
-      <button class="btn-secondary" onclick="loadHome()">← Retour</button>
+      <button class="btn-secondary" onclick="_retourAccueilCoach()">← Retour</button>
     </div>
   </div>`;
 }
@@ -400,7 +409,7 @@ async function loadRapportsBugs() {
       api('marquerBugLu', { ligne: b.ligne }).catch(() => {});
     });
     S.data.bugsNonLus = 0;
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); _retourAccueilCoach(); }
 }
 
 function renderRapportsBugs() {
@@ -428,7 +437,7 @@ function renderRapportsBugs() {
     <div class="page">
       ${html}
       <button class="btn-secondary" onclick="loadRapportsBugs()" style="margin-bottom:8px;">↻ Rafraîchir</button>
-      <button class="btn-secondary" onclick="loadHome()">← Retour</button>
+      <button class="btn-secondary" onclick="_retourAccueilCoach()">← Retour</button>
     </div>
   </div>`;
 }
