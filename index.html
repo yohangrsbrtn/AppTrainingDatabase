@@ -247,13 +247,21 @@ let _vueClientRetour = 'mes-clients';
 
 // andThen : callback de navigation à exécuter une fois en vue client (défaut loadHome)
 // retour : page à afficher au clic sur "Retour coach" (défaut 'mes-clients')
-function enterVueClient(clientId, andThen, retour) {
+//
+// Le mode API (Supabase vs GAS/PWA) est normalement déterminé par `at_auth_mode` dans
+// localStorage, réglé au login du client. Un coach n'est jamais loggé en mode 'supabase'
+// (son propre compte passe par le flux GAS classique) : sans la bascule ci-dessous, la
+// vue client héritait toujours du mode GAS du coach, donc affichait les anciennes données
+// PWA prod pour un client pourtant supabase_only (ex: recettes de la base PWA au lieu de
+// la table Supabase `recettes` — bug constaté sur la fiche de Manon Besnier).
+async function enterVueClient(clientId, andThen, retour) {
   const nom = (_clientSelectionne && _clientSelectionne.nom) || clientId;
   _coachSavedState = {
     client: S.client,
     isCoach: S.isCoach,
     data: S.data,
-    journeeData: _journeeData
+    journeeData: _journeeData,
+    authMode: localStorage.getItem('at_auth_mode')
   };
   S.client = clientId;
   S.isCoach = false;
@@ -266,7 +274,18 @@ function enterVueClient(clientId, andThen, retour) {
   // client (loadHome() relance le préchargement, mais andThen peut ouvrir
   // bilan/mensurations directement sans repasser par l'accueil).
   _resetPrechargement();
+
+  let supabaseOnly = false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=supabase_only`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    supabaseOnly = !!(rows[0] && rows[0].supabase_only);
+  } catch(e) {}
+  if (supabaseOnly) localStorage.setItem('at_auth_mode', 'supabase');
+  else localStorage.removeItem('at_auth_mode');
+
   if (typeof andThen === 'function') andThen();
+  else if (supabaseOnly) loadHomeSupabase();
   else loadHome();
 }
 
@@ -277,6 +296,8 @@ function exitVueClient() {
   S.isCoach = _coachSavedState.isCoach;
   S.data    = _coachSavedState.data;
   _journeeData = _coachSavedState.journeeData;
+  if (_coachSavedState.authMode) localStorage.setItem('at_auth_mode', _coachSavedState.authMode);
+  else localStorage.removeItem('at_auth_mode');
   _coachSavedState = null;
   _resetPrechargement();
   const banner = document.getElementById('coachRetourBanner');
