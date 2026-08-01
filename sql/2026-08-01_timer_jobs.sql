@@ -37,7 +37,7 @@ BEGIN
         'body',      'C''est reparti 💪',
         'client_id', r.client_id,
         'tag',       'chrono'
-      )::text
+      )
     );
   END LOOP;
   -- Nettoyage des jobs de plus d'une heure
