@@ -3061,6 +3061,106 @@ async function assignerTemplateAuClient(templateId, clientId){
   return cp;
 }
 
+// ── Réparation ponctuelle : diètes cassées par le bug de template partagé (2026-08-01) ──
+// Voir mémoire projet "Architecture diètes" — 5 clients avaient chacun une diète
+// personnelle nommée pareil ("DIETE JOUR ON"/"DIETE JOUR OFF TRAINING"), migrées
+// sur le MÊME template Supabase par erreur (corrigé dans migrerDieteGAS/
+// assignerDieteAuClient). Ce bandeau + bouton refait l'import GAS→Supabase pour
+// chacun en un seul clic, sans que le coach n'ait à naviguer dans l'outil de
+// migration — à retirer une fois la réparation confirmée effectuée.
+const DIETES_A_REPARER_20260801 = [
+  { client: 'hugosaubusse',   nom: 'DIETE JOUR OFF TRAINING' },
+  { client: 'ericdelorenzo',  nom: 'DIETE JOUR OFF TRAINING' },
+  { client: 'matthieuesnouf', nom: 'DIETE JOUR OFF TRAINING' },
+  { client: 'mathisleray',    nom: 'DIETE JOUR ON' },
+  { client: 'perrineayot',    nom: 'DIETE JOUR OFF TRAINING' },
+  { client: 'perrineayot',    nom: 'DIETE JOUR ON' },
+];
+
+function _renderReparationDietesBanner(){
+  return `
+    <div id="reparationDietesBanner" class="table-card" style="padding:16px 18px;margin-bottom:16px;border:1.5px solid var(--critical);background:var(--critical-soft, rgba(224,85,85,0.08));">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--critical);">⚠️ Réparation diètes — 5 clients affectés par le bug de template partagé</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">hugosaubusse, ericdelorenzo, matthieuesnouf, mathisleray, perrineayot — un clic recharge leur diète depuis GAS dans un template qui leur est propre.</div>
+        </div>
+        <button id="btnReparerDietes" class="btn primary" style="flex-shrink:0;" onclick="reparerDietesPartagees()">🔧 Réparer maintenant</button>
+      </div>
+      <div id="reparationDietesStatus" style="margin-top:10px;font-size:12.5px;"></div>
+    </div>`;
+}
+
+async function reparerDietesPartagees(){
+  const statusEl = document.getElementById('reparationDietesStatus');
+  const btn = document.getElementById('btnReparerDietes');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Réparation en cours…'; }
+  const resultats = [];
+  for (const { client, nom } of DIETES_A_REPARER_20260801) {
+    if (statusEl) statusEl.innerHTML = resultats.map(r=>`<div>${esc(r)}</div>`).join('') + `<div style="color:var(--text-faint);">⏳ ${esc(client)} — "${esc(nom)}"…</div>`;
+    try {
+      const dietesRaw = await apiGasProd('listerDietes', client);
+      const dietes = typeof dietesRaw === 'string' ? JSON.parse(dietesRaw) : (dietesRaw || []);
+      const d = dietes.find(x => (x.nom || '').trim().toUpperCase() === nom.toUpperCase());
+      if (!d) { resultats.push(`❌ ${client} — "${nom}" introuvable dans GAS (vérifier le nom exact)`); continue; }
+
+      const detailRaw = await apiGasProd('chargerDieteParPosition', client, { ligneTitre: d.ligne, colTitre: d.col });
+      const detail = typeof detailRaw === 'string' ? JSON.parse(detailRaw) : detailRaw;
+      const repasGAS = detail.repas || [];
+
+      // Toujours un nouveau template dédié — c'est justement l'objet de la réparation.
+      const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
+        { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom, client_only: true }) });
+      if (!tplRes.ok) throw new Error('template ' + tplRes.status);
+      const tpl = (await tplRes.json())[0];
+
+      const saveAliments = async (repasId, aliments) => {
+        if (!aliments || !aliments.length) return;
+        const payload = aliments.map((a, ai) => {
+          const q = a.qte || 1;
+          return {
+            repas_id: repasId, nom: a.nom, quantite_g: q, ordre: ai,
+            kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
+            prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
+            glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
+            lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
+          };
+        });
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
+          { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(payload) });
+      };
+      for (let ri = 0; ri < repasGAS.length; ri++) {
+        const r = repasGAS[ri];
+        const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
+          { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: r.nom, ordre: ri, variante_index: 0 }) });
+        if (!rRes.ok) continue;
+        const savedR = (await rRes.json())[0];
+        await saveAliments(savedR.id, r.aliments);
+        const equivs = r.equivalences || [];
+        for (let vi = 0; vi < equivs.length; vi++) {
+          const eq = equivs[vi];
+          const eqRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`,
+            { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id: tpl.id, nom: eq.nom, ordre: ri, variante_index: vi + 1 }) });
+          if (!eqRes.ok) continue;
+          const savedEq = (await eqRes.json())[0];
+          await saveAliments(savedEq.id, eq.aliments);
+        }
+      }
+
+      await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(client)}&nom=eq.${encodeURIComponent(nom)}`,
+        { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ diete_template_id: tpl.id }) });
+
+      resultats.push(`✅ ${client} — "${nom}" réparée (${repasGAS.length} repas restaurés depuis GAS)`);
+    } catch(e) {
+      resultats.push(`❌ ${client} — "${nom}" — erreur : ${e.message}`);
+    }
+    if (statusEl) statusEl.innerHTML = resultats.map(r=>`<div>${esc(r)}</div>`).join('');
+  }
+  dieteTemplatesData = null;
+  if (btn) { btn.disabled = false; btn.textContent = '🔧 Relancer'; }
+  if (statusEl) statusEl.innerHTML += `<div style="margin-top:6px;color:var(--text-faint);">Terminé.</div>`;
+}
+
 function renderDashboard(el){
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
   const bilansSupaATrait = (data.bilansSupa || []).map(b => {
@@ -3082,6 +3182,7 @@ function renderDashboard(el){
       <div><div class="eyebrow">Console coach</div><h1>Accueil</h1></div>
       <div class="meta">${data.clients.length} client${data.clients.length>1?'s':''}</div>
     </div>
+    ${_renderReparationDietesBanner()}
     <div class="dash-grid">
       <div class="card">
         <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span>${(bilansATraiter.length+bilansSupaATrait.length)>0?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${bilansATraiter.length+bilansSupaATrait.length}</span>`:''}</div>
