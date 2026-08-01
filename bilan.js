@@ -211,6 +211,10 @@ function _normaliserBilanSupa(row) {
     commentaireAlim:    row.commentaire_alim    || '',
     commentaireJour:    row.commentaire_jour    || '',
     commentaireActivite:row.commentaire_activite|| '',
+    fatigueGenerale:    row.fatigue_generale    || 0,
+    commentaireFatigue: row.commentaire_fatigue || '',
+    qualiteSommeil:     row.qualite_sommeil     || 0,
+    commentaireSommeil: row.commentaire_sommeil || '',
     dejaValide:         !!row.date_validation,
     dateValidation:     row.date_validation,
     dejaEnvoye:         !!row.envoye_coach,
@@ -342,7 +346,32 @@ function sauverCommentaireBilanSupa(field, value) {
   if (field === 'commentaire_alim')     _bilanData.commentaireAlim     = value;
   if (field === 'commentaire_jour')     _bilanData.commentaireJour     = value;
   if (field === 'commentaire_activite') _bilanData.commentaireActivite = value;
+  if (field === 'commentaire_fatigue')  _bilanData.commentaireFatigue  = value;
+  if (field === 'commentaire_sommeil')  _bilanData.commentaireSommeil  = value;
   _supaUpdateBilan({ [field]: value }).catch(() => {});
+}
+
+// Note globale 1-5 (fatigue générale / qualité du sommeil) — même pattern que
+// noterRepasSupa mais pour une valeur unique par bilan (pas par repas).
+function noterGlobalSupa(field, dbField, valeur, groupeId) {
+  if (!_bilanData) return;
+  _bilanData[field] = valeur;
+  const palette = _paletteNote(groupeId);
+  for (let i = 1; i <= 5; i++) {
+    const btn = document.getElementById(groupeId + '_' + i);
+    if (btn) btn.style.cssText = 'flex:1;padding:8px 0;' + _styleNoteBtn(i, valeur, palette) + 'border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;';
+  }
+  _supaUpdateBilan({ [dbField]: valeur }).catch(() => {});
+}
+
+function _renderNoteGlobaleSupa(field, dbField, groupeId, valActuelle) {
+  const palette = _paletteNote(groupeId);
+  let h = `<div style="display:flex;gap:4px;margin:3px 0;">`;
+  for (let i = 1; i <= 5; i++) {
+    h += `<button id="${groupeId}_${i}" onclick="noterGlobalSupa('${field}','${dbField}',${i},'${groupeId}')"
+      style="flex:1;padding:8px 0;${_styleNoteBtn(i, valActuelle, palette)}border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">${i}</button>`;
+  }
+  return h + '</div>';
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -554,12 +583,27 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
   });
 
   html += `<div class="card">
+    <div class="field-label">FATIGUE GÉNÉRALE</div>
+    <div style="font-size:10px;color:var(--muted);margin:1px 0 4px;">1 = extrêmement fatigué · 5 = en pleine forme</div>
+    ${_renderNoteGlobaleSupa('fatigueGenerale', 'fatigue_generale', 'fatigue', data.fatigueGenerale)}
+    <textarea class="bilan-textarea" placeholder="Commentaire fatigue..." style="margin-top:6px;"
+      onchange="sauverCommentaireBilanSupa('commentaire_fatigue', this.value)"
+    >${esc(data.commentaireFatigue)}</textarea>
+    <div class="field-label" style="margin-top:14px;">QUALITÉ DU SOMMEIL</div>
+    <div style="font-size:10px;color:var(--muted);margin:1px 0 4px;">1 = sommeil éclaté · 5 = dort comme un bébé</div>
+    ${_renderNoteGlobaleSupa('qualiteSommeil', 'qualite_sommeil', 'sommeil', data.qualiteSommeil)}
+    <textarea class="bilan-textarea" placeholder="Commentaire sommeil..." style="margin-top:6px;"
+      onchange="sauverCommentaireBilanSupa('commentaire_sommeil', this.value)"
+    >${esc(data.commentaireSommeil)}</textarea>
+  </div>`;
+
+  html += `<div class="card">
     <div class="field-label">COMMENTAIRE SEMAINE</div>
     <textarea class="bilan-textarea" placeholder="Commentaire global..."
       onchange="sauverCommentaireBilanSupa('commentaire_jour', this.value)"
     >${esc(data.commentaireJour)}</textarea>
-    <div class="field-label" style="margin-top:10px;">COMMENTAIRE ACTIVITÉ</div>
-    <textarea class="bilan-textarea" placeholder="Commentaire activité..."
+    <div class="field-label" style="margin-top:10px;">COMMENTAIRE ACTIVITÉ PHYSIQUE</div>
+    <textarea class="bilan-textarea" placeholder="Commentaire activité physique..."
       onchange="sauverCommentaireBilanSupa('commentaire_activite', this.value)"
     >${esc(data.commentaireActivite)}</textarea>
   </div>`;
