@@ -1467,6 +1467,22 @@ function openBilanHistoClient(clientId) {
     });
 }
 
+function ouvrirBilanDashboard(bilanId) {
+  openBilanByIdFromRecents(bilanId);
+}
+
+// "Bilans en retard" ne porte que le client (pas de bilan précis) — on va
+// chercher son bilan non-envoyé le plus ancien (le plus en retard) avant
+// d'ouvrir le détail. Fallback sur la fiche client si rien n'est trouvé.
+async function ouvrirBilanEnRetardDashboard(clientId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.asc&limit=1`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    if (rows[0]) { openBilanDetailSupabase(rows[0]); return; }
+  } catch(e) {}
+  openPanel(clientId);
+}
+
 function openBilanDetailSupabase(bilan) {
   const dateIso = bilan.date_validation || '';
   const dateFr  = dateIso ? dateIso.split('-').reverse().join('/') : '';
@@ -3393,10 +3409,10 @@ function renderDashboard(el){
         <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span>${(bilansATraiter.length+bilansSupaATrait.length)>0?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${bilansATraiter.length+bilansSupaATrait.length}</span>`:''}</div>
         ${(bilansATraiter.length+bilansSupaATrait.length) ? `<div class="card-list">
           ${bilansSupaATrait.map(b => `
-            <div class="card-list-row" onclick="marquerBilanSupaTraite(${b.id})">
+            <div class="card-list-row" onclick="ouvrirBilanDashboard(${b.id})">
               <div class="mini-avatar">${initials(b.clientNom)}</div>
-              <div><div class="t">${esc(b.clientNom)}</div><div class="s">${esc(b.semaine_label||'Supabase')} · clic pour marquer traité</div></div>
-              <span class="chip ok" style="font-size:9px;">Supabase</span>
+              <div><div class="t">${esc(b.clientNom)}</div><div class="s">${esc(b.semaine_label||'Supabase')} · clic pour voir le bilan</div></div>
+              <button class="btn" style="font-size:10px;padding:3px 8px;" onclick="event.stopPropagation();marquerBilanSupaTraite(${b.id})">✓ Traité</button>
             </div>`).join('')}
           ${bilansATraiter.map(b => `
             <div class="card-list-row" onclick="marquerTraite('${b.client}','${esc(b.ts)}')">
@@ -3410,9 +3426,9 @@ function renderDashboard(el){
         <div class="card-head">${iClipboard()}<span class="t">Bilans en retard</span></div>
         ${bilansEnRetard.length ? `<div class="card-list">
           ${bilansEnRetard.map(c => `
-            <div class="card-list-row" onclick="openPanel('${c.id}')">
+            <div class="card-list-row" onclick="ouvrirBilanEnRetardDashboard('${c.id}')">
               <div class="mini-avatar">${initials(c.nom)}</div>
-              <div><div class="t">${esc(c.nom)}</div><div class="s">Niveau ${c.niveau||1}</div></div>
+              <div><div class="t">${esc(c.nom)}</div><div class="s">Niveau ${c.niveau||1} · clic pour voir le bilan</div></div>
               <span class="chip late"><span class="dot"></span>Retard</span>
             </div>`).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Tous vos clients sont à jour.</div>`}
