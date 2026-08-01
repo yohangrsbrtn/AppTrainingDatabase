@@ -537,7 +537,7 @@ function renderPcSeancePage() {
           ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
           ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
-        ${ex.repos ? `<button class="chrono-btn" style="font-size:11px;padding:5px 7px;" onclick="pcLancerChrono('${esc(ex.repos)}')">⏱</button>` : ''}
+        ${ex.repos ? `<button onclick="pcLancerChrono('${esc(ex.repos)}')" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">⏱</button>` : ''}
       </div>
       ${bodyHtml}
     </div>`;
@@ -803,7 +803,7 @@ function _pcAfficherReglageChrono() {
       <button onclick="pcAjusterChrono(30)" style="padding:8px 12px;border-radius:20px;background:#2d3142;color:#8892a4;border:none;font-size:13px;cursor:pointer;">+30s</button>
     </div>
     <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
-      ${[60,90,120,180].map(v => `<button onclick="pcSetChrono(${v})" style="padding:6px 10px;border-radius:12px;background:${_pcTemps===v?'#378ADD':'#2d3142'};color:white;border:none;font-size:12px;cursor:pointer;">${v<60?v+'s':v/60+'min'+(v%60?String(v%60).padStart(2,'0'):'')}</button>`).join('')}
+      ${[60,90,120,180].map(v => `<button onclick="pcSetChrono(${v})" style="padding:6px 10px;border-radius:12px;background:${_pcTemps===v?'#378ADD':'#2d3142'};color:white;border:none;font-size:12px;cursor:pointer;">${v<60?v+'s':Math.floor(v/60)+'min'+(v%60?String(v%60).padStart(2,'0'):'')}</button>`).join('')}
     </div>
     <div style="display:flex;gap:10px;">
       <button onclick="pcDemarrerChrono()" style="flex:1;padding:14px;background:#378ADD;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">▶ Lancer</button>
