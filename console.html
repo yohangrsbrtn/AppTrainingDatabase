@@ -3403,7 +3403,6 @@ function renderDashboard(el){
       <div><div class="eyebrow">Console coach</div><h1>Accueil</h1></div>
       <div class="meta">${data.clients.length} client${data.clients.length>1?'s':''}</div>
     </div>
-    ${_renderReparationDietesBanner()}
     <div class="dash-grid">
       <div class="card">
         <div class="card-head">${iSend()}<span class="t">Bilans à traiter</span>${(bilansATraiter.length+bilansSupaATrait.length)>0?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${bilansATraiter.length+bilansSupaATrait.length}</span>`:''}</div>
