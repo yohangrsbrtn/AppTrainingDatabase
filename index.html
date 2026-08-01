@@ -2282,22 +2282,27 @@ if ('serviceWorker' in navigator) {
 }
 
 if (S.token && S.client) {
-  if (localStorage.getItem('at_auth_mode') === 'supabase') {
-    loadHomeSupabase();
-  } else {
+  // ?viewAs= doit être vérifié EN PREMIER, avant at_auth_mode : sinon, si une
+  // précédente session "vue client" a laissé at_auth_mode='supabase' en
+  // localStorage (cas normal — la seule chose qui le restaure est le bouton
+  // "✕ Retour", pas le bouton back du navigateur, voir exitVueClient), un
+  // nouveau clic "Ouvrir en vue client" tombait dans loadHomeSupabase() avec
+  // S.client = le compte du COACH lui-même (jamais mis à jour par
+  // enterVueClient dans localStorage) au lieu du client visé — bug vécu.
   const _urlParams = new URLSearchParams(window.location.search);
   const _viewAsParam = _urlParams.get('viewAs');
   const _forceMobile = _urlParams.get('mobile');
   if (_viewAsParam && S.isCoach) {
     history.replaceState(null, '', window.location.pathname);
     enterVueClient(_viewAsParam);
+  } else if (localStorage.getItem('at_auth_mode') === 'supabase') {
+    loadHomeSupabase();
   } else if (S.isCoach && !_forceMobile && window.innerWidth >= 900) {
     // Coach sur grand écran → la console desktop est plus adaptée que l'appli mobile.
     // ?mobile=1 (utilisé par "Retour à l'app" depuis console.html) contourne cette redirection.
     window.location.replace('console.html?t=' + Date.now());
   } else {
     loadHome();
-  }
   }
 } else {
   setPage('login');

@@ -798,7 +798,32 @@ async function chargerTousProgrammes(clientId){
 async function chargerTousDietes(clientId){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc`, { headers: supaHeaders() });
   if (!res.ok) return [];
-  return res.json();
+  const rows = await res.json();
+  // Macros totales par diète (bandeau fiche client) — calculées sur le repas
+  // "de base" de chaque emplacement (variante_index=0), pas ses équivalences,
+  // pour donner un ordre de grandeur représentatif sans compter plusieurs fois.
+  const tplIds = [...new Set(rows.map(d => d.diete_template_id).filter(Boolean))];
+  if (tplIds.length) {
+    try {
+      const repasRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/repas?template_id=in.(${tplIds.join(',')})&variante_index=eq.0&select=template_id,repas_aliments(quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
+        { headers: supaHeaders() });
+      const repasRows = repasRes.ok ? await repasRes.json() : [];
+      const macrosParTpl = {};
+      repasRows.forEach(r => {
+        const m = macrosParTpl[r.template_id] || (macrosParTpl[r.template_id] = { kcal:0, prot:0, glu:0, lip:0 });
+        (r.repas_aliments || []).forEach(a => {
+          const q = a.quantite_g || 0;
+          m.kcal += q * (a.kcal_par_gramme || 0);
+          m.prot += q * (a.prot_par_gramme || 0);
+          m.glu  += q * (a.glu_par_gramme  || 0);
+          m.lip  += q * (a.lip_par_gramme  || 0);
+        });
+      });
+      rows.forEach(d => { if (d.diete_template_id) d._macros = macrosParTpl[d.diete_template_id] || null; });
+    } catch(e) {}
+  }
+  return rows;
 }
 
 async function chargerProgrammeById(progId){
@@ -4158,7 +4183,7 @@ function renderFicheDieteTab(c){
       <div class="prog-row" style="cursor:default;margin-bottom:8px;">
         <div style="flex:1;min-width:0;">
           <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
-          <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+          <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
         </div>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
@@ -4173,10 +4198,18 @@ function renderFicheDieteTab(c){
         <div class="prog-row inactif" style="cursor:default;">
           <div style="flex:1;min-width:0;">
             <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
-            <div class="p-meta">${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+            <div class="p-meta">${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
           </div>
           <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Supprimer</button>
         </div>`).join('')}` : ''}`;
+}
+
+// Résumé kcal/macros affiché directement dans le bandeau de la diète (fiche
+// client), sans avoir besoin de l'ouvrir — calculé une fois dans chargerTousDietes().
+function _dieteMacrosBadge(d){
+  if (!d._macros) return '';
+  const m = d._macros;
+  return ` · <span style="color:var(--text);font-weight:600;">${Math.round(m.kcal)} kcal</span> · P${Math.round(m.prot)} G${Math.round(m.glu)} L${Math.round(m.lip)}`;
 }
 
 function renderFicheProgressionTab(){
@@ -6201,13 +6234,62 @@ async function confirmerAssignerDieteDepuisFiche(clientId){
 }
 
 async function assignerDieteAuClient(templateId, templateNom, clientId){
+  // Chaque assignation doit être une COPIE indépendante du template, jamais un
+  // lien direct dessus — sinon éditer la diète de CE client (editerDieteClient,
+  // qui écrit sur repas/repas_aliments via diete_template_id) modifierait
+  // silencieusement le template partagé, donc la diète de tous les autres
+  // clients assignés au même template. Bug vécu 2026-08-01. Voir aussi le
+  // même principe côté migration GAS (migrerDieteGAS) : jamais de repas
+  // partagé entre deux clients différents, sauf template explicitement coché
+  // "réutilisable" au moment de sa création dans la bibliothèque.
+  const dieteTemplateId = await _dupliquerTemplateDiete(templateId, templateNom);
   // Plusieurs diètes simultanées autorisées — pas de désactivation des autres
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`, {
     method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
-    body:JSON.stringify({ client_id:clientId, nom:templateNom, diete_template_id:templateId, actif:true })
+    body:JSON.stringify({ client_id:clientId, nom:templateNom, diete_template_id:dieteTemplateId, actif:true })
   });
   if (!res.ok) throw new Error('supabase_'+res.status);
   return (await res.json())[0];
+}
+
+// Duplique un template diète (+ ses repas/variantes + leurs aliments) dans un
+// nouveau template dédié (client_only=true) — jamais réutilisé, jamais partagé.
+async function _dupliquerTemplateDiete(sourceTemplateId, nom){
+  const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${sourceTemplateId}&select=description`, { headers: supaHeaders() });
+  const tplArr = tplRes.ok ? await tplRes.json() : [];
+  const description = (tplArr[0] && tplArr[0].description) || null;
+
+  const newTplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`, {
+    method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
+    body: JSON.stringify({ nom, description, client_only: true })
+  });
+  if (!newTplRes.ok) throw new Error('duplication_template_' + newTplRes.status);
+  const newTpl = (await newTplRes.json())[0];
+
+  const repasRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${sourceTemplateId}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`,
+    { headers: supaHeaders() });
+  const repasArr = repasRes.ok ? await repasRes.json() : [];
+  for (const r of repasArr) {
+    const newRepasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, {
+      method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
+      body: JSON.stringify({ template_id: newTpl.id, nom: r.nom, ordre: r.ordre || 0, variante_index: r.variante_index || 0 })
+    });
+    if (!newRepasRes.ok) continue;
+    const newRepas = (await newRepasRes.json())[0];
+    const aliments = r.repas_aliments || [];
+    if (aliments.length) {
+      const payload = aliments.map((a, ai) => ({
+        repas_id: newRepas.id, nom: a.nom, quantite_g: a.quantite_g, ordre: a.ordre != null ? a.ordre : ai,
+        kcal_par_gramme: a.kcal_par_gramme, prot_par_gramme: a.prot_par_gramme,
+        glu_par_gramme: a.glu_par_gramme, lip_par_gramme: a.lip_par_gramme,
+      }));
+      await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, {
+        method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(payload)
+      });
+    }
+  }
+  return newTpl.id;
 }
 
 async function retirerDieteClient(dieteId, clientId){
@@ -7406,16 +7488,50 @@ async function migrerDieteGAS() {
     const nom = document.getElementById('migDieteNomInput')?.value.trim() || migPreviewDieteSel.nom;
     const repasGAS = migPreviewDieteDetail.repas || [];
 
-    // 1. Réutiliser ou créer le template diète
+    // 1. Réutiliser ou créer le template diète.
+    //
+    // PIÈGE CORRIGÉ (2026-08-01, bug vécu — 5 clients affectés : hugosaubusse,
+    // ericdelorenzo, matthieuesnouf, mathisleray, perrineayot) : la recherche
+    // de template existant se faisait par NOM SEUL, sur TOUTE la base, sans
+    // filtrer par client. Beaucoup de clients ont, chacun de leur côté dans
+    // leur propre feuille GAS, une diète personnelle nommée de façon générique
+    // ("DIETE JOUR ON", "DIETE JOUR OFF TRAINING"...) — la recherche globale
+    // retombait donc sur LE TEMPLATE D'UN AUTRE CLIENT, dont le contenu était
+    // silencieusement supprimé et remplacé par celui du client en cours de
+    // migration. Résultat : migrer N'IMPORTE LEQUEL de ces clients cassait la
+    // diète de tous les autres partageant le même nom, sans toucher à leur
+    // propre fiche — d'où le bug qui "revenait" après chaque nouvelle
+    // migration, même pour des clients qu'on ne pensait pas avoir touchés.
+    //
+    // Fix : ne réutiliser un template existant que dans deux cas précis —
+    // (a) CE client a déjà cette diète (réimport idempotent de SA PROPRE
+    //     diète, jamais celle d'un autre) ;
+    // (b) le coach a explicitement coché "template réutilisable" ET un
+    //     template PUBLIC (client_only=false) de ce nom existe déjà.
+    // Dans tous les autres cas (diète privée, nom pas encore utilisé par ce
+    // client) : toujours créer un NOUVEAU template dédié, jamais de partage
+    // par coïncidence de nom.
     const commeTemplate = document.getElementById('cbMigAsTemplate')?.checked;
-    const existTplRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nom)}&order=id.desc&limit=1&select=id`,
+    const existCdPourClientRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(migPreviewClientId)}&nom=eq.${encodeURIComponent(nom)}&select=diete_template_id`,
       { headers: supaHeaders() });
-    const existTpls = existTplRes.ok ? await existTplRes.json() : [];
-    let tpl;
-    if (existTpls.length) {
-      tpl = existTpls[0];
-      // Supprimer les repas existants (aliments d'abord si pas de cascade)
+    const existCdPourClient = existCdPourClientRes.ok ? await existCdPourClientRes.json() : [];
+    const tplDejaLieAuClient = existCdPourClient[0] && existCdPourClient[0].diete_template_id;
+
+    let tpl = null;
+    if (tplDejaLieAuClient) {
+      tpl = { id: tplDejaLieAuClient };
+    } else if (commeTemplate) {
+      const existTplRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nom)}&client_only=eq.false&order=id.desc&limit=1&select=id`,
+        { headers: supaHeaders() });
+      const existTpls = existTplRes.ok ? await existTplRes.json() : [];
+      tpl = existTpls[0] || null;
+    }
+
+    if (tpl) {
+      // Réécriture du contenu — soit le propre template de ce client (réimport),
+      // soit un template public volontairement partagé (case cochée par le coach).
       const oldRepasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&select=id`, { headers: supaHeaders() });
       const oldRepas = oldRepasRes.ok ? await oldRepasRes.json() : [];
       if (oldRepas.length) {
@@ -7423,9 +7539,8 @@ async function migrerDieteGAS() {
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments?repas_id=in.(${ids})`, { method:'DELETE', headers: supaHeaders() });
         await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}`, { method:'DELETE', headers: supaHeaders() });
       }
-      // Mettre à jour client_only si besoin
       await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${tpl.id}`,
-        { method:'PATCH', headers: supaHeaders(), body: JSON.stringify({ client_only: !commeTemplate }) });
+        { method:'PATCH', headers: supaHeaders(), body: JSON.stringify({ nom, client_only: !commeTemplate }) });
     } else {
       const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`,
         { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ nom, client_only: !commeTemplate }) });
