@@ -502,6 +502,9 @@ function initials(nom){ return (nom||'?').split(" ").map(w=>w[0]).filter(Boolean
 
 // Même mapping que renderNotificationsCoach() (coach.js) — à garder synchro si un type est ajouté là-bas.
 function libelleLog(l){
+  if (l.type === 'bilan_envoye') return { icon:'📤', txt:'Bilan envoyé au coach', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
+  if (l.type === 'seance_validee') return { icon:'💪', txt:'Séance validée', sub: '' };
+  if (l.type === 'journee_validee') return { icon:'✅', txt:'Journée validée', sub: '' };
   if (l.type === 'bilan') return { icon:'📋', txt:'Bilan clôturé', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
   if (l.type === 'journee') return { icon:'✅', txt:'Journée validée', sub: l.semaine || '' };
   if (l.type === 'bilanEnvoye') return { icon:'📤', txt:'Bilan envoyé au coach', sub: l.semaine ? 'Semaine ' + l.semaine : '' };
@@ -1001,36 +1004,22 @@ async function chargerDonnees(){
   }
 }
 
-// Activité récente (dashboard) : fusion bilans envoyés + séries loggées en séance,
-// triés par date desc, limités aux 7 derniers jours. 100% Supabase (aucun appel
-// GAS ici) — remplace l'ancien chargerTousLesLogs (GAS).
+// Activité récente (dashboard) : événements réels (bilan envoyé, séance
+// validée, journée validée) depuis activite_events, alimentée par les
+// triggers Postgres sur `bilans` (voir sql/2026-08-01_coach_notif_prefs.sql).
+// Ne contient PLUS les logs individuels de charge/reps (client_programme_logs) :
+// chaque série sauvegardée y apparaissait comme "Séance validée" (fallback
+// trompeur de libelleLog), noyant les vrais événements sous du bruit.
 async function _chargerActiviteRecente(clientsById){
   const fmtTs = iso => { const d = new Date(iso); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); };
   const depuis7j = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [logsRes, bilansRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?updated_at=gte.${depuis7j}&order=updated_at.desc&limit=200&select=updated_at,semaine,client_programme_exercices(client_programme_seances(titre,client_programme_blocs(client_programmes!client_programme_blocs_client_programme_id_fkey(nom,client_id))))`, { headers: supaHeaders() }).catch(()=>null),
-    fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&created_at=gte.${depuis7j}&order=created_at.desc&limit=200&select=client_id,created_at,semaine_label`, { headers: supaHeaders() }).catch(()=>null),
-  ]);
-  const logsRows = (logsRes && logsRes.ok) ? await logsRes.json() : [];
-  const bilansRows = (bilansRes && bilansRes.ok) ? await bilansRes.json() : [];
-
-  const fromLogs = logsRows.map(l => {
-    const seance = l.client_programme_exercices && l.client_programme_exercices.client_programme_seances;
-    const bloc = seance && seance.client_programme_blocs;
-    const prog = bloc && bloc.client_programmes;
-    const clientId = prog && prog.client_id;
-    const nom = clientId ? (clientsById[clientId] || null) : null;
-    if (!nom) return null; // client sans profil (pas encore migré) — pas d'activité affichée
-    return { nom, tms: l.updated_at, ts: fmtTs(l.updated_at), semaine: l.semaine, programme: (prog.nom||'') + '|' + (seance.titre||'') };
-  }).filter(Boolean);
-
-  const fromBilans = bilansRows.map(b => ({
-    nom: clientsById[b.client_id] || b.client_id,
-    tms: b.created_at, ts: fmtTs(b.created_at),
-    type: 'bilanEnvoye', semaine: b.semaine_label,
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/activite_events?created_at=gte.${depuis7j}&order=created_at.desc&limit=100&select=client_id,type,meta,created_at`, { headers: supaHeaders() }).catch(()=>null);
+  const rows = (res && res.ok) ? await res.json() : [];
+  return rows.map(r => ({
+    nom: clientsById[r.client_id] || r.client_id,
+    tms: r.created_at, ts: fmtTs(r.created_at),
+    type: r.type, semaine: r.meta && r.meta.semaine_label,
   }));
-
-  return [...fromLogs, ...fromBilans].sort((a,b) => (b.tms||'').localeCompare(a.tms||'')).slice(0,50);
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
@@ -1127,12 +1116,19 @@ function renderParametresPage(el){
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Paramètres</h1></div></div>
     <div class="table-card" style="padding:18px 20px;max-width:520px;">
-      <div style="font-weight:700;margin-bottom:6px;">🔔 Notifications push</div>
-      <p style="color:var(--text-muted);font-size:12.5px;margin:0 0 14px;">Reçois une alerte sur cet appareil quand un client envoie un bilan, valide une séance ou valide sa journée.</p>
+      <div style="font-weight:700;margin-bottom:6px;">🔔 Activer sur cet appareil</div>
+      <p style="color:var(--text-muted);font-size:12.5px;margin:0 0 14px;">À activer séparément sur chaque appareil (console desktop, mobile…) — ce que tu reçois ensuite est piloté par les préférences ci-dessous, communes à tous tes appareils.</p>
       ${!supporte ? `<div style="color:var(--critical);font-size:12.5px;">Non supporté par ce navigateur.</div>`
         : !standalone ? `<div style="color:var(--warning);font-size:12.5px;">Sur iPhone, ouvre d'abord l'app depuis l'icône ajoutée à l'écran d'accueil (pas depuis un onglet Safari) pour pouvoir activer les notifications.</div>`
         : `<button class="btn primary" id="btnActiverPush" onclick="activerNotificationsPush()">Activer les notifications sur cet appareil</button>
            <div id="pushStatus" style="margin-top:10px;font-size:12px;color:var(--text-faint);"></div>`}
+    </div>
+    <div class="table-card" style="padding:18px 20px;max-width:520px;margin-top:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">🔔 Types de notifications reçues</div>
+      <p style="color:var(--text-muted);font-size:12.5px;margin:0 0 14px;">Choisis quels événements déclenchent une notification — s'applique instantanément à tous tes appareils (console + mobile).</p>
+      ${_coachNotifToggleRow('bilan_recu', '📋 Bilan reçu', 'Un client vient d’envoyer son bilan.')}
+      ${_coachNotifToggleRow('seance_validee', '💪 Séance validée', 'Un client vient de valider sa séance du jour.')}
+      ${_coachNotifToggleRow('journee_validee', '✅ Journée validée', 'Un client vient de valider sa journée.')}
     </div>
     <div class="table-card" style="padding:18px 20px;max-width:520px;margin-top:14px;">
       <div style="font-weight:700;margin-bottom:6px;">🔄 Mise à jour</div>
@@ -1140,6 +1136,44 @@ function renderParametresPage(el){
       <button class="btn" onclick="forcerMiseAJour()">Vérifier les mises à jour</button>
     </div>`;
   _majStatutPush();
+  _chargerCoachNotifPrefs();
+}
+
+// Préférences globales du coach (quels événements déclenchent un push) —
+// une seule ligne en base (id=1), s'applique à tous ses appareils puisque
+// console et mobile partagent le même client_id (COACH_CLIENT_ID) dans
+// push_subscriptions. Chargées en lazy (pas de save button, écriture
+// instantanée à chaque toggle).
+let _coachNotifPrefs = { bilan_recu: true, seance_validee: true, journee_validee: true };
+
+function _coachNotifToggleRow(key, label, desc){
+  const actif = _coachNotifPrefs[key] !== false;
+  return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--hairline);">
+    <div><div style="font-size:13.5px;font-weight:600;">${label}</div><div style="font-size:11.5px;color:var(--text-faint);margin-top:2px;">${desc}</div></div>
+    <div id="notifPref_${key}" onclick="toggleCoachNotifPref('${key}')" style="width:44px;height:26px;border-radius:13px;background:${actif?'#3ecf8e':'#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+      <div style="position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:${actif?'#fff':'#555e7a'};transform:${actif?'translateX(18px)':'none'};transition:transform .2s,background .2s;"></div>
+    </div>
+  </div>`;
+}
+
+async function _chargerCoachNotifPrefs(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_notif_prefs?id=eq.1`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    if (rows[0]) _coachNotifPrefs = rows[0];
+  } catch(e) {}
+  if (state.nav === 'parametres') renderMain();
+}
+
+async function toggleCoachNotifPref(key){
+  _coachNotifPrefs[key] = !(_coachNotifPrefs[key] !== false);
+  if (state.nav === 'parametres') renderMain();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_notif_prefs?on_conflict=id`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ id: 1, [key]: _coachNotifPrefs[key] })
+    });
+  } catch(e) {}
 }
 
 async function forcerMiseAJour(){
