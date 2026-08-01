@@ -26,6 +26,7 @@ let _dDieteDetailCache    = {};   // "ligne|col" -> détail chargerDieteParPosit
 
 // ── Modale de recherche/ajout/création d'aliment (alimente _dMenuDraft) ──────
 let _dBaseAliments          = null;
+let _dAlimentsRecents       = null; // null=pas encore chargé, []=aucun
 let _dAjoutEtape            = 'recherche'; // 'recherche' | 'quantite' | 'creation' | 'scan'
 let _dAjoutSelection        = null;
 let _dModifIndex            = null; // index dans _dMenuDraft.aliments en cours de modification (null = ajout d'un nouvel aliment)
@@ -224,6 +225,9 @@ function _apiAjouterSlotJournal(date, slot, type, ref, label) { return isSupabas
 function _apiSupprimerSlotJournal(ligne) { return isSupabase() ? sbSupprimerSlotJournal(ligne) : api('supprimerSlotJournal', { ligne }); }
 function _apiChargerBaseAliments() { return isSupabase() ? sbChargerBaseAliments() : api('chargerBaseAliments'); }
 function _apiAjouterAlimentCommunaute(p) { return isSupabase() ? sbAjouterAlimentCommunaute(p) : api('ajouterAlimentCommunaute', p); }
+// Aliments récents : fonctionnalité Supabase-only (pas d'équivalent GAS), no-op silencieux en mode GAS.
+function _apiChargerAlimentsRecents() { return isSupabase() ? sbChargerAlimentsRecents() : Promise.resolve([]); }
+function _apiEnregistrerAlimentRecent(nom, source) { return isSupabase() ? sbEnregistrerAlimentRecent(nom, source) : Promise.resolve(); }
 
 function _sbDateToFr(iso)  { const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`; }
 function _sbDateToIso(fr)  { const [d,m,y] = fr.split('/'); return `${y}-${m}-${d}`; }
@@ -403,6 +407,24 @@ async function sbAjouterAlimentCommunaute(p) {
   if (!res.ok) return { ok: false };
   const [row] = await res.json();
   return { ok: true, aliment: { nom: row.nom, kcal: row.kcal_par_gramme, prot: row.prot_par_gramme, glu: row.glu_par_gramme, lip: row.lip_par_gramme, sucres: row.sucres_par_gramme, fibres: row.fibres_par_gramme, ags: row.ags_par_gramme, codeBarre: row.code_barre, source: 'communaute', valide: row.valide } };
+}
+
+async function sbChargerAlimentsRecents() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_aliments_recents?client_id=eq.${encodeURIComponent(S.client)}&order=derniere_utilisation.desc&limit=8&select=aliment_nom,aliment_source`, { headers: supaHeaders() });
+  return res.ok ? await res.json() : [];
+}
+
+// Upsert simple (client_id, nom, source) → juste réécrire derniere_utilisation à
+// chaque usage, pas besoin de compteur : la récence seule suffit à alimenter la
+// liste "récemment utilisés" du picker.
+async function sbEnregistrerAlimentRecent(nom, source) {
+  if (!nom || !source) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_aliments_recents?on_conflict=client_id,aliment_nom,aliment_source`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, aliment_nom: nom, aliment_source: source, derniere_utilisation: new Date().toISOString() })
+    });
+  } catch(e) {}
 }
 
 // Identifie une diète (issue de _dDietes, GAS ou Supabase) pour la résolution/le cache des
@@ -1372,9 +1394,10 @@ async function ouvrirAjoutAliment() {
   _dAjoutEtape = 'recherche';
   _dAjoutSelection = null;
   _dModifIndex = null;
-  if (!_dBaseAliments) {
+  if (!_dBaseAliments || !_dAlimentsRecents) {
     _afficherModalAjout(true);
-    try { _dBaseAliments = await _apiChargerBaseAliments(); } catch(e) { _dBaseAliments = { coach: [], communaute: [] }; }
+    try { _dBaseAliments = _dBaseAliments || await _apiChargerBaseAliments(); } catch(e) { _dBaseAliments = _dBaseAliments || { coach: [], communaute: [] }; }
+    try { _dAlimentsRecents = await _apiChargerAlimentsRecents(); } catch(e) { _dAlimentsRecents = []; }
   }
   _afficherModalAjout(false);
 }
@@ -1401,22 +1424,37 @@ function onRechercheAlimentInput(val) {
   if (cont) cont.innerHTML = renderResultatsAliments(val);
 }
 
+function _renderLigneAliment(a) {
+  const badge = a.source === 'coach'
+    ? '<span style="font-size:9px;font-weight:700;color:#378ADD;background:#378ADD18;border:1px solid #378ADD44;border-radius:4px;padding:1px 5px;">🧑‍🍳 base</span>'
+    : `<span style="font-size:9px;font-weight:700;color:#a78bfa;background:#a78bfa18;border:1px solid #a78bfa44;border-radius:4px;padding:1px 5px;">👥 communauté${a.valide ? '' : ' · non validé'}</span>`;
+  return `<div onclick="selectionnerAliment('${a.nom.replace(/'/g,"\\'")}','${a.source}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+    <div style="min-width:0;">
+      <div style="font-size:14px;">${esc(a.nom)}</div>
+      <div style="margin-top:3px;">${badge}</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;margin-left:10px;">${Math.round(a.kcal*100)} kcal/100g</div>
+  </div>`;
+}
+
+// Liste vide (pas encore de recherche tapée) : propose les aliments récemment
+// utilisés par CE client plutôt qu'un simple placeholder — évite de re-scanner/
+// re-chercher les mêmes aliments à chaque repas (recette perso, pas partagée :
+// contrairement au cache code-barres aliments_communaute, la récence d'usage
+// n'a de sens qu'individuellement).
+function _renderAlimentsRecents() {
+  const recents = (_dAlimentsRecents || [])
+    .map(r => _tousLesAliments().find(a => a.nom === r.aliment_nom && a.source === r.aliment_source))
+    .filter(Boolean);
+  if (!recents.length) return '<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Tape le nom d\'un aliment…</div>';
+  return `<div style="font-size:10px;font-weight:600;color:#8892a4;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Récemment utilisés</div>${recents.map(_renderLigneAliment).join('')}`;
+}
+
 function renderResultatsAliments(query) {
   const q = (query || '').trim();
-  if (!q) return '<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Tape le nom d\'un aliment…</div>';
+  if (!q) return _renderAlimentsRecents();
   const results = _rechercherAlimentsLocal(q);
-  const rowsHtml = results.map(a => {
-    const badge = a.source === 'coach'
-      ? '<span style="font-size:9px;font-weight:700;color:#378ADD;background:#378ADD18;border:1px solid #378ADD44;border-radius:4px;padding:1px 5px;">🧑‍🍳 base</span>'
-      : `<span style="font-size:9px;font-weight:700;color:#a78bfa;background:#a78bfa18;border:1px solid #a78bfa44;border-radius:4px;padding:1px 5px;">👥 communauté${a.valide ? '' : ' · non validé'}</span>`;
-    return `<div onclick="selectionnerAliment('${a.nom.replace(/'/g,"\\'")}','${a.source}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;">
-      <div style="min-width:0;">
-        <div style="font-size:14px;">${esc(a.nom)}</div>
-        <div style="margin-top:3px;">${badge}</div>
-      </div>
-      <div style="font-size:12px;color:var(--muted);white-space:nowrap;margin-left:10px;">${Math.round(a.kcal*100)} kcal/100g</div>
-    </div>`;
-  }).join('');
+  const rowsHtml = results.map(_renderLigneAliment).join('');
   const creerBtn = `<button onclick="_dCreationPrefill=null;_dCreationCodeBarre=null;ouvrirCreationAliment('${q.replace(/'/g,"\\'")}')" style="width:100%;margin-top:10px;padding:10px;background:#2d3142;border:none;border-radius:8px;color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;">+ Créer "${esc(q)}" comme nouvel aliment</button>`;
   if (results.length === 0) {
     return `<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Aucun résultat.</div>${creerBtn}`;
@@ -1499,6 +1537,14 @@ function confirmerAjoutAliment() {
   };
   if (_dModifIndex != null) { _dMenuDraft.aliments[_dModifIndex] = item; _dModifIndex = null; }
   else { _dMenuDraft.aliments.push(item); }
+  // Fire-and-forget : alimente la liste "récemment utilisés" pour la prochaine
+  // ouverture du picker. a.source est absent en édition de quantité (pas une
+  // vraie nouvelle sélection) — sbEnregistrerAlimentRecent ignore ce cas.
+  if (a.source) {
+    _apiEnregistrerAlimentRecent(a.nom, a.source).catch(() => {});
+    if (!_dAlimentsRecents) _dAlimentsRecents = [];
+    _dAlimentsRecents = [{ aliment_nom: a.nom, aliment_source: a.source }, ..._dAlimentsRecents.filter(r => !(r.aliment_nom === a.nom && r.aliment_source === a.source))].slice(0, 8);
+  }
   const modal = document.getElementById('modalAjoutAliment');
   if (modal) modal.remove();
   setPage('diete');
@@ -1570,6 +1616,16 @@ function _demarrerScan() {
 async function onScanSuccess(codeBarre) {
   if (_dAjoutEtape !== 'scan' || _dScanTraitementEnCours) return; // ignore un 2e décodage pendant qu'on traite déjà le premier
   _dScanTraitementEnCours = true;
+  // Feedback immédiat à l'instant de la détection — sinon le client reste à
+  // viser la caméra en pensant que rien ne se passe (vécu), le temps que la
+  // recherche locale/Open Food Facts se termine derrière.
+  if (navigator.vibrate) navigator.vibrate(80);
+  const viewport = document.getElementById('dScanViewport');
+  if (viewport) {
+    viewport.style.position = 'relative';
+    viewport.insertAdjacentHTML('beforeend', '<div style="position:absolute;inset:0;background:rgba(29,158,117,0.88);display:flex;align-items:center;justify-content:center;font-size:52px;color:#fff;">✓</div>');
+    await new Promise(r => setTimeout(r, 350));
+  }
   _arreterScan();
   const local = _tousLesAliments().find(a => a.codeBarre === codeBarre);
   if (local) { _dScanTraitementEnCours = false; selectionnerAliment(local.nom, local.source); return; }
