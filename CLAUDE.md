@@ -35,7 +35,7 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 
 ### Clients et profils
 
-- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, updated_at }` — Upsert via `on_conflict=client_id`.
+- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, mode_simplifie, updated_at }` — Upsert via `on_conflict=client_id`. `mode_simplifie` (BOOLEAN, `sql/2026-08-01_mode_simplifie.sql`) : cache XP/niveau/classement côté client (l'XP continue de tourner en fond), source de vérité pour exclure ces clients du classement — le cache local `localStorage.modeSimplifie` est resynchronisé depuis cette colonne à chaque chargement de l'accueil.
 
 ### Programmes (snapshot par client)
 
