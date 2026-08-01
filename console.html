@@ -4460,6 +4460,28 @@ function rmAppliquerDuree(id, clientId, dureeKey){
   rmChangerChamp(id, clientId, 'date_fin', _rmComputeFin(p.date_debut, dureeKey));
 }
 
+// Recolle les phases suivantes (par ordre chronologique) après modification
+// des dates de la phase `phaseId` : chaque phase après elle doit commencer
+// exactement le lendemain de la fin de celle qui la précède (pas de trou, pas
+// de chevauchement), en conservant sa propre durée. S'arrête dès qu'une phase
+// est déjà correctement positionnée (tout ce qui suit l'est forcément aussi).
+async function rmCascaderSuite(clientId, phaseId){
+  const phases = (Array.isArray(ficheData.roadmap) ? ficheData.roadmap : []).slice().sort((a,b)=>(a.date_debut||'').localeCompare(b.date_debut||''));
+  const idx = phases.findIndex(p => p.id === phaseId);
+  if (idx === -1) return;
+  let ancre = phases[idx];
+  for (let i = idx + 1; i < phases.length; i++) {
+    const p = phases[i];
+    const nouveauDebut = _rmAddDays(ancre.date_fin, 1);
+    if (nouveauDebut === p.date_debut) { ancre = p; continue; }
+    const dureeJours = Math.round((new Date(p.date_fin) - new Date(p.date_debut)) / 86400000);
+    const nouveauFin = _rmAddDays(nouveauDebut, dureeJours);
+    await sauverRoadmapApi(clientId, p.id, Object.assign({}, p, { date_debut: nouveauDebut, date_fin: nouveauFin }));
+    p.date_debut = nouveauDebut; p.date_fin = nouveauFin;
+    ancre = p;
+  }
+}
+
 // Type/dates : sauvegarde immédiate + re-render (met à jour timeline + tri).
 async function rmChangerChamp(id, clientId, champ, valeur){
   const phases = Array.isArray(ficheData.roadmap) ? ficheData.roadmap : [];
@@ -4470,6 +4492,10 @@ async function rmChangerChamp(id, clientId, champ, valeur){
   try {
     await sauverRoadmapApi(clientId, id, maj);
     ficheData.roadmap = await chargerRoadmap(clientId);
+    if (champ === 'date_debut' || champ === 'date_fin') {
+      await rmCascaderSuite(clientId, id);
+      ficheData.roadmap = await chargerRoadmap(clientId);
+    }
     setFicheTab('roadmap');
     rmAutoGrowAll();
   } catch(e){ alert('Erreur : ' + e.message); }
@@ -4484,6 +4510,8 @@ async function rmDecaler(id, clientId, deltaJours){
   const maj = Object.assign({}, p, { date_debut:_rmAddDays(p.date_debut,deltaJours), date_fin:_rmAddDays(p.date_fin,deltaJours) });
   try {
     await sauverRoadmapApi(clientId, id, maj);
+    ficheData.roadmap = await chargerRoadmap(clientId);
+    await rmCascaderSuite(clientId, id);
     ficheData.roadmap = await chargerRoadmap(clientId);
     setFicheTab('roadmap');
     rmAutoGrowAll();
