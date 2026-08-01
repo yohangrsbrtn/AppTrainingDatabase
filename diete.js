@@ -1760,12 +1760,13 @@ function _afficherModalAjout(loading) {
       <div id="dAjoutResultats" style="max-height:50vh;overflow-y:auto;">${renderResultatsAliments('')}</div>
       <button onclick="document.getElementById('modalAjoutAliment').remove();" style="width:100%;margin-top:12px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>`;
   }
-  modal.innerHTML = `<div style="background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;max-height:85vh;overflow-y:auto;">
-    <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
+  modal.innerHTML = `<div class="sheet-body" style="background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;max-height:85vh;overflow-y:auto;">
+    <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
     ${contenu}
   </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) { _arreterScan(); modal.remove(); } });
+  attacherSwipeFermeture(modal, () => { _arreterScan(); modal.remove(); });
   if (!loading && _dAjoutEtape === 'scan') _demarrerScan();
   if (!loading && _dAjoutEtape === 'quantite') _majPreviewAjout(); // initialise l'aperçu (utile surtout en édition, quantité déjà pré-remplie)
 }

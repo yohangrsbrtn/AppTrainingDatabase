@@ -208,3 +208,43 @@ function _protocoleCalculer(protocole, molecules) {
 
   return { molecules: molsCalc, semaines };
 }
+
+// ── Swipe-to-close pour les volets "bottom sheet" ───────────────────────
+// Glisser vers le bas depuis la poignée (petit trait en haut du volet) ferme
+// le volet — comportement standard sur mobile que l'utilisateur essaiera de
+// toute façon en premier. Utilisé par tous les volets de index.html/diete.js/
+// programme-client.js portant la classe "sheet-handle"/"sheet-body".
+// onClose optionnel : certains volets doivent nettoyer autre chose qu'un
+// simple .remove() à la fermeture (ex: arrêter la caméra du scan code-barres
+// dans diete.js — sinon le flux vidéo reste actif en arrière-plan).
+function attacherSwipeFermeture(overlayEl, onClose) {
+  if (!overlayEl) return;
+  const handle = overlayEl.querySelector('.sheet-handle');
+  const sheet  = overlayEl.querySelector('.sheet-body');
+  if (!handle || !sheet) return;
+  const SEUIL = 80;
+  let startY = null, dy = 0, dragging = false;
+  handle.style.touchAction = 'none';
+  handle.addEventListener('touchstart', e => {
+    startY = e.touches[0].clientY; dy = 0; dragging = true;
+    sheet.style.transition = 'none';
+  }, { passive: true });
+  handle.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    dy = Math.max(0, e.touches[0].clientY - startY);
+    sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  const finDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    sheet.style.transition = 'transform 0.22s ease';
+    if (dy > SEUIL) {
+      sheet.style.transform = 'translateY(100%)';
+      setTimeout(() => onClose ? onClose() : overlayEl.remove(), 180);
+    } else {
+      sheet.style.transform = 'translateY(0)';
+    }
+  };
+  handle.addEventListener('touchend', finDrag);
+  handle.addEventListener('touchcancel', finDrag);
+}

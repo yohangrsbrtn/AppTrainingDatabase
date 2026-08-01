@@ -151,17 +151,17 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=4"></script>
+<script src="api.js?v=5"></script>
 <script src="bilan.js?v=8"></script>
 <script src="training.js?v=2"></script>
-<script src="diete.js?v=9"></script>
+<script src="diete.js?v=10"></script>
 <script src="mensurations.js?v=4"></script>
 <script src="recettes.js?v=3"></script>
 <script src="progression.js?v=4"></script>
 <script src="collection.js?v=2"></script>
 <script src="coach.js?v=2"></script>
 <script src="protocole.js?v=3"></script>
-<script src="programme-client.js?v=12"></script>
+<script src="programme-client.js?v=13"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=3"></script>
 <script>
@@ -1241,8 +1241,8 @@ function ouvrirNotificationsClient() {
       <div style="font-size:10.5px;color:#555e7a;margin-top:6px;">${new Date(n.created_at).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})} à ${new Date(n.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
     </div>`;
   el.innerHTML = `
-    <div style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;max-height:82vh;display:flex;flex-direction:column;">
-      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;max-height:82vh;display:flex;flex-direction:column;">
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;flex-shrink:0;">
         <div style="font-size:17px;font-weight:700;color:#fff;">🔔 Notifications</div>
         <button onclick="document.getElementById('notifsClientPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
@@ -1253,6 +1253,7 @@ function ouvrirNotificationsClient() {
     </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };
   document.body.appendChild(el);
+  attacherSwipeFermeture(el);
   if (_notifsClientCount > 0) {
     fetch(`${SUPABASE_URL}/rest/v1/client_notifications?client_id=eq.${encodeURIComponent(S.client)}&lu=eq.false`, {
       method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true })
@@ -1748,8 +1749,8 @@ function ouvrirSettings(tab) {
   const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 0;font-size:13px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
   const content = _settingsTab === 'bug' ? renderSettingsBug() : _settingsTab === 'guide' ? renderSettingsGuide() : renderSettingsGeneral();
 
-  el.innerHTML = `<div style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
-    <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
+  el.innerHTML = `<div class="sheet-body" style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
+    <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 20px 0;flex-shrink:0;">
       <div style="font-size:17px;font-weight:700;color:#e8eaf0;">Paramètres</div>
       <button onclick="document.getElementById('settingsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
@@ -1768,6 +1769,7 @@ function ouvrirSettings(tab) {
   </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };
   document.body.appendChild(el);
+  attacherSwipeFermeture(el);
   if (_settingsTab === 'general') setTimeout(_majStatutPushClient, 0);
 }
 
@@ -1851,8 +1853,8 @@ function ouvrirGererRappels() {
       </div>
     </div>`;
   el.innerHTML = `
-    <div style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;max-height:82vh;display:flex;flex-direction:column;">
-      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;max-height:82vh;display:flex;flex-direction:column;">
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;flex-shrink:0;">
         <div style="font-size:17px;font-weight:700;color:#fff;">🔔 Rappels automatiques</div>
         <button onclick="document.getElementById('rappelsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
@@ -1863,6 +1865,7 @@ function ouvrirGererRappels() {
       </div>
     </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };
+  attacherSwipeFermeture(el);
   document.body.appendChild(el);
 }
 
@@ -2028,9 +2031,9 @@ function _afficherModalJournee(refreshing) {
   modal.id = 'modalJournee';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
   modal.innerHTML = `
-    <div style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
+    <div class="sheet-body" style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
       ${refreshing ? `<div style="position:absolute;inset:0;background:rgba(26,31,53,0.85);border-radius:20px 20px 0 0;z-index:2;display:flex;align-items:center;justify-content:center;"><div class="spin"></div></div>` : ''}
-      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
       <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Journée en cours</div>
       <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:20px;">${jourNom}</div>
       <div style="display:flex;gap:8px;margin-bottom:16px;">
@@ -2050,6 +2053,7 @@ function _afficherModalJournee(refreshing) {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  attacherSwipeFermeture(modal);
 }
 
 function toggleJourneeField(type) {
@@ -2150,8 +2154,8 @@ function _afficherModalJourneeSupabase() {
   modal.id = 'modalJournee';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
   modal.innerHTML = `
-    <div style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
-      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
+    <div class="sheet-body" style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
       <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Journée en cours</div>
       <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:20px;">${jourNom}</div>
       <div style="display:flex;gap:8px;margin-bottom:16px;">
@@ -2170,6 +2174,7 @@ function _afficherModalJourneeSupabase() {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  attacherSwipeFermeture(modal);
 }
 function toggleJourneeFieldSupabase(type) {
   if (!_journeeData) return;
