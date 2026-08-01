@@ -4299,7 +4299,7 @@ function renderFicheRoadmapTab(c){
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${phases.length} phase${phases.length>1?'s':''}</div>
-      <button class="btn primary" onclick="rmAjouterPhase('${c.id}')">+ Ajouter une phase</button>
+      <button class="btn primary" onclick="ouvrirModalAjoutPhase('${c.id}')">+ Ajouter une phase</button>
     </div>
     ${phases.length ? `
       <div style="display:flex;border-radius:8px;overflow:hidden;margin-bottom:20px;height:10px;">
@@ -4367,17 +4367,17 @@ function _rmCalendrierHtml(phases, typeFn){
       const isToday = dateStr===todayStr;
       cells.push(`<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:11px;${t?`background:${t.color}26;color:${t.color};font-weight:700;`:'color:var(--text-faint);'}${isToday?`box-shadow:inset 0 0 0 2px ${t?t.color:'var(--accent)'};`:''}" title="${t?esc(t.label):''}">${d}</div>`);
     }
-    return `<div style="flex:1;min-width:210px;">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;text-align:center;">${moisNoms[m-1]} ${y}</div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;">
-        ${RM_JOURS_SEMAINE.map(j=>`<div style="text-align:center;font-size:9px;color:var(--text-faint);">${j}</div>`).join('')}
+    return `<div style="flex:0 0 auto;width:168px;">
+      <div style="font-size:11px;font-weight:700;margin-bottom:6px;text-align:center;">${moisNoms[m-1]} ${y}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:2px;">
+        ${RM_JOURS_SEMAINE.map(j=>`<div style="text-align:center;font-size:8px;color:var(--text-faint);">${j}</div>`).join('')}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">${cells.join('')}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">${cells.join('')}</div>
     </div>`;
   }).join('');
   return `<div style="margin-top:20px;">
     <div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Calendrier</div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px;">${monthsHtml}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;">${monthsHtml}</div>
   </div>`;
 }
 
@@ -4399,17 +4399,97 @@ function _rmAddDays(iso, n){
   d.setDate(d.getDate()+n);
   return d.toISOString().slice(0,10);
 }
+function _rmAddMonths(iso, n){
+  const d = new Date(iso+'T00:00:00');
+  d.setMonth(d.getMonth()+n);
+  return d.toISOString().slice(0,10);
+}
+// Prochain dimanche à partir de `iso` (renvoie `iso` lui-même si déjà un dimanche).
+function _rmNextSunday(iso){
+  const d = new Date(iso+'T00:00:00');
+  const dow = d.getDay();
+  if (dow !== 0) d.setDate(d.getDate() + (7-dow));
+  return d.toISOString().slice(0,10);
+}
+const RM_DUREES_SEMAINES = { '1sem':1, '2sem':2, '3sem':3, '4sem':4 };
+const RM_DUREES_MOIS = { '1mois':1, '2mois':2, '3mois':3 };
+// Date de fin par défaut pour une durée donnée, calée sur le dimanche suivant
+// (le coach peut ensuite la modifier manuellement dans le champ date).
+function _rmComputeFin(dateDebut, dureeKey){
+  let raw;
+  if (RM_DUREES_SEMAINES[dureeKey]) raw = _rmAddDays(dateDebut, RM_DUREES_SEMAINES[dureeKey]*7 - 1);
+  else raw = _rmAddDays(_rmAddMonths(dateDebut, RM_DUREES_MOIS[dureeKey]||1), -1);
+  return _rmNextSunday(raw);
+}
 
-// Ajoute une phase directement (pas de dialogue) : enchaînée juste après la
-// dernière phase existante pour partir sur des dates déjà cohérentes — le
-// coach ajuste ensuite via les champs date ou les boutons ‹7j/7j›.
-async function rmAjouterPhase(clientId){
+// Modale d'ajout de phase : date de début + durée (semaines/mois) → date de fin
+// calculée automatiquement (calée dimanche), modifiable ensuite à la main —
+// une fois touchée manuellement, elle n'est plus recalculée par _rmModalRecalcFin.
+let _rmModalFinTouchee = false;
+function ouvrirModalAjoutPhase(clientId){
   const phases = (Array.isArray(ficheData.roadmap)?ficheData.roadmap:[]).slice().sort((a,b)=>(a.date_debut||'').localeCompare(b.date_debut||''));
   const last = phases[phases.length-1];
-  const date_debut = last ? _rmAddDays(last.date_fin,1) : new Date().toISOString().slice(0,10);
-  const date_fin = _rmAddDays(date_debut,27);
+  const dateDebutDefault = last ? _rmAddDays(last.date_fin,1) : new Date().toISOString().slice(0,10);
+  const dureeDefault = '4sem';
+  const dateFinDefault = _rmComputeFin(dateDebutDefault, dureeDefault);
+  _rmModalFinTouchee = false;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-add-phase';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:420px;width:100%;">
+      <h3 style="margin:0 0 16px;">Ajouter une phase</h3>
+      <div class="fiche-field">
+        <label>Type</label>
+        <select id="rm-add-type" style="font-size:16px;">
+          ${ROADMAP_TYPES.map(rt=>`<option value="${rt.key}" ${last&&last.type===rt.key?'selected':''}>${esc(rt.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fiche-field">
+        <label>Date de début</label>
+        <input id="rm-add-debut" type="date" value="${dateDebutDefault}" style="font-size:16px;" oninput="_rmModalRecalcFin()">
+      </div>
+      <div class="fiche-field">
+        <label>Durée</label>
+        <select id="rm-add-duree" style="font-size:16px;" onchange="_rmModalRecalcFin()">
+          <option value="1sem">1 semaine</option>
+          <option value="2sem">2 semaines</option>
+          <option value="3sem">3 semaines</option>
+          <option value="4sem" selected>4 semaines</option>
+          <option value="1mois">1 mois</option>
+          <option value="2mois">2 mois</option>
+          <option value="3mois">3 mois</option>
+        </select>
+      </div>
+      <div class="fiche-field">
+        <label>Date de fin <span style="font-weight:400;color:var(--text-faint);">(dimanche par défaut, modifiable)</span></label>
+        <input id="rm-add-fin" type="date" value="${dateFinDefault}" style="font-size:16px;" onchange="_rmModalFinTouchee=true">
+      </div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" onclick="rmConfirmerAjoutPhase('${clientId}')">Ajouter</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+function _rmModalRecalcFin(){
+  if (_rmModalFinTouchee) return;
+  const debut = document.getElementById('rm-add-debut')?.value;
+  const duree = document.getElementById('rm-add-duree')?.value;
+  const finEl = document.getElementById('rm-add-fin');
+  if (!debut || !finEl) return;
+  finEl.value = _rmComputeFin(debut, duree);
+}
+async function rmConfirmerAjoutPhase(clientId){
+  const type = document.getElementById('rm-add-type')?.value;
+  const date_debut = document.getElementById('rm-add-debut')?.value;
+  const date_fin = document.getElementById('rm-add-fin')?.value;
+  if (!date_debut || !date_fin) { alert('Les deux dates sont requises.'); return; }
+  if (date_fin < date_debut) { alert('La date de fin doit être après la date de début.'); return; }
   try {
-    await sauverRoadmapApi(clientId, null, { type: last?last.type:'cut', date_debut, date_fin, objectif:'' });
+    await sauverRoadmapApi(clientId, null, { type, date_debut, date_fin, objectif:'' });
+    document.getElementById('modal-add-phase')?.remove();
     ficheData.roadmap = await chargerRoadmap(clientId);
     setFicheTab('roadmap');
     rmAutoGrowAll();
