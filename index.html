@@ -1193,7 +1193,39 @@ async function chargerNotificationsClient() {
     _notifsClient = res.ok ? await res.json() : [];
     _notifsClientCount = _notifsClient.filter(n => !n.lu).length;
     _majCarteHeader();
+    const pleinEcran = _notifsClient.find(n => n.plein_ecran && !n.lu);
+    if (pleinEcran) afficherNotifPleinEcran(pleinEcran);
   } catch(e) {}
+}
+
+// Notification "plein écran" (en plus de la cloche) : le coach coche l'option
+// à l'envoi. Affichée une seule fois à l'ouverture de l'app tant qu'elle n'a
+// pas été fermée — la fermeture la marque lue (elle reste ensuite dans la
+// cloche comme n'importe quelle autre notification, juste sans replay du popup).
+function afficherNotifPleinEcran(n) {
+  if (document.getElementById('notifPleinEcran')) return;
+  const el = document.createElement('div');
+  el.id = 'notifPleinEcran';
+  el.style.cssText = 'position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:24px;';
+  el.innerHTML = `
+    <div style="background:#151a28;border-radius:20px;max-width:420px;width:100%;padding:28px 24px;text-align:center;">
+      <div style="font-size:36px;margin-bottom:14px;">🔔</div>
+      <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:10px;">${esc(n.title)}</div>
+      <div style="font-size:14.5px;color:#c8d0e0;line-height:1.6;margin-bottom:22px;">${esc(n.body)}</div>
+      <button onclick="_fermerNotifPleinEcran(${n.id})" style="width:100%;background:#4f8ef7;color:#fff;border:none;border-radius:12px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;">OK</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+function _fermerNotifPleinEcran(id) {
+  document.getElementById('notifPleinEcran')?.remove();
+  fetch(`${SUPABASE_URL}/rest/v1/client_notifications?id=eq.${id}`, {
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true })
+  }).then(() => {
+    const n = _notifsClient.find(x => x.id === id);
+    if (n) n.lu = true;
+    _notifsClientCount = _notifsClient.filter(x => !x.lu).length;
+    _majCarteHeader();
+  }).catch(() => {});
 }
 
 function ouvrirNotificationsClient() {

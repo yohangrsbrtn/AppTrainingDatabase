@@ -494,6 +494,7 @@ function iSend(){return svgIcon('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9
 function iLock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>');}
 function iUnlock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 017.6-1.8"/>');}
 function iTrash(){return svgIcon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13"/>');}
+function iBell(){return svgIcon('<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/>');}
 function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
 
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -537,6 +538,7 @@ const NAV = [
     { id:"bilans", label:"Bilans", icon:iClipboard() },
     { id:"mensurations", label:"Mensurations", icon:iRuler() },
     { id:"classement", label:"Classement", icon:iTrophy() },
+    { id:"notifications", label:"Notifications", icon:iBell() },
   ]},
   { group:"Contenu", items:[
     { id:"programmes", label:"Programmes", icon:iDumbbell() },
@@ -1056,7 +1058,7 @@ function _saveNavState() {
     localStorage.setItem('at_console_lastnav_v1', JSON.stringify(payload));
   } catch(e) {}
 }
-const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration','parametres']);
+const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration','parametres','notifications']);
 
 function renderMain(){
   if (NAV_RESTORE_SIMPLE.has(state.nav) || state.nav === 'fiche-client' || state.nav === 'mensurations') _saveNavState();
@@ -1066,6 +1068,7 @@ function renderMain(){
   if (state.nav === 'bilans') { renderBilansPage(el); return; }
   if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
+  if (state.nav === 'notifications') { renderNotificationsPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
   if (state.nav === 'editeur-protocole') { renderEditeurProtocolePage(el); return; }
@@ -1146,7 +1149,7 @@ async function _majStatutPush(){
 }
 
 // ── Envoyer une notification push à un client (ou tous) ────────────────
-function ouvrirModalNotifier(clientId, clientNom){
+function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
@@ -1154,12 +1157,16 @@ function ouvrirModalNotifier(clientId, clientNom){
       <h3 style="margin:0 0 16px;">🔔 Notifier ${esc(clientNom)}</h3>
       <div class="fiche-field">
         <label>Titre</label>
-        <input id="ntf-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;">
+        <input id="ntf-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;" value="${esc(presetTitre||'')}">
       </div>
       <div class="fiche-field">
         <label>Message</label>
-        <textarea id="ntf-corps" placeholder="Écris ton message…" style="font-size:14px;"></textarea>
+        <textarea id="ntf-corps" placeholder="Écris ton message…" style="font-size:14px;">${esc(presetCorps||'')}</textarea>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-muted);margin:4px 0 6px;cursor:pointer;">
+        <input type="checkbox" id="ntf-plein-ecran" style="width:16px;height:16px;flex-shrink:0;">
+        Afficher en plein écran à l'ouverture de l'app (en plus de la cloche)
+      </label>
       <div id="ntf-err" style="color:var(--critical);font-size:12px;display:none;margin-bottom:6px;"></div>
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
@@ -1171,32 +1178,52 @@ function ouvrirModalNotifier(clientId, clientNom){
   document.getElementById('ntf-titre').focus();
 }
 
+// Cœur d'un envoi : trace l'envoi groupé (notif_envois), ses destinataires
+// (notif_envoi_destinataires, conservés même si l'inbox client est vidée),
+// écrit dans l'inbox vivante du client (client_notifications) puis pousse le
+// push. Réutilisé par le modal manuel ET par "Renvoyer" depuis l'historique.
+async function _envoyerNotifCore(clientId, titre, corps, pleinEcran, source){
+  const cibles = clientId === 'all' ? data.clients.map(c => c.id) : [clientId];
+  const resEnvoi = await fetch(`${SUPABASE_URL}/rest/v1/notif_envois`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ title: titre, body: corps, plein_ecran: !!pleinEcran, source: source || 'manuel' })
+  });
+  if (!resEnvoi.ok) throw new Error('Erreur création envoi (' + resEnvoi.status + ')');
+  const envoi = (await resEnvoi.json())[0];
+  await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/notif_envoi_destinataires`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify(cibles.map(id => ({ envoi_id: envoi.id, client_id: id })))
+    }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_notifications`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify(cibles.map(id => ({ client_id: id, title: titre, body: corps, envoi_id: envoi.id, plein_ecran: !!pleinEcran })))
+    })
+  ]);
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    body: JSON.stringify({ title: titre, body: corps, client_id: clientId })
+  });
+  const j = await res.json();
+  if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
+  return j;
+}
+
 async function envoyerNotification(clientId){
   const titre = document.getElementById('ntf-titre').value.trim();
   const corps = document.getElementById('ntf-corps').value.trim();
+  const pleinEcran = document.getElementById('ntf-plein-ecran')?.checked || false;
   const err = document.getElementById('ntf-err');
   const btn = document.getElementById('ntf-btn');
   if (!titre || !corps) { err.textContent = 'Titre et message obligatoires.'; err.style.display = 'block'; return; }
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    // Historique persistant (indépendant du push, sert de badge/liste dans l'app
-    // cliente) — une ligne par client ciblé, y compris pour la diffusion "all".
-    const cibles = clientId === 'all' ? data.clients.map(c => c.id) : [clientId];
-    fetch(`${SUPABASE_URL}/rest/v1/client_notifications`, {
-      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
-      body: JSON.stringify(cibles.map(id => ({ client_id: id, title: titre, body: corps })))
-    }).catch(() => {});
-
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ title: titre, body: corps, client_id: clientId })
-    });
-    const j = await res.json();
-    if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
+    const j = await _envoyerNotifCore(clientId, titre, corps, pleinEcran, 'manuel');
     document.querySelector('.modal-overlay')?.remove();
     alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
+    if (state.nav === 'notifications') { await chargerHistoriqueNotifs(); renderMain(); }
   } catch(e) {
     err.textContent = 'Erreur : ' + e.message; err.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Envoyer';
@@ -1222,6 +1249,124 @@ async function activerNotificationsPush(){
     alert('Erreur : ' + e.message);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Activer les notifications sur cet appareil'; }
+  }
+}
+
+// ── Page Notifications (historique des envois) ──────────────────────────
+let notifHistoData = { loaded:false, envois:[] };
+
+function _nomClient(id){
+  const c = data.clients.find(x => x.id === id);
+  return c ? c.nom : id;
+}
+
+async function chargerHistoriqueNotifs(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/notif_envois?select=*,notif_envoi_destinataires(client_id,supprime)&order=created_at.desc&limit=200`, { headers: supaHeaders() });
+  const envois = res.ok ? await res.json() : [];
+  const ids = envois.map(e => e.id);
+  let luByKey = {};
+  if (ids.length) {
+    const resLu = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?envoi_id=in.(${ids.join(',')})&select=envoi_id,client_id,lu`, { headers: supaHeaders() });
+    if (resLu.ok) (await resLu.json()).forEach(r => { luByKey[r.envoi_id + '|' + r.client_id] = r.lu; });
+  }
+  notifHistoData = { loaded: true, envois: envois.map(e => ({
+    ...e,
+    destinataires: (e.notif_envoi_destinataires || []).map(d => ({
+      client_id: d.client_id, supprime: d.supprime,
+      lu: luByKey[e.id + '|' + d.client_id] === true
+    }))
+  })) };
+}
+
+function renderNotificationsPage(el){
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Notifications</h1></div>
+      <button class="btn primary" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
+    </div>
+    <div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>'}</div>`;
+  if (!notifHistoData.loaded) {
+    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications') renderMain(); });
+  }
+}
+
+function _renderNotifHistoList(){
+  const envois = notifHistoData.envois;
+  if (!envois.length) return `<div class="fiche-prog-empty" style="text-align:center;padding:32px;"><div style="font-size:14px;color:var(--text-muted);">Aucune notification envoyée pour l'instant.</div></div>`;
+  return envois.map(e => {
+    const dest = e.destinataires;
+    const actifs = dest.filter(d => !d.supprime);
+    const luCount = actifs.filter(d => d.lu).length;
+    const noms = dest.map(d => `${esc(_nomClient(d.client_id))}${d.supprime ? ' (supprimée)' : (d.lu ? ' ✓ lu' : '')}`).join(', ');
+    return `
+    <div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
+      <div style="display:flex;justify-content:space-between;width:100%;gap:10px;">
+        <div style="min-width:0;">
+          <div class="p-nom">${esc(e.title)}${e.plein_ecran ? ' <span style="font-size:10px;font-weight:700;color:var(--accent);">PLEIN ÉCRAN</span>' : ''}</div>
+          <div class="p-meta" style="white-space:normal;">${esc(e.body)}</div>
+        </div>
+        <div class="p-meta" style="flex-shrink:0;text-align:right;">${new Date(e.created_at).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+      </div>
+      <div class="p-meta" style="white-space:normal;">Envoyé à : ${noms || '—'} · ${luCount}/${actifs.length || 0} lue${luCount>1?'s':''}</div>
+      <div style="display:flex;gap:8px;margin-top:2px;">
+        <button class="btn" style="font-size:11px;padding:5px 9px;" onclick="ouvrirRenvoyerNotif('${e.id}')">↻ Renvoyer</button>
+        ${actifs.length ? `<button class="btn" style="font-size:11px;padding:5px 9px;color:var(--critical);" onclick="supprimerNotifEnvoi('${e.id}')">🗑 Supprimer côté client</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function supprimerNotifEnvoi(envoiId){
+  if (!confirm("Supprimer cette notification chez tous les clients qui l'ont reçue ? Elle disparaîtra de leur cloche, mais restera dans cet historique.")) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?envoi_id=eq.${envoiId}`, { method:'DELETE', headers: supaHeaders({ Prefer:'return=minimal' }) });
+    await fetch(`${SUPABASE_URL}/rest/v1/notif_envoi_destinataires?envoi_id=eq.${envoiId}`, {
+      method:'PATCH', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ supprime:true })
+    });
+    await chargerHistoriqueNotifs();
+    if (state.nav === 'notifications') renderMain();
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+function ouvrirRenvoyerNotif(envoiId){
+  const e = notifHistoData.envois.find(x => x.id === envoiId);
+  if (!e) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:400px;width:100%;">
+      <h3 style="margin:0 0 16px;">↻ Renvoyer « ${esc(e.title)} »</h3>
+      <div class="fiche-field">
+        <label>Destinataire</label>
+        <select id="rnv-cible" style="font-size:16px;">
+          <option value="all">Tous les clients</option>
+          ${data.clients.slice().sort((a,b)=>a.nom.localeCompare(b.nom,'fr')).map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="rnv-err" style="color:var(--critical);font-size:12px;display:none;margin-bottom:6px;"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" id="rnv-btn" onclick="renvoyerNotif('${envoiId}')">Renvoyer</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function renvoyerNotif(envoiId){
+  const e = notifHistoData.envois.find(x => x.id === envoiId);
+  const cible = document.getElementById('rnv-cible').value;
+  const err = document.getElementById('rnv-err');
+  const btn = document.getElementById('rnv-btn');
+  btn.disabled = true; btn.textContent = 'Envoi…';
+  try {
+    await _envoyerNotifCore(cible, e.title, e.body, e.plein_ecran, e.source);
+    document.querySelector('.modal-overlay')?.remove();
+    await chargerHistoriqueNotifs();
+    if (state.nav === 'notifications') renderMain();
+  } catch(ex){
+    err.textContent = 'Erreur : ' + ex.message; err.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Renvoyer';
   }
 }
 
@@ -4245,6 +4390,7 @@ function _ficheProgRow(p, c, archived){
           ? `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();desarchiverProgrammeClient(${p.id},'${c.id}')">↩ Désarchiver</button>`
           : `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ton nouveau programme est disponible !','Ton programme « ${esc(p.nom).replace(/'/g, "\\'")} » vient d\\'être mis à jour, va y jeter un œil.')" title="Notifier">🔔</button>
         <button class="icon-btn del" onclick="event.stopPropagation();archiverProgrammeClient(${p.id},'${c.id}')" title="Archiver">${iTrash()}</button>`}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text-faint);flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
       </div>`;
@@ -4295,6 +4441,7 @@ function renderFicheDieteTab(c){
           <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
         </div>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d'être mise à jour.')" title="Notifier">🔔</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
       </div>`).join('') : `
       <div class="fiche-prog-empty" style="text-align:center;padding:24px;margin-bottom:16px;">
