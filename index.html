@@ -632,12 +632,20 @@ async function doCreerMotDePasseSupabase() {
   }
 }
 
+// Date locale (Europe/Paris) au format YYYY-MM-DD — toISOString() convertit en
+// UTC avant de trancher la date, ce qui la fait reculer d'un jour à certaines
+// heures (même piège que _rmIsoLocal côté console.html, voir CLAUDE.md).
+function _isoDateLocal(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 async function _completerConnexionSupabase(session) {
   // Verrouillage app (coach) — vérifié AVANT de finaliser la connexion, même avec
   // le bon mot de passe : un client verrouillé ne doit jamais atteindre l'accueil.
   let estCoach = false;
   try {
-    const lockRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}&select=verrouille_app,est_coach`, { headers: supaHeaders() });
+    const lockRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}&select=verrouille_app,est_coach,date_creation_compte`, { headers: supaHeaders() });
     const lockRows = lockRes.ok ? await lockRes.json() : [];
     if (lockRows[0] && lockRows[0].verrouille_app) {
       await sbAuth.auth.signOut();
@@ -648,6 +656,14 @@ async function _completerConnexionSupabase(session) {
       return;
     }
     estCoach = !!(lockRows[0] && lockRows[0].est_coach);
+    // Date de première connexion — ancrée une seule fois, jamais réécrite
+    // ensuite (reconnexions normales, changement de mot de passe, etc.).
+    if (lockRows[0] && !lockRows[0].date_creation_compte) {
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}`, {
+        method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
+        body: JSON.stringify({ date_creation_compte: _isoDateLocal(new Date()) })
+      }).catch(() => {});
+    }
   } catch(e) { /* échec de la vérif réseau : on laisse passer plutôt que de bloquer tout le monde par erreur */ }
 
   localStorage.setItem('at_client', _loginClient);
@@ -929,6 +945,39 @@ function renderHomeErreur() {
   </div>`;
 }
 
+// Extrait de _apresChargementHome pour pouvoir aussi être rappelé quand on
+// désactive le mode simplifié en cours de session (toggleModeSimplifie),
+// sans dupliquer la logique de fetch.
+function _chargerTop5Home() {
+  setTimeout(async () => {
+    try {
+      let cl;
+      if (isSupabase()) {
+        const [progRes, profilRes] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
+          fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
+        ]);
+        const progRows = progRes.ok ? await progRes.json() : [];
+        const profils = profilRes.ok ? await profilRes.json() : [];
+        const profilMap = {};
+        // Mode simplifié = ne pas apparaître dans le classement des autres.
+        profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+        cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
+          id: p.client_id, nom: profilMap[p.client_id],
+          xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+          titreActif: p.titre_actif || null,
+        }));
+      } else {
+        const raw = await api('listerClassement');
+        cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+      }
+      S.data.classement = cl;
+      const el = document.getElementById('top5Home');
+      if (el) el.outerHTML = renderTop5Home(cl);
+    } catch(e) {}
+  }, 0);
+}
+
 function _apresChargementHome() {
   chargerNotificationsClient();
   chargerNotifPrefs();
@@ -948,35 +997,7 @@ function _apresChargementHome() {
   // fire-and-forget classement — lit un spreadsheet séparé (LOG_SHEET_ID), safe en concurrent
   // Pas d'appel du tout en mode simplifié (comme le GAS : chargerTop5() n'est
   // même pas invoquée), pas juste un masquage visuel.
-  if (!modeSimplifieActif()) {
-    setTimeout(async () => {
-      try {
-        let cl;
-        if (isSupabase()) {
-          const [progRes, profilRes] = await Promise.all([
-            fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
-            fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
-          ]);
-          const progRows = progRes.ok ? await progRes.json() : [];
-          const profils = profilRes.ok ? await profilRes.json() : [];
-          const profilMap = {};
-          // Mode simplifié = ne pas apparaître dans le classement des autres.
-          profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
-          cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
-            id: p.client_id, nom: profilMap[p.client_id],
-            xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
-            titreActif: p.titre_actif || null,
-          }));
-        } else {
-          const raw = await api('listerClassement');
-          cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
-        }
-        S.data.classement = cl;
-        const el = document.getElementById('top5Home');
-        if (el) el.outerHTML = renderTop5Home(cl);
-      } catch(e) {}
-    }, 0);
-  }
+  if (!modeSimplifieActif()) _chargerTop5Home();
   // Badges coach : chargés en parallèle en arrière-plan, injectés dans le DOM
   // dès que dispo (au lieu de bloquer l'affichage de l'accueil comme avant)
   if (S.isCoach) {
@@ -1088,7 +1109,16 @@ async function toggleModeSimplifie() {
   const nouveau = !modeSimplifieActif();
   try { localStorage.setItem('modeSimplifie', nouveau ? 'true' : 'false'); } catch(e) {}
   ouvrirSettings();
-  if (S.page === 'home') render();
+  // Rafraîchit l'accueil EN PLACE si on y est déjà — jamais render() ici, qui
+  // réécrit document.body.innerHTML et détruirait le panneau réglages qu'on
+  // vient de réafficher juste au-dessus (c'était le bug : le toggle semblait
+  // ne prendre effet qu'après avoir rechargé l'app).
+  if (S.page === 'home') {
+    _majCarteHeader();
+    const top5El = document.getElementById('top5Home');
+    if (nouveau) { if (top5El) top5El.innerHTML = ''; }
+    else if (top5El) _chargerTop5Home();
+  }
   if (S.data.profil) S.data.profil.mode_simplifie = nouveau;
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
@@ -1756,7 +1786,6 @@ function ouvrirGererRappels() {
       <div style="flex:1;overflow-y:auto;padding:4px 20px calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;">
         ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 21h30 si tu n'as pas encore validé ta journée")}
         ${toggleRow('rappel_bilan', 'Rappel de bilan', "Vers 10h le jour de ton bilan si tu ne l'as pas encore envoyé")}
-        ${toggleRow('rappel_paiement', 'Rappel de paiement', "3 jours après la date de facturation de ton coach")}
       </div>
     </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };

@@ -4000,8 +4000,8 @@ function renderFicheProfilTab(c){
       </div>
       <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
       <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
-      <div class="fiche-field"><label>Date de création du compte</label><input id="fDateCreationCompte" type="date" value="${esc(p.date_creation_compte||'')}">
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">À reporter depuis le fichier Excel de log clients de la PWA — sert de référence pour le nombre de séances/bilans attendus depuis la création du compte (distinct du "Début du coaching" ci-dessous).</div>
+      <div class="fiche-field"><label>Date de première connexion</label><input id="fDateCreationCompte" type="date" value="${esc(p.date_creation_compte||'')}">
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Enregistrée automatiquement à la toute première connexion du client — ne se réinitialise jamais ensuite (changement de mot de passe, reconnexions...). Pour un client migré depuis la PWA, reporter la date depuis le fichier Excel de log clients. Sert de référence pour le nombre de séances/bilans attendus (distinct du "Début du coaching" ci-dessous).</div>
       </div>
       <h3 style="margin-top:16px;">Suivi coaching</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -4022,13 +4022,54 @@ function renderFicheProfilTab(c){
       </div>
       <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
       <h3 style="margin-top:16px;">Facturation</h3>
-      <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
-        <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
-        <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Jour du mois où le client doit payer (1-31) — visible coach uniquement. Un rappel automatique part 3 jours après si rien n'est réglé.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
+          <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
+          <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
+        </div>
+        <div class="fiche-field"><label>Mode de paiement</label>
+          <select id="fModePaiement">
+            <option value="">—</option>
+            <option value="virement" ${p.mode_paiement==='virement'?'selected':''}>Virement</option>
+            <option value="espece" ${p.mode_paiement==='espece'?'selected':''}>Espèces</option>
+            <option value="gocardless" ${p.mode_paiement==='gocardless'?'selected':''}>GoCardless</option>
+          </select>
+        </div>
       </div>
+      <div style="font-size:11px;color:var(--text-faint);margin-top:-4px;margin-bottom:10px;">En GoCardless (prélèvement automatique), aucun rappel de paiement n'est jamais envoyé. Sinon, un rappel (visible uniquement dans la cloche de l'app, pas une notification poussée) part 3 jours après le jour de facturation, tant que le mois n'a pas été marqué payé ci-dessous.</div>
+      ${_ficheRenderStatutPaiement(p, c.id)}
       <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
     </div>`;
+}
+
+const _MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+function _ficheMoisCourantKey(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function _ficheRenderStatutPaiement(p, clientId){
+  const moisKey = _ficheMoisCourantKey();
+  const [y, m] = moisKey.split('-');
+  const moisLabel = `${_MOIS_FR[+m-1]} ${y}`;
+  const dejaPaye = p.dernier_mois_paye === moisKey;
+  return `
+    <div class="fiche-field" style="background:var(--surface-2);border-radius:var(--radius-sm);padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div>
+        <div style="font-size:13px;font-weight:600;">Paiement de ${moisLabel}</div>
+        <div style="font-size:11.5px;color:${dejaPaye?'var(--success)':'var(--text-faint)'};margin-top:2px;">${dejaPaye ? '✓ Marqué payé' : 'Pas encore marqué payé'}</div>
+      </div>
+      <button class="btn ${dejaPaye?'':'primary'}" style="flex-shrink:0;" onclick="toggleMoisPaye('${clientId}',${dejaPaye})">${dejaPaye ? 'Annuler' : 'Marquer payé'}</button>
+    </div>`;
+}
+async function toggleMoisPaye(clientId, dejaPaye){
+  const nouveauMois = dejaPaye ? null : _ficheMoisCourantKey();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ dernier_mois_paye: nouveauMois })
+    });
+    if (ficheData.profil) ficheData.profil.dernier_mois_paye = nouveauMois;
+    if (state.nav==='fiche-client') renderMain();
+  } catch(e){ alert('Erreur : ' + e.message); }
 }
 
 let _ficheProgVoirArchives = false;
@@ -5160,6 +5201,7 @@ async function sauvegarderFicheSandbox(clientId){
     seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
     cardio_consigne: document.getElementById('fCardioConsigne').value.trim() || null,
     jour_paiement: parseInt(document.getElementById('fJourPaiement').value) || null,
+    mode_paiement: document.getElementById('fModePaiement').value || null,
     updated_at: new Date().toISOString(),
   };
   try {

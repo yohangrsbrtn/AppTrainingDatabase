@@ -35,7 +35,11 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 
 ### Clients et profils
 
-- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, mode_simplifie, updated_at }` — Upsert via `on_conflict=client_id`. `mode_simplifie` (BOOLEAN, `sql/2026-08-01_mode_simplifie.sql`) : cache XP/niveau/classement côté client (l'XP continue de tourner en fond), source de vérité pour exclure ces clients du classement — le cache local `localStorage.modeSimplifie` est resynchronisé depuis cette colonne à chaque chargement de l'accueil.
+- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, mode_simplifie, jour_paiement, mode_paiement, dernier_mois_paye, date_creation_compte, updated_at }` — Upsert via `on_conflict=client_id`.
+  - `mode_simplifie` (BOOLEAN, `sql/2026-08-01_mode_simplifie.sql`) : cache XP/niveau/classement côté client (l'XP continue de tourner en fond), source de vérité pour exclure ces clients du classement — le cache local `localStorage.modeSimplifie` est resynchronisé depuis cette colonne à chaque chargement de l'accueil.
+  - `mode_paiement` (TEXT `virement`/`espece`/`gocardless`, `sql/2026-08-01_rappel_paiement_v2.sql`) : en `gocardless`, jamais de rappel de paiement (prélèvement automatique).
+  - `dernier_mois_paye` (TEXT `'YYYY-MM'`) : marqué manuellement par le coach (bouton "Marquer payé" dans la fiche client, Facturation) — le rappel de paiement (in-app uniquement, plus de push, plus de toggle client depuis cette refonte) ne part que si le mois courant n'est pas déjà marqué payé.
+  - `date_creation_compte` : renommé "Date de première connexion" côté console — auto-enregistrée une seule fois à la toute première connexion (`_completerConnexionSupabase` dans index.html), jamais réécrite ensuite. Pour les clients migrés, reporter manuellement la date depuis le fichier Excel GAS.
 
 ### Programmes (snapshot par client)
 
