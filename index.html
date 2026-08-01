@@ -2384,6 +2384,21 @@ if (S.token && S.client) {
     fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}`, {
       method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ derniere_connexion: new Date().toISOString() })
     }).catch(() => {});
+    // Même piège que derniere_connexion : S.isCoach/localStorage.at_coach
+    // n'est écrit qu'au login complet, jamais réévalué tant que la session
+    // persiste — un client promu coach en base (est_coach=true) restait donc
+    // "non coach" sur un appareil déjà connecté, sans jamais revoir les
+    // tuiles coach sur son téléphone (vécu : yohanp).
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=est_coach`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        const estCoachReel = !!(rows[0] && rows[0].est_coach);
+        if (estCoachReel !== S.isCoach) {
+          S.isCoach = estCoachReel;
+          localStorage.setItem('at_coach', estCoachReel ? '1' : '0');
+          if (S.page === 'home') loadHomeSupabase();
+        }
+      }).catch(() => {});
     loadHomeSupabase();
   } else if (S.isCoach && !_forceMobile && window.innerWidth >= 900) {
     // Coach sur grand écran → la console desktop est plus adaptée que l'appli mobile.
