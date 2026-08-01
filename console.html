@@ -4312,24 +4312,24 @@ function renderFicheRoadmapTab(c){
         const t = _roadmapType(p.type);
         const enCours = p.date_debut<=today && p.date_fin>=today;
         return `
-        <div class="fiche-card" style="margin-bottom:10px;border-left:3px solid ${t.color};">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-            <select onchange="rmChangerChamp(${p.id},'${c.id}','type',this.value)" style="font-size:13px;font-weight:700;color:${t.color};background:var(--surface-2);border:1px solid var(--hairline);border-radius:6px;padding:6px 8px;">
+        <div class="fiche-card" style="margin-bottom:6px;padding:8px 12px;border-left:3px solid ${t.color};">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+            <select onchange="rmChangerChamp(${p.id},'${c.id}','type',this.value)" style="font-size:12px;font-weight:700;color:${t.color};background:var(--surface-2);border:1px solid var(--hairline);border-radius:5px;padding:3px 6px;">
               ${ROADMAP_TYPES.map(rt=>`<option value="${rt.key}" ${p.type===rt.key?'selected':''}>${esc(rt.label)}</option>`).join('')}
             </select>
             ${enCours?'<span class="chip ok"><span class="dot"></span>En cours</span>':''}
             <div style="flex:1;"></div>
             <button class="icon-btn del" onclick="supprimerRoadmapPhase(${p.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
-            <button class="btn" style="padding:4px 8px;font-size:12px;" title="Décaler la phase d'une semaine plus tôt" onclick="rmDecaler(${p.id},'${c.id}',-7)">‹ 7j</button>
-            <input type="date" value="${p.date_debut||''}" onchange="rmChangerChamp(${p.id},'${c.id}','date_debut',this.value)" style="flex:1;font-size:14px;padding:7px 8px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">
+            <button class="btn" style="padding:2px 6px;font-size:11px;" title="Décaler la phase d'une semaine plus tôt" onclick="rmDecaler(${p.id},'${c.id}',-7)">‹ 7j</button>
+            <input type="date" value="${p.date_debut||''}" onchange="rmChangerChamp(${p.id},'${c.id}','date_debut',this.value)" style="flex:1;font-size:13px;padding:4px 6px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);">
             <span style="color:var(--text-faint);">→</span>
-            <input type="date" value="${p.date_fin||''}" onchange="rmChangerChamp(${p.id},'${c.id}','date_fin',this.value)" style="flex:1;font-size:14px;padding:7px 8px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);">
-            <button class="btn" style="padding:4px 8px;font-size:12px;" title="Décaler la phase d'une semaine plus tard" onclick="rmDecaler(${p.id},'${c.id}',7)">7j ›</button>
+            <input type="date" value="${p.date_fin||''}" onchange="rmChangerChamp(${p.id},'${c.id}','date_fin',this.value)" style="flex:1;font-size:13px;padding:4px 6px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);">
+            <button class="btn" style="padding:2px 6px;font-size:11px;" title="Décaler la phase d'une semaine plus tard" onclick="rmDecaler(${p.id},'${c.id}',7)">7j ›</button>
           </div>
           <textarea data-rm-objectif="${p.id}" oninput="rmAutoGrow(this);rmObjectifChange(${p.id},'${c.id}',this.value)" placeholder="Objectif / commentaire pour cette phase…"
-            style="width:100%;box-sizing:border-box;font-size:14px;font-family:inherit;padding:8px 10px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);resize:none;overflow:hidden;min-height:38px;line-height:1.5;">${esc(p.objectif||'')}</textarea>
+            style="width:100%;box-sizing:border-box;font-size:13px;font-family:inherit;padding:5px 7px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);resize:none;overflow:hidden;min-height:26px;line-height:1.4;">${esc(p.objectif||'')}</textarea>
         </div>`;
       }).join('')}
       ${_rmCalendrierHtml(phases, _roadmapType)}
