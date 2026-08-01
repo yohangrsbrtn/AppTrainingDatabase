@@ -135,7 +135,7 @@ function _rmCalendrierHtml(phases){
       const isToday = dateStr===todayStr;
       cells.push(`<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:11px;${t?`background:${t.color}26;color:${t.color};font-weight:700;`:'color:#8892a4;'}${isToday?`box-shadow:inset 0 0 0 2px ${t?t.color:'#3ecf8e'};`:''}">${d}</div>`);
     }
-    return `<div style="flex:1;min-width:150px;">
+    return `<div style="flex:0 0 auto;width:150px;">
       <div style="font-size:12px;font-weight:700;color:#e8eaf0;margin-bottom:8px;text-align:center;">${moisNoms[m-1]} ${y}</div>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;">
         ${RM_JOURS_SEMAINE.map(j=>`<div style="text-align:center;font-size:9px;color:#8892a4;">${j}</div>`).join('')}
@@ -145,7 +145,7 @@ function _rmCalendrierHtml(phases){
   }).join('');
   return `<div style="margin-top:20px;">
     <div style="font-size:11px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Calendrier</div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px;">${monthsHtml}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:center;">${monthsHtml}</div>
   </div>`;
 }
 
