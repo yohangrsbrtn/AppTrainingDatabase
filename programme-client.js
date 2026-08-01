@@ -13,6 +13,16 @@ let _pcSubPage         = 'selector'; // 'selector' | 'seance'
 let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_consigne } assignés par le coach
 let _pcNotesCoach      = []; // [{ nom, note }] pour la modale bulle coach
 
+// ── Exercices équivalents (créés par le client quand une machine manque) ──
+// Un seul équivalent par exercice prévu (UNIQUE côté DB). Mêmes séries/reps/
+// repos/tempo cibles que l'exercice prévu (jamais dupliqués, juste réaffichés) —
+// seuls le nom et les logs de charge sont propres à l'équivalent.
+let _pcEquivalents     = {}; // `${client_programme_exercice_id}` → { id, nom, exercice_id }
+let _pcEquivLogs       = {}; // `${equivalentId}|${semaine}|${serie}` → log
+const _pcEquivSaveQueues = {};
+let _pcExercicesLib    = null; // cache bibliothèque exercices (lazy)
+let _pcEquivCibleId    = null; // exercice prévu ciblé par la modale de création en cours
+
 // ── Chargement ─────────────────────────────────────────────────────────
 
 async function _chargerObjectifsClient() {
@@ -57,7 +67,8 @@ async function loadProgrammeClient() {
     // Sélection par défaut : première séance du bloc sélectionné
     const firstSeance = _pcSeancesForBloc(_pcBlocId)[0];
     if (!_pcSeanceId && firstSeance) _pcSeanceId = firstSeance.id;
-    await chargerLogsProgramme();
+    const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
+    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds)]);
     setPage('programme-client');
   } catch(e) {
     _pcClientProgramme = 'error';
@@ -117,6 +128,103 @@ async function chargerLogsProgramme() {
   if (!res.ok) return;
   const rows = await res.json();
   rows.forEach(l => { _pcLogs[l.client_programme_exercice_id + '|' + l.semaine + '|' + l.numero_serie] = l; });
+}
+
+async function _pcChargerEquivalents(exoIds) {
+  _pcEquivalents = {};
+  _pcEquivLogs = {};
+  if (!exoIds.length) return;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents?programme_exercice_id=in.(${exoIds.join(',')})`,
+    { headers: supaHeaders() }
+  );
+  const rows = res.ok ? await res.json() : [];
+  rows.forEach(r => { _pcEquivalents[r.programme_exercice_id] = r; });
+  const eqIds = rows.map(r => r.id);
+  if (!eqIds.length) return;
+  const resLogs = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?equivalent_id=in.(${eqIds.join(',')})`,
+    { headers: supaHeaders() }
+  );
+  if (!resLogs.ok) return;
+  (await resLogs.json()).forEach(l => { _pcEquivLogs[l.equivalent_id + '|' + l.semaine + '|' + l.numero_serie] = l; });
+}
+
+async function _pcChargerExercicesLib() {
+  if (_pcExercicesLib) return _pcExercicesLib;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?select=id,nom,groupe_musculaire&order=nom.asc`, { headers: supaHeaders() });
+    _pcExercicesLib = res.ok ? await res.json() : [];
+  } catch(e) { _pcExercicesLib = []; }
+  return _pcExercicesLib;
+}
+
+async function pcOuvrirCreerEquivalent(exerciceId) {
+  _pcEquivCibleId = exerciceId;
+  await _pcChargerExercicesLib();
+  const overlay = document.createElement('div');
+  overlay.id = 'pcEquivOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
+  overlay.innerHTML = `
+    <div style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+      <div style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+      <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">🔁 Exercice équivalent</div>
+      <div style="padding:0 20px 10px;font-size:12px;color:#8892a4;">Même nombre de séries, reps, repos et tempo que l'exercice prévu — seul le nom change.</div>
+      <div style="padding:0 20px 10px;">
+        <input id="pcEquivSearch" type="text" placeholder="Chercher ou saisir un nom…" oninput="_pcFiltrerEquivLib()" style="width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid #2d3142;background:#0f1117;color:#fff;">
+      </div>
+      <div id="pcEquivList" style="flex:1;overflow-y:auto;padding:0 20px 12px;"></div>
+      <div style="padding:12px 20px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;">
+        <button onclick="document.getElementById('pcEquivOverlay').remove()" style="flex:1;padding:12px;background:#2d3142;border:none;border-radius:10px;color:#fff;font-size:14px;cursor:pointer;">Annuler</button>
+        <button onclick="pcCreerEquivalent(null,null)" style="flex:1;padding:12px;background:#378ADD;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Utiliser ce nom</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  _pcFiltrerEquivLib();
+  setTimeout(() => document.getElementById('pcEquivSearch')?.focus(), 100);
+}
+
+function _pcFiltrerEquivLib() {
+  const q = (document.getElementById('pcEquivSearch')?.value || '').trim().toLowerCase();
+  const list = document.getElementById('pcEquivList');
+  if (!list) return;
+  const items = !q ? [] : (_pcExercicesLib || []).filter(e => e.nom.toLowerCase().includes(q)).slice(0, 30);
+  list.innerHTML = items.map(e => `
+    <div onclick="pcSelectionnerEquivLib(${e.id}, '${esc(e.nom).replace(/'/g, "\\'")}')" style="padding:11px 12px;border-bottom:1px solid #1e2235;cursor:pointer;font-size:14px;color:#e8eaf0;">
+      ${esc(e.nom)}${e.groupe_musculaire ? `<span style="font-size:11px;color:#8892a4;margin-left:6px;">${esc(e.groupe_musculaire)}</span>` : ''}
+    </div>`).join('') || (q ? `<div style="padding:12px 0;font-size:12px;color:#5a6172;">Aucun résultat dans la bibliothèque — clique "Utiliser ce nom" pour créer un nom libre.</div>` : '');
+}
+
+function pcSelectionnerEquivLib(exerciceLibId, nom) {
+  pcCreerEquivalent(exerciceLibId, nom);
+}
+
+async function pcCreerEquivalent(exerciceLibId, nomLib) {
+  const nomSaisi = (document.getElementById('pcEquivSearch')?.value || '').trim();
+  const nom = nomLib || nomSaisi;
+  if (!nom) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ programme_exercice_id: _pcEquivCibleId, nom, exercice_id: exerciceLibId || null })
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const row = (await res.json())[0];
+    _pcEquivalents[_pcEquivCibleId] = row;
+    document.getElementById('pcEquivOverlay')?.remove();
+    setPage('programme-client');
+  } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+}
+
+async function pcSupprimerEquivalent(programmeExerciceId, equivalentId) {
+  if (!confirm('Supprimer cet exercice équivalent ? Les charges loguées dessus seront perdues.')) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents?id=eq.${equivalentId}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+    delete _pcEquivalents[programmeExerciceId];
+    Object.keys(_pcEquivLogs).forEach(k => { if (k.startsWith(equivalentId + '|')) delete _pcEquivLogs[k]; });
+    setPage('programme-client');
+  } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
 }
 
 // ── Rendu ──────────────────────────────────────────────────────────────
@@ -322,6 +430,33 @@ function _pcRightPanel(seance) {
   </div>`;
 }
 
+// Rendu des lignes de séries, factorisé pour être utilisé identiquement côté
+// exercice prévu ET côté exercice équivalent (mêmes cibles, juste une source
+// de logs et un handler de sauvegarde différents).
+function _pcSetsHtml(nbSeries, semaine, getLog, getPrevLog, isReadonly, onchangeBuilder) {
+  let html = '';
+  for (let s = 1; s <= nbSeries; s++) {
+    const log = getLog(s) || {};
+    const prevLog = getPrevLog(s);
+    let refPrec = '';
+    if (prevLog && (prevLog.charge || prevLog.reps || prevLog.rir)) {
+      const parts = [];
+      if (prevLog.reps)   parts.push(prevLog.reps + ' reps');
+      if (prevLog.charge) parts.push(prevLog.charge + ' kg');
+      if (prevLog.rir)    parts.push('RIR ' + prevLog.rir);
+      refPrec = `<div style="font-size:11px;color:#5a6172;margin-bottom:2px;padding-left:38px;">Sem ${semaine - 1} : ${parts.join(' · ')}</div>`;
+    }
+    const roAttr = isReadonly ? 'disabled style="opacity:.55;padding:6px 2px;"' : 'style="padding:6px 2px;"';
+    html += refPrec + `<div class="set-row">
+      <span class="set-num">S${s}</span>
+      <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'reps')}"`}   ${roAttr}>
+      <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'charge')}"`} ${roAttr}>
+      <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'rir')}"`}    ${roAttr}>
+    </div>`;
+  }
+  return html;
+}
+
 function renderPcSeancePage() {
   const seance = _pcSeancesForBloc(_pcBlocId).find(s => s.id === _pcSeanceId)
     || _pcAllSeances().find(s => s.id === _pcSeanceId);
@@ -336,28 +471,15 @@ function renderPcSeancePage() {
     .map(i => `<option value="${i}" ${i === _pcSemaine ? 'selected' : ''}>Semaine ${i}</option>`).join('');
   const optsSeances = blocSeances.map(s => `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`).join('');
 
+  const exercicesAvecEquiv = [];
   const exosHtml = (seance.client_programme_exercices || []).map((ex, idx) => {
     const nbSeries = parseInt(ex.series) || 3;
-    let setsHtml = '';
-    for (let s = 1; s <= nbSeries; s++) {
-      const log = _pcLogs[ex.id + '|' + _pcSemaine + '|' + s] || {};
-      const prevLog = _pcLogs[ex.id + '|' + (_pcSemaine - 1) + '|' + s];
-      let refPrec = '';
-      if (prevLog && (prevLog.charge || prevLog.reps || prevLog.rir)) {
-        const parts = [];
-        if (prevLog.reps)   parts.push(prevLog.reps + ' reps');
-        if (prevLog.charge) parts.push(prevLog.charge + ' kg');
-        if (prevLog.rir)    parts.push('RIR ' + prevLog.rir);
-        refPrec = `<div style="font-size:11px;color:#5a6172;margin-bottom:2px;padding-left:38px;">Sem ${_pcSemaine - 1} : ${parts.join(' · ')}</div>`;
-      }
-      const roAttr = isReadonly ? 'disabled style="opacity:.55;padding:6px 2px;"' : 'style="padding:6px 2px;"';
-      setsHtml += refPrec + `<div class="set-row">
-        <span class="set-num">S${s}</span>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'reps',this.value)"`}   ${roAttr}>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'charge',this.value)"`} ${roAttr}>
-        <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   ${isReadonly ? 'disabled' : `onchange="pcSauverLog(${ex.id},${s},'rir',this.value)"`}    ${roAttr}>
-      </div>`;
-    }
+    const equiv = _pcEquivalents[ex.id];
+    const setsHtml = _pcSetsHtml(nbSeries, _pcSemaine,
+      s => _pcLogs[ex.id + '|' + _pcSemaine + '|' + s],
+      s => _pcLogs[ex.id + '|' + (_pcSemaine - 1) + '|' + s],
+      isReadonly,
+      (s, field) => `pcSauverLog(${ex.id},${s},'${field}',this.value)`);
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
     const cibleLigne1 = [
       ex.series ? ex.series + ' séries' : '',
@@ -371,6 +493,40 @@ function renderPcSeancePage() {
 
     _pcNotesCoach[idx] = { nom: ex.nom, note: ex.notes || '' };
 
+    const panelPrevu = `${setsHtml}
+      <textarea class="bilan-input" rows="3" placeholder="Note…"
+        ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaire(${ex.id},this.value)"`}
+        style="margin-top:6px;font-size:16px;${isReadonly?'opacity:.55;':''}">${esc(commentaireLog.commentaire || '')}</textarea>
+      ${!equiv && !isReadonly ? `<button onclick="pcOuvrirCreerEquivalent(${ex.id})" style="margin-top:8px;width:100%;background:transparent;border:1px dashed #378ADD66;border-radius:8px;padding:8px;color:#378ADD;font-size:12px;font-weight:600;cursor:pointer;">🔁 Exercice indisponible ? Créer un équivalent</button>` : ''}`;
+
+    let bodyHtml;
+    if (equiv) {
+      exercicesAvecEquiv.push(ex.id);
+      const setsHtmlEquiv = _pcSetsHtml(nbSeries, _pcSemaine,
+        s => _pcEquivLogs[equiv.id + '|' + _pcSemaine + '|' + s],
+        s => _pcEquivLogs[equiv.id + '|' + (_pcSemaine - 1) + '|' + s],
+        isReadonly,
+        (s, field) => `pcSauverLogEquivalent(${equiv.id},${s},'${field}',this.value)`);
+      const equivCommentLog = _pcEquivLogs[equiv.id + '|' + _pcSemaine + '|1'] || {};
+      bodyHtml = `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+          <div id="pcEquivDots_${ex.id}" style="font-size:11px;font-weight:600;color:var(--muted);">1 / 2</div>
+        </div>
+        <div id="pcEquivSlider_${ex.id}" style="display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;">
+          <div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">${panelPrevu}</div>
+          <div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
+            <div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(equiv.nom)}</div>
+            ${setsHtmlEquiv}
+            <textarea class="bilan-input" rows="3" placeholder="Note…"
+              ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaireEquivalent(${equiv.id},this.value)"`}
+              style="margin-top:6px;font-size:16px;${isReadonly?'opacity:.55;':''}">${esc(equivCommentLog.commentaire || '')}</textarea>
+            ${!isReadonly ? `<button onclick="pcSupprimerEquivalent(${ex.id},${equiv.id})" style="margin-top:8px;width:100%;background:transparent;border:1px solid #e05c5c55;border-radius:8px;padding:8px;color:#e05c5c;font-size:12px;font-weight:600;cursor:pointer;">🗑 Supprimer cet exercice équivalent</button>` : ''}
+          </div>
+        </div>`;
+    } else {
+      bodyHtml = panelPrevu;
+    }
+
     return `<div class="card" style="padding:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         <div style="flex:1;min-width:0;">
@@ -383,12 +539,21 @@ function renderPcSeancePage() {
         </div>
         ${ex.repos ? `<button class="chrono-btn" style="font-size:11px;padding:5px 7px;" onclick="pcLancerChrono('${esc(ex.repos)}')">⏱</button>` : ''}
       </div>
-      ${setsHtml}
-      <textarea class="bilan-input" rows="3" placeholder="Note…"
-        ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaire(${ex.id},this.value)"`}
-        style="margin-top:6px;font-size:16px;${isReadonly?'opacity:.55;':''}">${esc(commentaireLog.commentaire || '')}</textarea>
+      ${bodyHtml}
     </div>`;
   }).join('') || `<div class="empty"><div class="empty-text">Aucun exercice dans cette séance.</div></div>`;
+
+  setTimeout(() => {
+    exercicesAvecEquiv.forEach(exId => {
+      const slider = document.getElementById(`pcEquivSlider_${exId}`);
+      const dots = document.getElementById(`pcEquivDots_${exId}`);
+      if (!slider) return;
+      slider.addEventListener('scroll', () => {
+        const optIdx = Math.min(1, Math.round(slider.scrollLeft / (slider.clientWidth || 1)));
+        if (dots) dots.textContent = (optIdx + 1) + ' / 2';
+      }, { passive: true });
+    });
+  }, 150);
 
   const rightPanel = _pcRightPanel(seance);
   return `<div id="app">
@@ -531,6 +696,53 @@ async function pcSauverLog(exerciceId, serie, field, value) {
 
 async function pcSauverCommentaire(exerciceId, value) {
   await pcSauverLog(exerciceId, 1, 'commentaire', value);
+}
+
+// Copie exacte du pattern anti-race-condition de pcSauverLog, juste vers la
+// table dédiée aux exercices équivalents (clé equivalentId au lieu de exerciceId).
+async function pcSauverLogEquivalent(equivalentId, serie, field, value) {
+  const key = equivalentId + '|' + _pcSemaine + '|' + serie;
+  const current = _pcEquivLogs[key] || {
+    equivalent_id: equivalentId,
+    semaine: _pcSemaine,
+    numero_serie: serie,
+    charge: null, reps: null, rir: null, commentaire: null
+  };
+  const parsed = field === 'charge' ? (parseFloat((value + '').replace(',', '.')) || null)
+    : field === 'reps'   ? (parseInt(value)   || null)
+    : (value || null);
+  _pcEquivLogs[key] = Object.assign({}, current, { [field]: parsed });
+
+  _pcEquivSaveQueues[key] = (_pcEquivSaveQueues[key] || Promise.resolve()).then(async () => {
+    const log = _pcEquivLogs[key];
+    try {
+      if (log.id) {
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?id=eq.${log.id}`,
+          { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: parsed }) }
+        );
+      } else {
+        const l = _pcEquivLogs[key];
+        const body = { equivalent_id: equivalentId, semaine: _pcSemaine, numero_serie: serie };
+        if (l.charge      != null) body.charge      = l.charge;
+        if (l.reps        != null) body.reps        = l.reps;
+        if (l.rir         != null) body.rir         = l.rir;
+        if (l.commentaire != null) body.commentaire = l.commentaire;
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?on_conflict=equivalent_id,semaine,numero_serie`,
+          { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
+        );
+        if (res.ok) {
+          const rows = await res.json();
+          if (rows[0]?.id) _pcEquivLogs[key] = Object.assign({}, _pcEquivLogs[key], { id: rows[0].id });
+        }
+      }
+    } catch(e) {}
+  });
+}
+
+async function pcSauverCommentaireEquivalent(equivalentId, value) {
+  await pcSauverLogEquivalent(equivalentId, 1, 'commentaire', value);
 }
 
 function pcAfficherNoteCoach(idx) {

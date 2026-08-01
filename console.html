@@ -844,11 +844,25 @@ async function chargerProgrammeById(progId){
   const exIds = [];
   blocs.forEach(b => (b.client_programme_seances||[]).forEach(s => (s.client_programme_exercices||[]).forEach(ex => exIds.push(ex.id))));
   let logs = {};
+  let equivalents = {};
+  let equivLogs = {};
   if (exIds.length) {
-    const resLogs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() });
+    const [resLogs, resEquiv] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents?programme_exercice_id=in.(${exIds.join(',')})`, { headers: supaHeaders() })
+    ]);
     if (resLogs.ok) (await resLogs.json()).forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+    if (resEquiv.ok) {
+      const equivRows = await resEquiv.json();
+      equivRows.forEach(r => { equivalents[r.programme_exercice_id] = r; });
+      const eqIds = equivRows.map(r => r.id);
+      if (eqIds.length) {
+        const resEquivLogs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?equivalent_id=in.(${eqIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() });
+        if (resEquivLogs.ok) (await resEquivLogs.json()).forEach(l => { equivLogs[l.equivalent_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+      }
+    }
   }
-  return Object.assign({}, cp, { blocs, logs });
+  return Object.assign({}, cp, { blocs, logs, equivalents, equivLogs });
 }
 function fmtDateNote(iso){
   const d = new Date(iso);
@@ -5015,7 +5029,7 @@ function ouvrirLogsProgramme(progId){
       const bi = exToBloc[exId];
       if (bi !== undefined && sem > (blocMaxSem[bi]||0)) blocMaxSem[bi] = sem;
     });
-    progLogsData = { loaded:true, programme:prog, blocs, logs, blocMaxSem };
+    progLogsData = { loaded:true, programme:prog, blocs, logs, blocMaxSem, equivalents: (prog && prog.equivalents) || {}, equivLogs: (prog && prog.equivLogs) || {} };
     if (state.nav==='prog-logs' && state.progLogsId===progId) renderMain();
   }).catch(e => {
     progLogsData = { loaded:true, programme:null, blocs:[], logs:{}, error:e.message };
@@ -5190,6 +5204,27 @@ function renderProgLogsPage(el){
                 </div>`;
               }
               const firstLog = logs[ex.id+'|'+semLocale+'|1']||{};
+              const equiv = progLogsData.equivalents && progLogsData.equivalents[ex.id];
+              let equivHtml = '';
+              if (equiv) {
+                let equivSetsHtml = '';
+                for (let sr=1; sr<=nbSeries; sr++){
+                  const l = (progLogsData.equivLogs||{})[equiv.id+'|'+semLocale+'|'+sr]||{};
+                  const hasLog = l.charge!=null||l.reps!=null;
+                  equivSetsHtml += `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:3px 0;">
+                    <span style="color:var(--text-faint);width:18px;font-family:var(--font-mono);">#${sr}</span>
+                    <span style="${hasLog?'color:var(--text);font-weight:600;':'color:var(--text-faint);font-style:italic;'}">
+                      ${hasLog ? [(l.charge!=null?l.charge+'kg':''), (l.reps!=null?l.reps+' reps':''), (l.rir?'RIR '+l.rir:'')].filter(Boolean).join(' · ') : '—'}
+                    </span>
+                  </div>`;
+                }
+                const equivFirstLog = (progLogsData.equivLogs||{})[equiv.id+'|'+semLocale+'|1']||{};
+                equivHtml = `<div style="margin-top:8px;padding:8px 10px;background:#a78bfa14;border:1px solid #a78bfa33;border-radius:8px;">
+                  <div style="font-size:11px;font-weight:700;color:#a78bfa;margin-bottom:4px;">≡ Équivalent créé par le client : ${esc(equiv.nom)}</div>
+                  ${equivSetsHtml}
+                  ${equivFirstLog.commentaire ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;">"${esc(equivFirstLog.commentaire)}"</div>` : ''}
+                </div>`;
+              }
               return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
                   <div>
@@ -5200,6 +5235,7 @@ function renderProgLogsPage(el){
                 </div>
                 ${setsHtml}
                 ${firstLog.commentaire ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-style:italic;">"${esc(firstLog.commentaire)}"</div>` : ''}
+                ${equivHtml}
               </div>`;
             }).join('')||`<div style="padding:10px 14px;font-size:12px;color:var(--text-faint);">Aucun exercice.</div>`}
             </div>
