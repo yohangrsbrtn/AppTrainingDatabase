@@ -537,7 +537,7 @@ function renderPcSeancePage() {
           ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
           ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
-        ${ex.repos ? `<button onclick="pcLancerChrono('${esc(ex.repos)}')" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
+        ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
       </div>
       ${bodyHtml}
     </div>`;
@@ -785,6 +785,16 @@ let _pcEndTime = null;       // timestamp ms de fin (après lancement)
 let _pcJobId = null;         // id timer_jobs pour annulation push
 let _pcChronoDone = false;
 let _pcAudioCtx = null;
+
+// Délégation d'événement sur document : fonctionne pour tous les boutons
+// chrono présents ou futurs (re-render de la page) sans avoir à re-bind.
+// data-repos passe par un attribut HTML (pas un onclick inline) pour éviter
+// tout risque de casse de syntaxe JS quand ex.repos contient une apostrophe
+// (ex: "1'30" — bug vécu : le clic ne faisait rien, aucune erreur visible).
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chrono-btn-trigger');
+  if (btn) pcLancerChrono(btn.dataset.repos || '');
+});
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && _pcChronoInterval && _pcEndTime && !_pcChronoDone) {
