@@ -4404,27 +4404,20 @@ function _rmAddMonths(iso, n){
   d.setMonth(d.getMonth()+n);
   return d.toISOString().slice(0,10);
 }
-// Prochain dimanche à partir de `iso` (renvoie `iso` lui-même si déjà un dimanche).
-function _rmNextSunday(iso){
-  const d = new Date(iso+'T00:00:00');
-  const dow = d.getDay();
-  if (dow !== 0) d.setDate(d.getDate() + (7-dow));
-  return d.toISOString().slice(0,10);
-}
-const RM_DUREES_SEMAINES = { '1sem':1, '2sem':2, '3sem':3, '4sem':4 };
-const RM_DUREES_MOIS = { '1mois':1, '2mois':2, '3mois':3 };
-// Date de fin par défaut pour une durée donnée, calée sur le dimanche suivant
-// (le coach peut ensuite la modifier manuellement dans le champ date).
+const RM_DUREES_JOURS = { '7j':7, '2sem':14, '3sem':21, '4sem':28 };
+const RM_DUREES_MOIS = { '1mois':1, '2mois':2 };
+// Date de fin par défaut pour une durée donnée : toujours `durée - 1 jour` après
+// le début (pas de calage forcé sur un dimanche) — si la phase démarre un lundi,
+// une durée en semaines tombera donc naturellement un dimanche. Le coach peut
+// ensuite modifier la date de fin à la main.
 function _rmComputeFin(dateDebut, dureeKey){
-  let raw;
-  if (RM_DUREES_SEMAINES[dureeKey]) raw = _rmAddDays(dateDebut, RM_DUREES_SEMAINES[dureeKey]*7 - 1);
-  else raw = _rmAddDays(_rmAddMonths(dateDebut, RM_DUREES_MOIS[dureeKey]||1), -1);
-  return _rmNextSunday(raw);
+  if (RM_DUREES_JOURS[dureeKey]) return _rmAddDays(dateDebut, RM_DUREES_JOURS[dureeKey] - 1);
+  return _rmAddDays(_rmAddMonths(dateDebut, RM_DUREES_MOIS[dureeKey]||1), -1);
 }
 
-// Modale d'ajout de phase : date de début + durée (semaines/mois) → date de fin
-// calculée automatiquement (calée dimanche), modifiable ensuite à la main —
-// une fois touchée manuellement, elle n'est plus recalculée par _rmModalRecalcFin.
+// Modale d'ajout de phase : date de début + durée (jours/semaines/mois) → date de fin
+// calculée automatiquement, modifiable ensuite à la main — une fois touchée
+// manuellement, elle n'est plus recalculée par _rmModalRecalcFin.
 let _rmModalFinTouchee = false;
 function ouvrirModalAjoutPhase(clientId){
   const phases = (Array.isArray(ficheData.roadmap)?ficheData.roadmap:[]).slice().sort((a,b)=>(a.date_debut||'').localeCompare(b.date_debut||''));
@@ -4452,17 +4445,16 @@ function ouvrirModalAjoutPhase(clientId){
       <div class="fiche-field">
         <label>Durée</label>
         <select id="rm-add-duree" style="font-size:16px;" onchange="_rmModalRecalcFin()">
-          <option value="1sem">1 semaine</option>
+          <option value="7j">7 jours</option>
           <option value="2sem">2 semaines</option>
           <option value="3sem">3 semaines</option>
           <option value="4sem" selected>4 semaines</option>
           <option value="1mois">1 mois</option>
           <option value="2mois">2 mois</option>
-          <option value="3mois">3 mois</option>
         </select>
       </div>
       <div class="fiche-field">
-        <label>Date de fin <span style="font-weight:400;color:var(--text-faint);">(dimanche par défaut, modifiable)</span></label>
+        <label>Date de fin <span style="font-weight:400;color:var(--text-faint);">(calculée automatiquement, modifiable)</span></label>
         <input id="rm-add-fin" type="date" value="${dateFinDefault}" style="font-size:16px;" onchange="_rmModalFinTouchee=true">
       </div>
       <div class="modal-actions" style="margin-top:16px;">
