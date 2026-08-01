@@ -950,7 +950,13 @@ async function chargerDonnees(){
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?order=created_at.desc&limit=500`, { headers: supaHeaders() });
     if (res.ok) bilansAll = await res.json();
   } catch(e) {}
-  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  // Trié par date d'ENVOI réelle (envoye_at), pas par date de création de la
+  // semaine du bilan (created_at) — sinon un bilan tout juste envoyé reste
+  // noyé au milieu des bilans migrés en masse (created_at ancien, envoye_at
+  // absent) au lieu de remonter en tête de liste comme attendu. Fallback sur
+  // created_at pour les bilans migrés (envoye_at jamais renseigné côté GAS).
+  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite)
+    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
 
   let aValiderRows = [];
   try {
