@@ -95,7 +95,7 @@ function tpOuvrirEditer(id) {
   _tpSeanceEnEdition = {
     id: s.id, nom: s.nom, bloc: s.bloc || '', date_debut: s.date_debut || '',
     exercices: (s.client_exercices_perso || []).map(e => ({
-      id: e.id, nom: e.nom, series: e.series || '', reps: e.reps || '', repos: e.repos || '', tempo: e.tempo || '', rir: e.rir || '', notes: e.notes || ''
+      id: e.id, nom: e.nom, series: e.series != null ? String(e.series) : '', reps: e.reps || '', repos: e.repos || '', tempo: e.tempo || '', rir: e.rir || '', notes: e.notes || ''
     }))
   };
   if (!_tpSeanceEnEdition.exercices.length) _tpSeanceEnEdition.exercices.push({ nom: '', series: '', reps: '', repos: '', tempo: '', rir: '', notes: '' });
