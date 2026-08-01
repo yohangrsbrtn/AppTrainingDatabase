@@ -64,7 +64,7 @@ function renderRoadmapPage() {
     <div style="background:#1a1d29;border-radius:14px;padding:18px;margin-bottom:20px;border-left:4px solid ${t.color};">
       <div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Phase actuelle</div>
       <div style="font-size:20px;font-weight:700;color:${t.color};margin-bottom:8px;">${esc(t.label)}</div>
-      <div style="font-size:12px;color:#8892a4;margin-bottom:10px;">${_rmDateFr(enCours.date_debut)} → ${_rmDateFr(enCours.date_fin)}</div>
+      <div style="font-size:12px;color:#8892a4;margin-bottom:10px;">${_rmDateFr(enCours.date_debut)} → ${_rmDateFr(enCours.date_fin)} · ${_rmFmtDuree(enCours.date_debut, enCours.date_fin)}</div>
       <div style="background:#0f1117;border-radius:6px;height:8px;overflow:hidden;margin-bottom:6px;">
         <div style="height:100%;width:${pct}%;background:${t.color};border-radius:6px;"></div>
       </div>
@@ -81,7 +81,7 @@ function renderRoadmapPage() {
       <span style="width:10px;height:10px;border-radius:50%;background:${t.color};flex-shrink:0;"></span>
       <div style="flex:1;min-width:0;">
         <div style="font-size:13px;font-weight:600;color:#e8eaf0;">${esc(t.label)}</div>
-        <div style="font-size:11px;color:#8892a4;">${_rmDateFr(p.date_debut)} → ${_rmDateFr(p.date_fin)}</div>
+        <div style="font-size:11px;color:#8892a4;">${_rmDateFr(p.date_debut)} → ${_rmDateFr(p.date_fin)} · ${_rmFmtDuree(p.date_debut, p.date_fin)}</div>
         ${p.objectif ? `<div style="font-size:11.5px;color:#8892a4;margin-top:2px;line-height:1.4;">${esc(p.objectif)}</div>` : ''}
       </div>
       ${statut === 'passee' ? '<span style="font-size:14px;color:#3ecf8e;">✓</span>' : ''}
@@ -161,4 +161,30 @@ function _rmJoursEcoules(dateDebut) {
 function _rmDateFr(iso) {
   if (!iso) return '—';
   return iso.split('-').reverse().join('/');
+}
+function _rmAddMonths(iso, n) {
+  const d = new Date(iso+'T00:00:00');
+  d.setMonth(d.getMonth()+n);
+  const p = x => String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+function _rmAddDaysIso(iso, n) {
+  const d = new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  const p = x => String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+// Même logique que console.html (_rmFmtDuree) — mois = mois calendaire réel,
+// pas une approximation 30 jours, cohérent avec les durées posées côté coach.
+function _rmFmtDuree(dateDebut, dateFin) {
+  if (!dateDebut || !dateFin) return '';
+  const jours = Math.round((new Date(dateFin) - new Date(dateDebut))/86400000) + 1;
+  if (jours <= 0) return '';
+  for (let n = 1; n <= 24; n++) {
+    const fin = _rmAddDaysIso(_rmAddMonths(dateDebut, n), -1);
+    if (fin === dateFin) return n === 1 ? '1 mois' : n + ' mois';
+    if (fin > dateFin) break;
+  }
+  if (jours % 7 === 0) { const s = jours / 7; return s === 1 ? '1 semaine' : s + ' semaines'; }
+  return jours + (jours === 1 ? ' jour' : ' jours');
 }

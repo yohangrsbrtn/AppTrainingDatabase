@@ -4740,6 +4740,7 @@ function renderFicheRoadmapTab(c){
             <input type="date" value="${p.date_fin||''}" onchange="rmChangerChamp(${p.id},'${c.id}','date_fin',this.value)" style="flex:1;font-size:13px;padding:4px 6px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);color:var(--text);">
             <button class="btn" style="padding:2px 6px;font-size:11px;" title="Décaler la phase d'une semaine plus tard" onclick="rmDecaler(${p.id},'${c.id}',7)">7j ›</button>
           </div>
+          <div style="font-size:11px;color:var(--text-faint);margin-bottom:6px;">${_rmFmtDuree(p.date_debut, p.date_fin)}</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">
             ${RM_DUREE_OPTIONS.map(o=>`<button class="btn" style="padding:2px 7px;font-size:10.5px;" title="Fin = début + ${o.label}" onclick="rmAppliquerDuree(${p.id},'${c.id}','${o.key}')">${o.label}</button>`).join('')}
           </div>
@@ -4808,6 +4809,21 @@ function rmAutoGrowAll(){
 function _rmJoursConsole(p){
   const d = new Date(p.date_debut), f = new Date(p.date_fin);
   return Math.max(1, Math.round((f-d)/86400000) + 1);
+}
+// Affiche la durée d'une phase en semaines/mois si elle tombe exactement pile
+// (mois = mois calendaire réel via setMonth, pas une approximation 30 jours —
+// cohérent avec _rmComputeFin/_rmAppliquerDuree), sinon en jours.
+function _rmFmtDuree(dateDebut, dateFin){
+  if (!dateDebut || !dateFin) return '';
+  const jours = Math.round((new Date(dateFin) - new Date(dateDebut))/86400000) + 1;
+  if (jours <= 0) return '';
+  for (let n = 1; n <= 24; n++) {
+    const fin = _rmAddDays(_rmAddMonths(dateDebut, n), -1);
+    if (fin === dateFin) return n === 1 ? '1 mois' : n + ' mois';
+    if (fin > dateFin) break;
+  }
+  if (jours % 7 === 0) { const s = jours / 7; return s === 1 ? '1 semaine' : s + ' semaines'; }
+  return jours + (jours === 1 ? ' jour' : ' jours');
 }
 // toISOString() convertit en UTC avant de trancher la date : à minuit heure
 // locale (Europe/Paris, UTC+1/+2), ça fait reculer la date d'un jour (ex :
