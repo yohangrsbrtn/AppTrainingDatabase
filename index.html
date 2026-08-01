@@ -2362,6 +2362,15 @@ if (S.token && S.client) {
     history.replaceState(null, '', window.location.pathname);
     enterVueClient(_viewAsParam);
   } else if (localStorage.getItem('at_auth_mode') === 'supabase') {
+    // La session persiste dans localStorage : ce chemin est emprunté à CHAQUE
+    // ouverture de l'app tant que le client ne se déconnecte pas, donc
+    // derniere_connexion (écrite sinon uniquement à _completerConnexionSupabase,
+    // qui ne tourne qu'au tout premier login) ne bougeait plus jamais ensuite —
+    // presque tous les clients restaient à "Jamais connecté" côté console
+    // malgré une utilisation réelle et récente.
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ derniere_connexion: new Date().toISOString() })
+    }).catch(() => {});
     loadHomeSupabase();
   } else if (S.isCoach && !_forceMobile && window.innerWidth >= 900) {
     // Coach sur grand écran → la console desktop est plus adaptée que l'appli mobile.

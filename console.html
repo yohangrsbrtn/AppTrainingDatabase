@@ -920,12 +920,15 @@ function filteredSortedClients(){
 // est autorisé à parler à GAS). Un client sans ligne client_profils n'existe simplement
 // pas dans la console tant qu'il n'a pas été migré/créé.
 async function chargerDonnees(){
-  const [profilsRes, progressionRes] = await Promise.all([
+  const [profilsRes, progressionRes, pushRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_progression`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?select=client_id`, { headers: supaHeaders() }),
   ]);
   const profils = profilsRes.ok ? await profilsRes.json() : [];
   const progressionRows = progressionRes.ok ? await progressionRes.json() : [];
+  const pushRows = pushRes.ok ? await pushRes.json() : [];
+  const clientsAvecPush = new Set(pushRows.map(r => r.client_id));
   const progByClient = {};
   progressionRows.forEach(p => { progByClient[p.client_id] = p; });
 
@@ -950,6 +953,7 @@ async function chargerDonnees(){
       dernier_mois_paye: p.dernier_mois_paye || null,
       mode_paiement: p.mode_paiement || null,
       jour_paiement: p.jour_paiement || null,
+      pushActif: clientsAvecPush.has(p.client_id),
     };
   });
 
@@ -3534,7 +3538,7 @@ function renderTable(){
   const _moisLabel = `${_MOIS_FR[+_moisKey.split('-')[1]-1]} ${_moisKey.split('-')[0]}`;
   body.innerHTML = list.map(c => `
     <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
-      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : ''}</div></td>
+      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : ''} <span title="${c.pushActif ? 'Notifications activées' : 'Notifications non activées'}" style="font-size:12px;opacity:${c.pushActif?'1':'.35'};">${c.pushActif?'🔔':'🔕'}</span></div></td>
       <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile) ? ` <span class="chip off">🔒</span>` : ''}${c.chimieActifSupa ? ` <span class="chip ok" title="Protocole chimie actif">⚗️</span>` : ''}</td>
       <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
       <td>${esc(c.titreActif||'—')}</td>
@@ -5585,6 +5589,7 @@ function panelTabContent(c, t){
   return `
     <div class="panel-row"><span class="l">Statut bilan</span><span class="chip ${c.enRetard?'late':'ok'}"><span class="dot"></span>${c.enRetard?'En retard':'À jour'}</span></div>
     <div class="panel-row"><span class="l">Dernière connexion</span><span class="v mono" style="font-size:11px;">${esc(_fmtDerniereConnexion(c))}</span></div>
+    <div class="panel-row"><span class="l">Notifications</span><span class="v">${c.pushActif ? '🔔 Activées' : '🔕 Non activées'}</span></div>
     <div class="panel-row"><span class="l">Accès feuille</span><span class="v">${c.verrouile ? '🔒 Verrouillé' : 'Libre'}</span></div>
     <div class="panel-row"><span class="l">Protocole chimie</span><span class="v">${c.chimieActif ? 'Actif' : 'Inactif'}</span></div>`;
 }
