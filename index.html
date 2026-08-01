@@ -161,7 +161,8 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <script src="collection.js?v=2"></script>
 <script src="coach.js?v=2"></script>
 <script src="protocole.js?v=3"></script>
-<script src="programme-client.js?v=6"></script>
+<script src="programme-client.js?v=7"></script>
+<script src="training-perso.js?v=1"></script>
 <script src="roadmap.js?v=3"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
@@ -345,6 +346,8 @@ function render() {
     case 'protocole':            document.body.innerHTML = renderProtocolePage();        break;
     case 'programme-client':
     case 'programme-client-loading': document.body.innerHTML = renderProgrammeClientPage(); break;
+    case 'training-perso-loading': document.body.innerHTML = renderTrainingPersoLoading(); break;
+    case 'training-perso':       document.body.innerHTML = renderTrainingPersoPage();     break;
   }
 }
 

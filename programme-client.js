@@ -217,6 +217,7 @@ function renderPcSelectorPage() {
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSeance(this.value)">${optsSeances || '<option>—</option>'}</select>
       </div>
       <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>${isReadonly ? '👁 Voir la séance' : 'Commencer →'}</button>
+      ${(typeof tpAccesAutorise === 'function' && tpAccesAutorise()) ? `<button class="btn-secondary" onclick="loadTrainingPerso()" style="margin-top:8px;width:100%;">📓 Mes séances perso</button>` : ''}
     </div>
     ${renderNavBar('training')}
   </div>`;
