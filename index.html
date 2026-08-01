@@ -1606,14 +1606,41 @@ async function forcerMiseAJour(){
   window.location.href = window.location.pathname + '?t=' + Date.now();
 }
 
-async function _majStatutPushClient() {
-  const el = document.getElementById('pushStatusClient');
-  if (!el || !('serviceWorker' in navigator)) return;
+// État RÉEL de l'abonnement (indépendant de _notifPrefs.push_actif, qui n'est
+// qu'une préférence en base valant `true` par défaut tant que le client n'a
+// jamais rien enregistré). Piège vécu : le toggle des Paramètres se basait sur
+// cette préférence par défaut et s'affichait déjà vert pour tout nouveau
+// client, qui ne le touchait donc jamais → aucun abonnement navigateur créé
+// malgré un toggle "activé" (cas Perrine, 2026-08-01). Le toggle doit refléter
+// l'abonnement réel, jamais la préférence seule.
+let _pushReellementActif = false;
+
+async function _checkPushReel() {
+  if (!('serviceWorker' in navigator)) return false;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
-    el.textContent = sub ? '✓ Notifications activées sur cet appareil.' : '';
-  } catch(e) {}
+    _pushReellementActif = !!sub;
+  } catch(e) { _pushReellementActif = false; }
+  return _pushReellementActif;
+}
+
+async function _majStatutPushClient() {
+  await _checkPushReel();
+  const el = document.getElementById('pushStatusClient');
+  if (el) el.textContent = _pushReellementActif ? '✓ Notifications activées sur cet appareil.' : '';
+  _majToggleNotifDom();
+}
+
+// Met à jour uniquement le DOM du toggle des Paramètres (sans re-render complet
+// du panneau, qui perdrait le scroll/état en cours).
+function _majToggleNotifDom() {
+  const sw = document.getElementById('notifGeneralesToggle');
+  const kn = document.getElementById('notifGeneralesKnob');
+  if (!sw || !kn) return;
+  sw.style.background = _pushReellementActif ? '#3ecf8e' : '#2d3142';
+  kn.style.background = _pushReellementActif ? '#fff' : '#555e7a';
+  kn.style.transform = _pushReellementActif ? 'translateX(20px)' : 'none';
 }
 
 // Retourne true seulement si l'abonnement a réellement été créé — sert à
@@ -1680,15 +1707,19 @@ async function desactiverNotifications() {
 // au moment du clic (abonnement navigateur + push_subscriptions), pas
 // seulement la préférence en base.
 async function toggleNotificationsGenerales() {
-  const activerMaintenant = _notifPrefs.push_actif === false;
+  // Basé sur l'état RÉEL de l'abonnement (_pushReellementActif), pas sur la
+  // préférence _notifPrefs.push_actif qui peut valoir true par défaut sans
+  // qu'aucun abonnement navigateur n'existe (voir _checkPushReel).
+  const activerMaintenant = !_pushReellementActif;
   if (activerMaintenant) {
     const ok = await activerNotifications();
-    if (!ok) return; // permission refusée / non supporté : préférence inchangée
+    if (!ok) return; // permission refusée / non supporté : rien ne change
   } else {
     await desactiverNotifications();
   }
-  _notifPrefs.push_actif = activerMaintenant;
-  if (document.getElementById('settingsPanel')) ouvrirSettings();
+  await _checkPushReel();
+  _notifPrefs.push_actif = _pushReellementActif;
+  _majToggleNotifDom();
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/client_notif_prefs?on_conflict=client_id`, {
       method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
@@ -1740,8 +1771,8 @@ function ouvrirSettings(tab) {
             <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
             <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
           </div>
-          <div onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_notifPrefs.push_actif!==false ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-            <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_notifPrefs.push_actif!==false ? '#fff' : '#555e7a'};transform:${_notifPrefs.push_actif!==false ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+          <div id="notifGeneralesToggle" onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_pushReellementActif ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+            <div id="notifGeneralesKnob" style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_pushReellementActif ? '#fff' : '#555e7a'};transform:${_pushReellementActif ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
           </div>
         </div>
         <div id="pushStatusClient" style="font-size:12px;margin-top:6px;min-height:14px;color:#555e7a;"></div>
