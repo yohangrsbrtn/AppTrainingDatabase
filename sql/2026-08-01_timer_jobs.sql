@@ -3,6 +3,8 @@
 -- pg_cron fire_pending_timers() tourne toutes les minutes et envoie le push
 -- aux timers arrivés à échéance (latence max ~60s, acceptable pour un repos).
 
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
 CREATE TABLE IF NOT EXISTS timer_jobs (
   id         BIGSERIAL PRIMARY KEY,
   client_id  TEXT NOT NULL REFERENCES client_profils(client_id) ON DELETE CASCADE,
