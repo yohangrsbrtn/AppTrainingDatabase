@@ -1114,7 +1114,8 @@ function renderBilanDetail(data, modeHistorique, isSemainePrecedente) {
 const NOTES_PALETTE_QUALITE = ['#e05c5c', '#f0a500', '#eab308', '#8bc34a', '#1D9E75'];
 
 function _paletteNote(groupeId) {
-  return (groupeId.endsWith('_adh') || groupeId.endsWith('_dig')) ? NOTES_PALETTE_QUALITE : null;
+  return (groupeId.endsWith('_adh') || groupeId.endsWith('_dig') || groupeId.endsWith('_app')
+    || groupeId === 'fatigue' || groupeId === 'sommeil') ? NOTES_PALETTE_QUALITE : null;
 }
 
 function _styleNoteBtn(i, valeur, palette) {
