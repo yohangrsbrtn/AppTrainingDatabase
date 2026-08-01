@@ -859,13 +859,14 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
 }
 
 function _afficherXPValidationSupa(xpGagne) {
+  const afficherXp = xpGagne && !(typeof modeSimplifieActif === 'function' && modeSimplifieActif());
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;transition:opacity 0.3s;';
   overlay.innerHTML = `<div style="background:#1a1d29;border-radius:20px;padding:36px 28px;text-align:center;max-width:300px;width:85%;box-shadow:0 20px 60px rgba(0,0,0,0.5);transform:scale(0.85);transition:transform 0.3s;">
     <div style="font-size:52px;margin-bottom:10px;">🏆</div>
     <div style="font-size:22px;font-weight:700;color:#e8eaf0;margin-bottom:4px;">Bilan envoyé !</div>
-    <div style="font-size:13px;color:#8892a4;margin-bottom:${xpGagne ? '4px' : '24px'};">Bravo pour cette semaine !</div>
-    ${xpGagne ? `<div style="font-size:15px;font-weight:700;color:#1D9E75;margin-bottom:24px;">🎉 +${xpGagne} XP</div>` : ''}
+    <div style="font-size:13px;color:#8892a4;margin-bottom:${afficherXp ? '4px' : '24px'};">Bravo pour cette semaine !</div>
+    ${afficherXp ? `<div style="font-size:15px;font-weight:700;color:#1D9E75;margin-bottom:24px;">🎉 +${xpGagne} XP</div>` : ''}
     <button id="_xpOverlayBtn" style="background:linear-gradient(135deg,#1D9E75,#167a5a);width:100%;margin:0;padding:14px;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Retour à l'accueil</button>
   </div>`;
   document.body.appendChild(overlay);

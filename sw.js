@@ -37,17 +37,28 @@ self.addEventListener('push', e => {
   e.waitUntil(self.registration.showNotification(data.title, {
     body: data.body,
     icon: '/AppTrainingDatabase/icons/icon-192.png',
-    badge: '/AppTrainingDatabase/icons/icon-192.png'
+    badge: '/AppTrainingDatabase/icons/icon-192.png',
+    data: data.data || {}
   }));
 });
 
+// Au clic sur une notification poussée : ouvre/focus l'app ET affiche
+// directement le panneau de notifications (au lieu de juste revenir à
+// l'accueil). Si une fenêtre de l'app est déjà ouverte, on lui poste un
+// message (voir le listener 'message' dans index.html) plutôt que de la
+// naviguer, pour ne pas perdre son état en cours.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  const ouvrirNotifs = !!(e.notification.data && e.notification.data.openNotifs);
+  const targetUrl = '/AppTrainingDatabase/' + (ouvrirNotifs ? '?openNotif=1' : '');
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
       const existant = clientsArr.find(c => c.url.includes('/AppTrainingDatabase/'));
-      if (existant) return existant.focus();
-      return self.clients.openWindow('/AppTrainingDatabase/');
+      if (existant) {
+        if (ouvrirNotifs) existant.postMessage({ type: 'openNotifs' });
+        return existant.focus();
+      }
+      return self.clients.openWindow(targetUrl);
     })
   );
 });

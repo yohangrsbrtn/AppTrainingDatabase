@@ -152,7 +152,7 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=4"></script>
-<script src="bilan.js?v=5"></script>
+<script src="bilan.js?v=6"></script>
 <script src="training.js?v=2"></script>
 <script src="diete.js?v=8"></script>
 <script src="mensurations.js?v=4"></script>
@@ -161,7 +161,7 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <script src="collection.js?v=2"></script>
 <script src="coach.js?v=2"></script>
 <script src="protocole.js?v=3"></script>
-<script src="programme-client.js?v=5"></script>
+<script src="programme-client.js?v=6"></script>
 <script src="roadmap.js?v=2"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
@@ -738,11 +738,15 @@ async function _completerConnexion(json) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
     S.data.profil = profils[0] || {};
+    // Le mode simplifié est réglé côté serveur (voir toggleModeSimplifie) — on
+    // resynchronise le cache local à chaque chargement pour rester cohérent
+    // si le client change d'appareil.
+    try { localStorage.setItem('modeSimplifie', S.data.profil.mode_simplifie ? 'true' : 'false'); } catch(e) {}
     if (prog) {
       S.data.prog = prog;
       S.data.prog.nom = [S.data.profil.prenom, S.data.profil.nom].filter(Boolean).join(' ') || S.client;
@@ -928,6 +932,13 @@ function renderHomeErreur() {
 function _apresChargementHome() {
   chargerNotificationsClient();
   chargerNotifPrefs();
+  // Ouverture depuis une notification push (sw.js openWindow) sur un onglet
+  // qui n'était pas encore ouvert — le cas "déjà ouvert" passe par le
+  // postMessage écouté plus bas dans le fichier.
+  if (new URLSearchParams(location.search).get('openNotif')) {
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => ouvrirNotificationsClient(), 300);
+  }
   // Détection déblocages niveau/titres — le coach voit ses propres passages
   // de niveau/titres comme n'importe quel client (comme en GAS), seule la
   // vue client (coach qui consulte le profil d'un autre) est exclue.
@@ -944,12 +955,13 @@ function _apresChargementHome() {
         if (isSupabase()) {
           const [progRes, profilRes] = await Promise.all([
             fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
-            fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom`, { headers: supaHeaders() }),
+            fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
           ]);
           const progRows = progRes.ok ? await progRes.json() : [];
           const profils = profilRes.ok ? await profilRes.json() : [];
           const profilMap = {};
-          profils.forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+          // Mode simplifié = ne pas apparaître dans le classement des autres.
+          profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
           cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
             id: p.client_id, nom: profilMap[p.client_id],
             xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
@@ -1062,16 +1074,28 @@ function renderTop5Home(liste) {
 }
 
 // ── Mode simplifié ───────────────────────────────────────────────────
-// Réglage par appareil (pas par client, comme dans le GAS officiel) qui
-// cache l'affichage XP/progression/classement — l'XP continue de tourner
-// normalement côté serveur, seul le rendu client est concerné.
+// Cache l'affichage XP/progression/classement — l'XP continue de tourner
+// normalement côté serveur, seul le rendu client est concerné (voir
+// modeSimplifieActif() dans _showJourneeEnregistreeSupabase, _pcFlashSeanceValidee,
+// _afficherXPValidationSupa, verifierDeblocages). Persisté dans
+// client_profils.mode_simplifie (source de vérité, lu aussi par le classement
+// pour exclure ces clients) ; localStorage sert de cache local synchrone
+// (resynchronisé à chaque chargement de l'accueil, voir loadHomeSupabase).
 function modeSimplifieActif() {
   try { return localStorage.getItem('modeSimplifie') === 'true'; } catch(e) { return false; }
 }
-function toggleModeSimplifie() {
-  try { localStorage.setItem('modeSimplifie', modeSimplifieActif() ? 'false' : 'true'); } catch(e) {}
+async function toggleModeSimplifie() {
+  const nouveau = !modeSimplifieActif();
+  try { localStorage.setItem('modeSimplifie', nouveau ? 'true' : 'false'); } catch(e) {}
   ouvrirSettings();
   if (S.page === 'home') render();
+  if (S.data.profil) S.data.profil.mode_simplifie = nouveau;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, mode_simplifie: nouveau })
+    });
+  } catch(e) {}
 }
 
 // Carte header (badge, nom, titre, XP, barre de niveau) — extraite pour
@@ -1283,12 +1307,13 @@ async function loadClassement() {
       // Classement Supabase : uniquement les clients supabase_only
       const [progRes, profilRes] = await Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
-        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
       ]);
       const progRows = progRes.ok ? await progRes.json() : [];
       const profils = profilRes.ok ? await profilRes.json() : [];
       const profilMap = {};
-      profils.forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+      // Mode simplifié = ne pas apparaître dans le classement des autres.
+      profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
       // Garde uniquement les clients supabase_only ayant une progression
       S.data.classement = progRows
         .filter(p => profilMap[p.client_id])
@@ -1526,22 +1551,25 @@ async function _majStatutPushClient() {
   } catch(e) {}
 }
 
+// Retourne true seulement si l'abonnement a réellement été créé — sert à
+// toggleNotificationsGenerales() pour ne faire basculer la préférence que si
+// l'activation a vraiment réussi (sinon le toggle mentirait sur l'état réel).
 async function activerNotifications() {
   const btn = document.getElementById('btnActiverPushClient');
   if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-    showToast('Notifications non supportées sur cet appareil.', '#c0392b'); return;
+    showToast('Notifications non supportées sur cet appareil.', '#c0392b'); return false;
   }
   // iOS n'autorise les notifications web QUE pour une PWA installée à l'écran d'accueil
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   if (isIOS && !isStandalone) {
     showToast('Ajoute d\'abord l\'app à ton écran d\'accueil pour activer les notifications.', '#c0392b');
-    return;
+    return false;
   }
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   try {
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') { showToast('Permission refusée.', '#c0392b'); return; }
+    if (permission !== 'granted') { showToast('Permission refusée.', '#c0392b'); return false; }
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
@@ -1555,11 +1583,53 @@ async function activerNotifications() {
     if (!res.ok) throw new Error(await res.text());
     showToast('🔔 Notifications activées', '#1D9E75');
     _majStatutPushClient();
+    return true;
   } catch(e) {
     showToast(e.message || 'Erreur', '#c0392b');
+    return false;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Activer les notifications'; }
   }
+}
+
+// Désinscrit réellement l'appareil (contrairement à l'ancien toggle qui ne
+// faisait qu'écrire client_notif_prefs.push_actif sans jamais toucher à
+// l'abonnement navigateur — l'appareil continuait donc à recevoir les push
+// même "désactivées"). Supprime aussi la ligne push_subscriptions : les envois
+// manuels du coach et l'edge function n'ont alors plus aucun endpoint à viser.
+async function desactiverNotifications() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: 'DELETE', headers: supaHeaders() });
+        await sub.unsubscribe();
+      }
+    }
+  } catch(e) {}
+  _majStatutPushClient();
+}
+
+// Toggle "Notifications" des Paramètres : active/désactive réellement le push
+// au moment du clic (abonnement navigateur + push_subscriptions), pas
+// seulement la préférence en base.
+async function toggleNotificationsGenerales() {
+  const activerMaintenant = _notifPrefs.push_actif === false;
+  if (activerMaintenant) {
+    const ok = await activerNotifications();
+    if (!ok) return; // permission refusée / non supporté : préférence inchangée
+  } else {
+    await desactiverNotifications();
+  }
+  _notifPrefs.push_actif = activerMaintenant;
+  if (document.getElementById('settingsPanel')) ouvrirSettings();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_notif_prefs?on_conflict=client_id`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, push_actif: _notifPrefs.push_actif })
+    });
+  } catch(e) {}
 }
 
 // ── Paramètres ────────────────────────────────────────────────────────
@@ -1599,20 +1669,17 @@ function ouvrirSettings(tab) {
         </div>
       </div>
       ${localStorage.getItem('at_auth_mode') === 'supabase' ? `
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
-        <div>
-          <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
-          <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
-        </div>
-        <div onclick="toggleNotifPref('push_actif')" style="width:48px;height:28px;border-radius:14px;background:${_notifPrefs.push_actif!==false ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-          <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_notifPrefs.push_actif!==false ? '#fff' : '#555e7a'};transform:${_notifPrefs.push_actif!==false ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
-        </div>
-      </div>
       <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔔 Notifications sur cet appareil</div>
-        <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Reçois une alerte quand ton coach t'envoie un message.</div>
-        <button class="btn-primary" id="btnActiverPushClient" onclick="activerNotifications()" style="width:100%;padding:10px;font-size:13px;">Activer les notifications</button>
-        <div id="pushStatusClient" style="font-size:12px;text-align:center;margin-top:6px;min-height:14px;color:#555e7a;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
+            <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
+          </div>
+          <div onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_notifPrefs.push_actif!==false ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+            <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_notifPrefs.push_actif!==false ? '#fff' : '#555e7a'};transform:${_notifPrefs.push_actif!==false ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+          </div>
+        </div>
+        <div id="pushStatusClient" style="font-size:12px;margin-top:6px;min-height:14px;color:#555e7a;"></div>
         <div onclick="ouvrirGererRappels()" style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2235;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
           <span style="font-size:13px;color:#c8d0e0;">Gérer les rappels</span>
           <span style="color:#555e7a;">→</span>
@@ -1644,7 +1711,7 @@ function ouvrirSettings(tab) {
 // N'affecte QUE les rappels automatiques (journée 21h30, paiement...) — les
 // messages envoyés manuellement par le coach passent toujours (voir
 // sql/2026-08-01_rappel_journee.sql).
-let _notifPrefs = { push_actif: true, rappel_journee: true };
+let _notifPrefs = { push_actif: true, rappel_journee: true, rappel_bilan: true };
 
 async function chargerNotifPrefs() {
   try {
@@ -1688,6 +1755,7 @@ function ouvrirGererRappels() {
       </div>
       <div style="flex:1;overflow-y:auto;padding:4px 20px calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;">
         ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 21h30 si tu n'as pas encore validé ta journée")}
+        ${toggleRow('rappel_bilan', 'Rappel de bilan', "Vers 10h le jour de ton bilan si tu ne l'as pas encore envoyé")}
         ${toggleRow('rappel_paiement', 'Rappel de paiement', "3 jours après la date de facturation de ton coach")}
       </div>
     </div>`;
@@ -2059,7 +2127,7 @@ async function validerJourneeClientSupabase() {
 function _showJourneeEnregistreeSupabase(xpGagne) {
   const flash = document.createElement('div');
   flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:20px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
-  flash.innerHTML = xpGagne
+  flash.innerHTML = (xpGagne && !modeSimplifieActif())
     ? '🎉 +' + xpGagne + ' XP<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>'
     : '✓ Journée enregistrée !';
   document.body.appendChild(flash);
@@ -2166,7 +2234,15 @@ function goTo(page) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+  // Clic sur une notification push alors que l'app est déjà ouverte (sw.js
+  // ne peut pas la naviguer sans perdre son état en cours) : on reçoit un
+  // postMessage à la place et on ouvre directement le panneau.
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'openNotifs' && S.client) ouvrirNotificationsClient();
+  });
+}
 
 if (S.token && S.client) {
   if (localStorage.getItem('at_auth_mode') === 'supabase') {

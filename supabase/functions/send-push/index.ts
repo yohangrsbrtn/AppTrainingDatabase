@@ -43,7 +43,10 @@ Deno.serve(async (req) => {
       try {
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify({ title: title || "AppTraining", body: body || "" }),
+          // data.openNotifs : lu par sw.js au clic sur la notification pour
+          // ouvrir directement le panneau de notifications de l'app (voir
+          // notificationclick dans sw.js) plutôt que juste l'accueil.
+          JSON.stringify({ title: title || "AppTraining", body: body || "", data: { openNotifs: true } }),
         );
       } catch (err) {
         const statusCode = (err as { statusCode?: number }).statusCode;

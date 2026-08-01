@@ -475,7 +475,7 @@ async function pcValiderSeance() {
 function _pcFlashSeanceValidee(xpGagne) {
   const flash = document.createElement('div');
   flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:20px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);pointer-events:none;';
-  flash.innerHTML = '🏆 Séance validée !' + (xpGagne ? `<div style="font-size:15px;margin-top:6px;">🎉 +${xpGagne} XP</div>` : '');
+  flash.innerHTML = '🏆 Séance validée !' + ((xpGagne && !(typeof modeSimplifieActif === 'function' && modeSimplifieActif())) ? `<div style="font-size:15px;margin-top:6px;">🎉 +${xpGagne} XP</div>` : '');
   document.body.appendChild(flash);
   setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
 }
