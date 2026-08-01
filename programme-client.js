@@ -761,10 +761,23 @@ function pcAfficherNoteCoach(idx) {
 }
 
 // ── Chrono ─────────────────────────────────────────────────────────────
+// Anti-drift : on mémorise l'heure de fin absolue (Date.now()) plutôt qu'un
+// compteur décrémenté. Quand l'écran se déverrouille et que setInterval reprend,
+// le prochain tick() recalcule le temps restant depuis l'horloge réelle → plus
+// de décalage accumulé. visibilitychange force un tick immédiat au retour.
 
 let _pcChronoInterval = null;
-let _pcTemps = 90;
+let _pcTemps = 90;           // secondes configurées (avant lancement)
+let _pcEndTime = null;       // timestamp ms de fin (après lancement)
+let _pcJobId = null;         // id timer_jobs pour annulation push
+let _pcChronoDone = false;
 let _pcAudioCtx = null;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && _pcChronoInterval && _pcEndTime && !_pcChronoDone) {
+    _pcTickChrono();
+  }
+});
 
 function pcLancerChrono(repos) {
   let totalSec = 0;
@@ -781,11 +794,16 @@ function _pcAfficherReglageChrono() {
   const m = Math.floor(_pcTemps / 60), s = _pcTemps % 60;
   overlay.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1a1d29;color:white;padding:24px 20px;text-align:center;z-index:2000;border-top:2px solid #378ADD;display:block;';
   overlay.innerHTML = `
-    <div style="font-size:13px;color:#8892a4;margin-bottom:16px;text-transform:uppercase;letter-spacing:.05em;">Temps de repos</div>
-    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:20px;">
-      <button onclick="pcAjusterChrono(-15)" style="width:48px;height:48px;border-radius:50%;background:#2d3142;color:white;border:none;font-size:20px;cursor:pointer;">−</button>
-      <div style="font-size:42px;font-weight:700;min-width:140px;">${m}:${s.toString().padStart(2, '0')}</div>
-      <button onclick="pcAjusterChrono(15)" style="width:48px;height:48px;border-radius:50%;background:#2d3142;color:white;border:none;font-size:20px;cursor:pointer;">+</button>
+    <div style="font-size:13px;color:#8892a4;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em;">Temps de repos</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;">
+      <button onclick="pcAjusterChrono(-30)" style="padding:8px 12px;border-radius:20px;background:#2d3142;color:#8892a4;border:none;font-size:13px;cursor:pointer;">−30s</button>
+      <button onclick="pcAjusterChrono(-15)" style="width:44px;height:44px;border-radius:50%;background:#2d3142;color:white;border:none;font-size:20px;cursor:pointer;">−</button>
+      <div style="font-size:42px;font-weight:700;min-width:120px;">${m}:${s.toString().padStart(2, '0')}</div>
+      <button onclick="pcAjusterChrono(15)" style="width:44px;height:44px;border-radius:50%;background:#2d3142;color:white;border:none;font-size:20px;cursor:pointer;">+</button>
+      <button onclick="pcAjusterChrono(30)" style="padding:8px 12px;border-radius:20px;background:#2d3142;color:#8892a4;border:none;font-size:13px;cursor:pointer;">+30s</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
+      ${[60,90,120,180].map(v => `<button onclick="pcSetChrono(${v})" style="padding:6px 10px;border-radius:12px;background:${_pcTemps===v?'#378ADD':'#2d3142'};color:white;border:none;font-size:12px;cursor:pointer;">${v<60?v+'s':v/60+'min'+(v%60?String(v%60).padStart(2,'0'):'')}</button>`).join('')}
     </div>
     <div style="display:flex;gap:10px;">
       <button onclick="pcDemarrerChrono()" style="flex:1;padding:14px;background:#378ADD;color:white;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">▶ Lancer</button>
@@ -793,45 +811,81 @@ function _pcAfficherReglageChrono() {
     </div>`;
 }
 
-function pcAjusterChrono(delta) { _pcTemps = Math.max(0, _pcTemps + delta); _pcAfficherReglageChrono(); }
+function pcAjusterChrono(delta) { _pcTemps = Math.max(5, _pcTemps + delta); _pcAfficherReglageChrono(); }
+function pcSetChrono(sec) { _pcTemps = sec; _pcAfficherReglageChrono(); }
 
-function pcDemarrerChrono() {
+function _pcTickChrono() {
+  const overlay = document.getElementById('pcChronoOverlay');
+  if (!overlay || _pcChronoDone) return;
+  const restant = Math.max(0, Math.round((_pcEndTime - Date.now()) / 1000));
+  const m = Math.floor(restant / 60), s = restant % 60;
+  const urgent = restant <= 10 && restant > 0;
+  overlay.style.background = urgent ? '#8B1A1A' : '#378ADD';
+  overlay.innerHTML = `
+    <div style="font-size:56px;font-weight:700;letter-spacing:-1px;">${m}:${s.toString().padStart(2,'0')}</div>
+    <div style="font-size:14px;margin-top:10px;cursor:pointer;opacity:.7;" onclick="pcStopChrono()">Arrêter ✕</div>`;
+  if (restant <= 0) {
+    _pcChronoDone = true;
+    clearInterval(_pcChronoInterval);
+    _pcChronoInterval = null;
+    overlay.style.background = '#1D9E75';
+    overlay.innerHTML = `<div style="font-size:32px;font-weight:700;">✅ Repos terminé !</div>
+      <div style="font-size:14px;margin-top:10px;cursor:pointer;opacity:.8;" onclick="pcStopChrono()">Fermer ✕</div>`;
+    if (navigator.vibrate) navigator.vibrate([300,100,300,100,300]);
+  }
+}
+
+async function pcDemarrerChrono() {
   if (_pcChronoInterval) clearInterval(_pcChronoInterval);
+  _pcEndTime = Date.now() + _pcTemps * 1000;
+  _pcChronoDone = false;
+
+  // Planifier le push serveur (firewall si app fermée/écran verrouillé)
+  _pcJobId = null;
+  if (typeof S !== 'undefined' && S.client) {
+    fetch(`${SUPABASE_URL}/rest/v1/timer_jobs`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ client_id: S.client, fire_at: new Date(_pcEndTime).toISOString() })
+    }).then(r => r.ok ? r.json() : null).then(jobs => { if (jobs && jobs[0]) _pcJobId = jobs[0].id; }).catch(() => {});
+  }
+
+  // Pré-programmer le son via AudioContext (joue même si onglet en arrière-plan)
   try {
     if (!_pcAudioCtx) _pcAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (_pcAudioCtx.state === 'suspended') _pcAudioCtx.resume();
-    const debut = _pcAudioCtx.currentTime + _pcTemps;
-    for (let i = 0; i < 4; i++) {
+    const secLeft = (_pcEndTime - Date.now()) / 1000;
+    const debut = _pcAudioCtx.currentTime + secLeft;
+    for (let i = 0; i < 5; i++) {
       const osc = _pcAudioCtx.createOscillator(), gain = _pcAudioCtx.createGain();
       osc.connect(gain); gain.connect(_pcAudioCtx.destination);
-      osc.frequency.value = 880; osc.type = 'sine';
-      const t = debut + i * 0.22;
-      gain.gain.setValueAtTime(0.3, t); gain.gain.setValueAtTime(0, t + 0.12);
-      osc.start(t); osc.stop(t + 0.13);
+      osc.frequency.value = i < 3 ? 880 : 1047;
+      osc.type = 'sine';
+      const t = debut + i * 0.25;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
+      gain.gain.linearRampToValueAtTime(0, t + 0.18);
+      osc.start(t); osc.stop(t + 0.2);
     }
   } catch(e) {}
-  const overlay = document.getElementById('pcChronoOverlay');
-  let restant = _pcTemps;
-  const tick = () => {
-    const m = Math.floor(restant / 60), s = restant % 60;
-    overlay.style.background = '#378ADD';
-    overlay.innerHTML = `<div style="font-size:48px;font-weight:700;">${m}:${s.toString().padStart(2,'0')}</div>
-      <div style="font-size:14px;margin-top:8px;cursor:pointer;opacity:.8;" onclick="pcStopChrono()">Arrêter ✕</div>`;
-    if (restant <= 0) {
-      clearInterval(_pcChronoInterval);
-      overlay.style.background = '#1D9E75';
-      overlay.innerHTML = `<div style="font-size:32px;font-weight:700;">✅ Repos terminé !</div>
-        <div style="font-size:14px;margin-top:8px;cursor:pointer;opacity:.8;" onclick="pcStopChrono()">Fermer ✕</div>`;
-      if (navigator.vibrate) navigator.vibrate([300,100,300,100,300]);
-    }
-    restant--;
-  };
-  tick();
-  _pcChronoInterval = setInterval(tick, 1000);
+
+  _pcTickChrono();
+  _pcChronoInterval = setInterval(_pcTickChrono, 500);
 }
 
 function pcStopChrono() {
-  if (_pcChronoInterval) clearInterval(_pcChronoInterval);
+  if (_pcChronoInterval) { clearInterval(_pcChronoInterval); _pcChronoInterval = null; }
+  // Annuler le push serveur si le timer est stoppé manuellement
+  if (_pcJobId) {
+    fetch(`${SUPABASE_URL}/rest/v1/timer_jobs?id=eq.${_pcJobId}`, {
+      method: 'PATCH',
+      headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ cancelled: true })
+    }).catch(() => {});
+    _pcJobId = null;
+  }
+  _pcEndTime = null;
+  _pcChronoDone = false;
   const overlay = document.getElementById('pcChronoOverlay');
   if (overlay) overlay.style.display = 'none';
 }

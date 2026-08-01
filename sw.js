@@ -34,10 +34,13 @@ self.addEventListener('fetch', e => {
 
 self.addEventListener('push', e => {
   const data = e.data ? e.data.json() : { title: 'AppTraining', body: '' };
+  const isChrono = data.tag === 'chrono';
   e.waitUntil(self.registration.showNotification(data.title, {
     body: data.body,
     icon: '/AppTrainingDatabase/icons/icon-192.png',
     badge: '/AppTrainingDatabase/icons/icon-192.png',
+    tag: data.tag || '',
+    vibrate: isChrono ? [300, 100, 300, 100, 300, 100, 500] : [200, 100, 200],
     data: data.data || {}
   }));
 });
