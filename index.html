@@ -1733,7 +1733,7 @@ async function toggleNotificationsGenerales() {
 // bug, sous-onglets L'application (accordéon) / Système XP. Le contenu du
 // Bilan/Mensurations est réécrit pour matcher le fonctionnement RÉEL actuel
 // (mensurations découplées de l'envoi/clôture du bilan — pas de blocage).
-let _settingsTab = 'guide'; // 'guide' | 'bug'
+let _settingsTab = 'general'; // 'general' | 'guide' | 'bug'
 let _settingsGuideSub = 'application'; // 'application' | 'xp'
 let _settingsAccordion = null; // 'journee' | 'bilan' | 'mensurations' | 'titres' | null
 
@@ -1746,7 +1746,7 @@ function ouvrirSettings(tab) {
   el.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.82);display:flex;align-items:flex-end;';
 
   const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 0;font-size:13px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
-  const content = _settingsTab === 'bug' ? renderSettingsBug() : renderSettingsGuide();
+  const content = _settingsTab === 'bug' ? renderSettingsBug() : _settingsTab === 'guide' ? renderSettingsGuide() : renderSettingsGeneral();
 
   el.innerHTML = `<div style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
     <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
@@ -1754,41 +1754,9 @@ function ouvrirSettings(tab) {
       <div style="font-size:17px;font-weight:700;color:#e8eaf0;">Paramètres</div>
       <button onclick="document.getElementById('settingsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
     </div>
-    <div style="padding:14px 20px 0;flex-shrink:0;">
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
-        <div>
-          <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Mode simplifié</div>
-          <div style="font-size:11px;color:#555e7a;margin-top:2px;">Cache XP, progression et classement</div>
-        </div>
-        <div onclick="toggleModeSimplifie()" style="width:48px;height:28px;border-radius:14px;background:${modeSimplifieActif() ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-          <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${modeSimplifieActif() ? '#fff' : '#555e7a'};transform:${modeSimplifieActif() ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
-        </div>
-      </div>
-      ${localStorage.getItem('at_auth_mode') === 'supabase' ? `
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <div>
-            <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
-            <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
-          </div>
-          <div id="notifGeneralesToggle" onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_pushReellementActif ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-            <div id="notifGeneralesKnob" style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_pushReellementActif ? '#fff' : '#555e7a'};transform:${_pushReellementActif ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
-          </div>
-        </div>
-        <div id="pushStatusClient" style="font-size:12px;margin-top:6px;min-height:14px;color:#555e7a;"></div>
-        <div onclick="ouvrirGererRappels()" style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2235;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
-          <span style="font-size:13px;color:#c8d0e0;">Gérer les rappels</span>
-          <span style="color:#555e7a;">→</span>
-        </div>
-      </div>
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔄 Mise à jour</div>
-        <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
-        <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
-      </div>` : ''}
-    </div>
     <div style="display:flex;gap:8px;padding:14px 20px 0;flex-shrink:0;">
-      ${tabBtn('guide', 'Fonctionnement', _settingsTab !== 'bug')}
+      ${tabBtn('general', 'Général', _settingsTab === 'general')}
+      ${tabBtn('guide', 'Fonctionnement', _settingsTab === 'guide')}
       ${tabBtn('bug', 'Rapport de bug', _settingsTab === 'bug')}
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 20px 12px;-webkit-overflow-scrolling:touch;">
@@ -1800,7 +1768,47 @@ function ouvrirSettings(tab) {
   </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };
   document.body.appendChild(el);
-  setTimeout(_majStatutPushClient, 0);
+  if (_settingsTab === 'general') setTimeout(_majStatutPushClient, 0);
+}
+
+// Onglet "Général" — regroupe Mode simplifié / Notifications / Mise à jour,
+// séparés du guide "Fonctionnement" et du "Rapport de bug" qu'ils écrasaient
+// auparavant (les 3 cartes toujours dépliées au-dessus des onglets ne
+// laissaient presque plus de place au contenu du guide — vécu, remonté par le
+// coach). Chaque onglet a maintenant sa propre zone scrollable complète.
+function renderSettingsGeneral() {
+  return `
+    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Mode simplifié</div>
+        <div style="font-size:11px;color:#555e7a;margin-top:2px;">Cache XP, progression et classement</div>
+      </div>
+      <div onclick="toggleModeSimplifie()" style="width:48px;height:28px;border-radius:14px;background:${modeSimplifieActif() ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+        <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${modeSimplifieActif() ? '#fff' : '#555e7a'};transform:${modeSimplifieActif() ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+      </div>
+    </div>
+    ${localStorage.getItem('at_auth_mode') === 'supabase' ? `
+    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
+          <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
+        </div>
+        <div id="notifGeneralesToggle" onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_pushReellementActif ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+          <div id="notifGeneralesKnob" style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_pushReellementActif ? '#fff' : '#555e7a'};transform:${_pushReellementActif ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+        </div>
+      </div>
+      <div id="pushStatusClient" style="font-size:12px;margin-top:6px;min-height:14px;color:#555e7a;"></div>
+      <div onclick="ouvrirGererRappels()" style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2235;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
+        <span style="font-size:13px;color:#c8d0e0;">Gérer les rappels</span>
+        <span style="color:#555e7a;">→</span>
+      </div>
+    </div>
+    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
+      <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔄 Mise à jour</div>
+      <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
+      <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
+    </div>` : ''}`;
 }
 
 // ── Préférences de notifications automatiques ───────────────────────────
