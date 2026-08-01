@@ -1857,6 +1857,14 @@ function renderGuideApplication() {
         ${_stepItem('👑', '#f0a500', "Clique sur un titre débloqué pour l'activer", "Il s'affiche sous ton prénom sur l'accueil et dans le classement", true)}
       </div>
       ${_calloutBox('#9333ea', '💎 Titres verrouillés (🔒)', 'Ils se débloquent automatiquement en cumulant des pas, en validant des bilans ou des séances, ou en montant de niveau.')}
+    `)}
+    ${_accordionItem('notifications', '🔔', 'Notifications', 'La cloche, les rappels automatiques et le push', `
+      <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
+        ${_stepItem('1', '#4f8ef7', "La cloche 🔔 en haut de l'accueil", 'Historique de toutes tes notifications (messages de ton coach + rappels automatiques), avec un badge du nombre non lues')}
+        ${_stepItem('2', '#4f8ef7', 'Réglages → Notifications', "Active/désactive le push sur cet appareil (les alertes reçues même app fermée) — l'action est instantanée")}
+        ${_stepItem('3', '#4f8ef7', 'Réglages → Gérer les rappels', "Active/désactive individuellement le rappel de journée (21h30) et le rappel de bilan (10h le jour de ton bilan)")}
+      </div>
+      ${_calloutBox('#f59e0b', '💳 Rappel de paiement', "N'apparaît que dans la cloche, jamais en push, et ne peut pas être désactivé — il ne se déclenche de toute façon que si ton coach n'a pas encore marqué ton mois comme payé.")}
     `)}`;
 }
 

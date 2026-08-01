@@ -44,9 +44,18 @@ self.addEventListener('push', e => {
 
 // Au clic sur une notification poussée : ouvre/focus l'app ET affiche
 // directement le panneau de notifications (au lieu de juste revenir à
-// l'accueil). Si une fenêtre de l'app est déjà ouverte, on lui poste un
-// message (voir le listener 'message' dans index.html) plutôt que de la
-// naviguer, pour ne pas perdre son état en cours.
+// l'accueil).
+//
+// Si une fenêtre de l'app est déjà ouverte, on tente d'abord un postMessage
+// (voir le listener 'message' dans index.html) pour ouvrir le panneau sans
+// perdre son état en cours. Mais sur iOS, une PWA standalone mise en arrière-
+// plan peut être suspendue par le système : focus() ramène alors l'app au
+// premier plan tout en affichant l'image figée d'avant la mise en veille
+// (écran blanc/figé constaté), car le postMessage n'est traité qu'une fois le
+// JS réellement réveillé, ce qui n'arrive pas toujours. Pour garantir un
+// écran qui répond, on force en plus une navigation fraîche de cette fenêtre
+// (perd l'état en cours, mais jamais de gel) plutôt que de se fier uniquement
+// au focus.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const ouvrirNotifs = !!(e.notification.data && e.notification.data.openNotifs);
@@ -56,7 +65,7 @@ self.addEventListener('notificationclick', e => {
       const existant = clientsArr.find(c => c.url.includes('/AppTrainingDatabase/'));
       if (existant) {
         if (ouvrirNotifs) existant.postMessage({ type: 'openNotifs' });
-        return existant.focus();
+        return existant.focus().then(c => c.navigate ? c.navigate(targetUrl) : c);
       }
       return self.clients.openWindow(targetUrl);
     })

@@ -906,6 +906,9 @@ async function chargerDonnees(){
       supabaseOnlyActif: !!p.supabase_only,
       statut: p.statut || 'actif',
       enRetard: false,
+      dernier_mois_paye: p.dernier_mois_paye || null,
+      mode_paiement: p.mode_paiement || null,
+      jour_paiement: p.jour_paiement || null,
     };
   });
 
@@ -3205,6 +3208,7 @@ function renderClientsPage(el){
           <th onclick="setSort('niveau')" class="${state.sortKey==='niveau'?'sorted':''}">Niveau<span class="sort-arrow">${arrow('niveau')}</span></th>
           <th>Titre actif</th>
           <th>Dernière connexion</th>
+          <th>Paiement</th>
           <th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
@@ -3233,13 +3237,21 @@ function renderTable(){
   if (countEl) countEl.textContent = list.length + ' client' + (list.length>1?'s':'');
   const body = document.getElementById('tbody');
   if (!body) return;
+  const _moisKey = _ficheMoisCourantKey();
+  const _moisLabel = `${_MOIS_FR[+_moisKey.split('-')[1]-1]} ${_moisKey.split('-')[0]}`;
   body.innerHTML = list.map(c => `
     <tr class="${state.selected===c.id?'selected':''}" onclick="openPanel('${c.id}')">
-      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c.supabaseOnlyActif ? ' <span class="chip off" style="font-size:9px;">Supabase only</span>' : (c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : '')}</div></td>
+      <td><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}${c._supabaseOnly ? ' <span class="chip off" style="font-size:9px;">DB seule</span>' : ''}</div></td>
       <td>${c.enRetard ? `<span class="chip late"><span class="dot"></span>En retard</span>` : `<span class="chip ok"><span class="dot"></span>À jour</span>`}${(c.supabaseOnlyActif?c.verrouilleApp:c.verrouile) ? ` <span class="chip off">🔒</span>` : ''}${c.chimieActifSupa ? ` <span class="chip ok" title="Protocole chimie actif">⚗️</span>` : ''}</td>
       <td><span class="level-pill">Niv. ${c.niveau||1}</span></td>
       <td>${esc(c.titreActif||'—')}</td>
       <td class="mono" style="color:var(--text-faint);">${esc(_fmtDerniereConnexion(c))}</td>
+      <td onclick="event.stopPropagation();" style="white-space:nowrap;">
+        ${c.mode_paiement === 'gocardless'
+          ? `<span class="chip ok" style="font-size:10px;" title="Prélèvement automatique">🔄 GoCardless</span>`
+          : `<span class="chip ${c.dernier_mois_paye===_moisKey?'ok':'late'}" style="font-size:10px;">${c.dernier_mois_paye===_moisKey?'✓ Payé':'⏳ En attente'}</span>
+             <button class="btn" style="font-size:10px;padding:3px 8px;margin-left:6px;" title="${_moisLabel}" onclick="toggleMoisPaye('${c.id}',${c.dernier_mois_paye===_moisKey})">${c.dernier_mois_paye===_moisKey?'Annuler':'Marquer payé'}</button>`}
+      </td>
       <td class="row-actions">
         <div class="dropdown">
           <button class="icon-btn" onclick="event.stopPropagation();toggleMenu(event,'row${c.id}')">
@@ -3261,7 +3273,7 @@ function renderTable(){
         </div>
       </td>
     </tr>
-  `).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun client ne correspond.</td></tr>`;
+  `).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun client ne correspond.</td></tr>`;
 }
 
 // Pour un client supabase_only, "Verrouiller l'accès" coupe désormais sa connexion à
@@ -4067,8 +4079,11 @@ async function toggleMoisPaye(clientId, dejaPaye){
     await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
       method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ dernier_mois_paye: nouveauMois })
     });
-    if (ficheData.profil) ficheData.profil.dernier_mois_paye = nouveauMois;
+    if (ficheData.profil && state.selected === clientId) ficheData.profil.dernier_mois_paye = nouveauMois;
+    const c = data.clients && data.clients.find(x => x.id === clientId);
+    if (c) c.dernier_mois_paye = nouveauMois;
     if (state.nav==='fiche-client') renderMain();
+    else if (state.nav==='clients') renderTable();
   } catch(e){ alert('Erreur : ' + e.message); }
 }
 
