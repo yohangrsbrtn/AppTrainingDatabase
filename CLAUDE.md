@@ -178,6 +178,7 @@ Dashboard, Clients, Classement, Base alimentaire, Bilans, Mensurations, Protocol
 - **`repas.template_id`** (pas `diete_template_id`) — bug connu dans ancien code diete.js, corrigé.
 - **`client_profils`** (avec 's') ≠ `client_profiles` (table PWA prod avec 'es')
 - **Deux GAS distincts** : `api.js` → GAS sandbox. Migrations → `GAS_PROD_URL` via `apiGasProd()`. Ne pas mélanger.
+- **`enterVueClient` (index.html)** : la "vue client" du coach (console → ⋯ → "Ouvrir en vue client", ou `index.html?viewAs=id`) doit basculer `localStorage.at_auth_mode` selon le `supabase_only` du client **visé**, pas hériter du mode du coach (qui n'est jamais en mode `'supabase'`). Sinon un client supabase_only affiche les vieilles données GAS/PWA (bug constaté : 3 recettes PWA au lieu de l'unique recette Supabase, sur la fiche de Manon Besnier). Corrigé — `enterVueClient` interroge `client_profils.supabase_only` et restaure le mode d'origine dans `exitVueClient`. Vérifier ce point si une page continue d'afficher des données GAS pour un client migré.
 - **`GAS_ID_MAP`** : `yohanp` → `yohan` pour toute lecture GAS.
 - **`chargerHistoriqueBilans(client)`** existe dans GAS → retourne `[{ligneTitre, semaine, date, dejaEnvoye}]`, newest first.
 - **`chargerBilanParLigne(client, ligneTitre)`** → données complètes d'un bilan (jours, repas, commentaires).
