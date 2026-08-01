@@ -982,12 +982,14 @@ async function chargerDonnees(){
 }
 
 // Activité récente (dashboard) : fusion bilans envoyés + séries loggées en séance,
-// triés par date desc. Remplace l'ancien chargerTousLesLogs (GAS).
+// triés par date desc, limités aux 7 derniers jours. 100% Supabase (aucun appel
+// GAS ici) — remplace l'ancien chargerTousLesLogs (GAS).
 async function _chargerActiviteRecente(clientsById){
   const fmtTs = iso => { const d = new Date(iso); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); };
+  const depuis7j = new Date(Date.now() - 7 * 86400000).toISOString();
   const [logsRes, bilansRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?order=updated_at.desc&limit=30&select=updated_at,semaine,client_programme_exercices(client_programme_seances(titre,client_programme_blocs(client_programmes!client_programme_blocs_client_programme_id_fkey(nom,client_id))))`, { headers: supaHeaders() }).catch(()=>null),
-    fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&order=created_at.desc&limit=30&select=client_id,created_at,semaine_label`, { headers: supaHeaders() }).catch(()=>null),
+    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?updated_at=gte.${depuis7j}&order=updated_at.desc&limit=200&select=updated_at,semaine,client_programme_exercices(client_programme_seances(titre,client_programme_blocs(client_programmes!client_programme_blocs_client_programme_id_fkey(nom,client_id))))`, { headers: supaHeaders() }).catch(()=>null),
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?envoye_coach=eq.true&created_at=gte.${depuis7j}&order=created_at.desc&limit=200&select=client_id,created_at,semaine_label`, { headers: supaHeaders() }).catch(()=>null),
   ]);
   const logsRows = (logsRes && logsRes.ok) ? await logsRes.json() : [];
   const bilansRows = (bilansRes && bilansRes.ok) ? await bilansRes.json() : [];
@@ -1008,7 +1010,7 @@ async function _chargerActiviteRecente(clientsById){
     type: 'bilanEnvoye', semaine: b.semaine_label,
   }));
 
-  return [...fromLogs, ...fromBilans].sort((a,b) => (b.tms||'').localeCompare(a.tms||'')).slice(0,30);
+  return [...fromLogs, ...fromBilans].sort((a,b) => (b.tms||'').localeCompare(a.tms||'')).slice(0,50);
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
