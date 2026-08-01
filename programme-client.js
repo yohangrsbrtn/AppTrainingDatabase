@@ -537,7 +537,7 @@ function renderPcSeancePage() {
           ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
           ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
-        ${ex.repos ? `<button onclick="pcLancerChrono('${esc(ex.repos)}')" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">⏱</button>` : ''}
+        ${ex.repos ? `<button onclick="pcLancerChrono('${esc(ex.repos)}')" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
       </div>
       ${bodyHtml}
     </div>`;
@@ -569,7 +569,6 @@ function renderPcSeancePage() {
       ${!isReadonly ? `<button id="pcValiderSeanceBtn" class="btn-primary" onclick="pcValiderSeance()" style="margin-top:8px;width:100%;">✅ Valider la séance</button>` : ''}
       <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
     </div>
-    <div id="pcChronoOverlay" style="display:none;"></div>
     ${renderNavBar('training')}
   </div>`;
 }
@@ -765,6 +764,20 @@ function pcAfficherNoteCoach(idx) {
 // compteur décrémenté. Quand l'écran se déverrouille et que setInterval reprend,
 // le prochain tick() recalcule le temps restant depuis l'horloge réelle → plus
 // de décalage accumulé. visibilitychange force un tick immédiat au retour.
+//
+// L'overlay est attaché à document.body (pas au rendu de la page) pour survivre
+// aux navigations et garantir son existence quelle que soit la page affichée.
+
+function _pcGetOverlay() {
+  let el = document.getElementById('pcChronoOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'pcChronoOverlay';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
 
 let _pcChronoInterval = null;
 let _pcTemps = 90;           // secondes configurées (avant lancement)
@@ -789,7 +802,7 @@ function pcLancerChrono(repos) {
 }
 
 function _pcAfficherReglageChrono() {
-  const overlay = document.getElementById('pcChronoOverlay');
+  const overlay = _pcGetOverlay();
   if (!overlay) return;
   const m = Math.floor(_pcTemps / 60), s = _pcTemps % 60;
   overlay.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1a1d29;color:white;padding:24px 20px;text-align:center;z-index:2000;border-top:2px solid #378ADD;display:block;';
@@ -815,7 +828,7 @@ function pcAjusterChrono(delta) { _pcTemps = Math.max(5, _pcTemps + delta); _pcA
 function pcSetChrono(sec) { _pcTemps = sec; _pcAfficherReglageChrono(); }
 
 function _pcTickChrono() {
-  const overlay = document.getElementById('pcChronoOverlay');
+  const overlay = _pcGetOverlay();
   if (!overlay || _pcChronoDone) return;
   const restant = Math.max(0, Math.round((_pcEndTime - Date.now()) / 1000));
   const m = Math.floor(restant / 60), s = restant % 60;
@@ -886,6 +899,6 @@ function pcStopChrono() {
   }
   _pcEndTime = null;
   _pcChronoDone = false;
-  const overlay = document.getElementById('pcChronoOverlay');
+  const overlay = _pcGetOverlay();
   if (overlay) overlay.style.display = 'none';
 }
