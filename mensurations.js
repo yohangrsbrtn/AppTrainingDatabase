@@ -300,6 +300,9 @@ async function sauverMensurationSupa(field, value) {
     const idx = _mReleves.findIndex(r => r.date === f.date);
     if (idx >= 0) _mReleves[idx] = updated;
     else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
+    // Le poids saisi ici est aussi reporté dans le bilan de la semaine en
+    // cours, à la journée correspondant à cette date (voir bilan.js).
+    if (field === 'poids' && value !== null) reporterMesureDansBilan(S.client, f.date, 'poids', value);
   } catch(e) {}
 }
 

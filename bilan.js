@@ -259,6 +259,32 @@ async function sauverJourBilanSupa(jourIdx, field, value) {
   } catch(e) {}
 }
 
+// Report d'une mesure saisie ailleurs (ex: le poids depuis la page
+// Mensurations) dans le bilan de la semaine en cours, à la bonne journée
+// calendaire — demandé par le coach pour éviter au client de ressaisir deux
+// fois la même donnée. N'écrit que si la date saisie tombe dans la semaine du
+// bilan actif (non-envoyé) — sinon aucun bilan éditable ne correspond à cette
+// date, on ne fait rien plutôt que de créer/modifier un bilan d'une autre semaine.
+async function reporterMesureDansBilan(clientId, dateISO, field, value) {
+  if (!dateISO || value === null || value === undefined || value === '' || isNaN(value)) return;
+  try {
+    const { row, jourBilanNom } = await _supaGetOrCreateBilanCourant(clientId);
+    const { debut, fin } = _bilanWeekBounds(jourBilanNom, new Date(row.created_at));
+    const d = new Date(dateISO + 'T12:00:00'); // midi : évite tout souci de bord de journée sur les bornes debut/fin
+    if (d < debut || d > fin) return;
+    const jourIdx = (d.getDay() + 6) % 7; // Lundi=0...Dimanche=6, même convention que _bilanWeekBounds
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${row.id}&select=jours`, { headers: supaHeaders() });
+    const arr = res.ok ? await res.json() : [];
+    const jours = (arr[0] && arr[0].jours) || row.jours || [];
+    const nomExistant = (jours[jourIdx] && jours[jourIdx].nom) || _JOURS_NOMS[jourIdx];
+    jours[jourIdx] = { ...(jours[jourIdx] || {}), nom: nomExistant, [field]: value };
+    await _supaPatchJoursBilan(row.id, jours);
+    // Si le bilan en cours est actuellement affiché (page Bilan déjà ouverte
+    // dans un autre onglet/état de session), garder _bilanData synchronisé.
+    if (_bilanData && _bilanId === row.id && _bilanData.jours[jourIdx]) _bilanData.jours[jourIdx][field] = value;
+  } catch(e) {}
+}
+
 function toggleJourBilanSupa(jourIdx, field, elemId) {
   if (!_bilanData) return;
   const el     = document.getElementById(elemId);
