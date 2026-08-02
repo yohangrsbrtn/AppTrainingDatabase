@@ -42,8 +42,13 @@ async function _supaGetOrCreateBilanCourant(clientId) {
   const profilArr = profilRes.ok ? await profilRes.json() : [];
   const jourBilanNom = (profilArr[0] && profilArr[0].jour_bilan) || null;
 
+  // archive=eq.false : un bilan non-envoyé mis à la corbeille par le coach (doublon supprimé
+  // depuis la console) ne doit jamais être repris comme "bilan en cours" — sans ce filtre, le
+  // client récupérait le doublon archivé (bug vécu : bilan de la semaine passée qui réapparaît
+  // "en cours" après suppression du doublon côté coach, alors que le vrai bilan de cette
+  // semaine a déjà été envoyé).
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&limit=1`,
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.desc&limit=1`,
     { headers: supaHeaders() }
   );
   const arr = res.ok ? await res.json() : [];
@@ -461,7 +466,7 @@ async function chargerBilansEnAttente() {
   try {
     const clientId = getClient();
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.false&order=created_at.desc`,
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.false&archive=eq.false&order=created_at.desc`,
       { headers: supaHeaders() }
     );
     const arr = res.ok ? await res.json() : [];

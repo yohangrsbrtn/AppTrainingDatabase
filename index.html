@@ -330,7 +330,6 @@ function render() {
     case 'roadmap':
     case 'roadmap-loading': document.body.innerHTML = renderRoadmapPage(); break;
     case 'classement':           app.innerHTML = renderClassement();           break;
-    case 'profil':               app.innerHTML = renderProfil(); setTimeout(_majStatutPushClient, 0); break;
     case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
     case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
     case 'rapports-bugs':        document.body.innerHTML = renderRapportsBugs();         break;
@@ -1117,87 +1116,52 @@ function renderClassement() {
 }
 
 // ── Profil ────────────────────────────────────────────────────────────
-function renderProfil() {
-  const p = S.data.prog || {};
-  const niveau = p.niveau || 1;
-  const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
-  const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858'};
-  const sz = tier === 'legendaire' ? 40 : tier === 'diamant' ? 36 : tier === 'platine' ? 32 : 28;
-  const titreId = p.titreActif || ((() => { try { return localStorage.getItem('titreActif_' + S.client) || null; } catch(e) { return null; } })());
-  const titreDef = titreId && typeof TITRES_DEF !== 'undefined' ? TITRES_DEF.find(t => t.id === titreId) : null;
-  const titreHtml = titreDef ? `<div style="margin-top:6px;display:flex;justify-content:center;">${renderTitrePill(titreDef, false)}</div>` : '';
-  const isSupabaseAuth = localStorage.getItem('at_auth_mode') === 'supabase';
+// Onglet "Profil" du panneau Paramètres (ouvrirSettings) — nom/prénom (lecture seule),
+// date de naissance/taille/email (modifiables), infos coaching et facturation (lecture
+// seule). Anciennement une page dédiée `renderProfil()`/case 'profil' — jamais reliée à
+// aucune navigation réelle dans le flux Supabase (aucun goTo('profil')/setPage('profil')
+// depuis un élément cliquable), donc invisible du client malgré son code fonctionnel — piège
+// documenté, page supprimée et contenu déplacé ici où le client accède réellement (icône ☰).
+function renderSettingsProfil() {
   const profilData = S.data.profil || {};
-  const infoRow = (label, val) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span style="color:var(--muted);font-size:13px;">${label}</span><span style="font-size:13px;font-weight:600;text-align:right;">${val}</span></div>`;
-  const infosHtml = !isSupabaseAuth ? '' : `
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Informations personnelles</div>
+  const p = S.data.prog || {};
+  const infoRow = (label, val) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e2235;"><span style="color:#8892a4;font-size:13px;">${label}</span><span style="font-size:13px;font-weight:600;color:#e8eaf0;text-align:right;">${val}</span></div>`;
+  return `
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Informations personnelles</div>
         ${infoRow('Nom', esc([profilData.prenom, profilData.nom].filter(Boolean).join(' ') || p.nom || S.client))}
-        <label style="display:block;font-size:12px;color:var(--muted);margin:12px 0 4px;">Date de naissance</label>
-        <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Taille (cm)</label>
-        <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        <button class="btn-primary" onclick="doSauverInfosProfil()">Enregistrer</button>
+        <label style="display:block;font-size:12px;color:#8892a4;margin:12px 0 4px;">Date de naissance</label>
+        <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px;">Taille (cm)</label>
+        <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+        <button class="btn-primary" onclick="doSauverInfosProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
         <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:16px;padding-top:12px;border-top:1px solid var(--border);margin-bottom:8px;">
+        <div style="font-size:11px;color:#8892a4;margin-top:16px;padding-top:12px;border-top:1px solid #1e2235;margin-bottom:8px;">
           ${profilData.email_confirme ? '✅ Email confirmé — utilisé pour la récupération de mot de passe.' : 'Renseigne et confirme ton email pour pouvoir récupérer ton mot de passe en cas d\'oubli.'}
         </div>
-        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Email</label>
-        <input id="pf-email" type="email" placeholder="ton@email.com" value="${(profilData.email || '').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        <button class="btn-primary" onclick="doSauverEmailProfil()">Enregistrer</button>
+        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px;">Email</label>
+        <input id="pf-email" type="email" placeholder="ton@email.com" value="${(profilData.email || '').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+        <button class="btn-primary" onclick="doSauverEmailProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
         <div id="pf-email-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
       </div>
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Informations coaching</div>
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Informations coaching</div>
         ${profilData.date_debut ? infoRow('Début du coaching', new Date(profilData.date_debut).toLocaleDateString('fr-FR')) : ''}
         ${profilData.jour_bilan ? infoRow('Jour de bilan', esc(profilData.jour_bilan)) : ''}
-        ${!profilData.date_debut && !profilData.jour_bilan ? `<div style="font-size:13px;color:var(--muted);">Non renseigné.</div>` : ''}
+        ${!profilData.date_debut && !profilData.jour_bilan ? `<div style="font-size:13px;color:#8892a4;">Non renseigné.</div>` : ''}
       </div>
       ${profilData.jour_paiement ? `
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Facturation</div>
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Facturation</div>
         ${infoRow('Jour de facturation', profilData.jour_paiement + ' de chaque mois')}
-      </div>` : ''}`;
-  const compteHtml = !isSupabaseAuth ? '' : `
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Mot de passe</div>
-        <input id="pf-mdp1" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        <input id="pf-mdp2" type="password" placeholder="Répète le nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        <button class="btn-primary" onclick="doChangerMotDePasse()">Changer mon mot de passe</button>
+      </div>` : ''}
+      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:10px;">Mot de passe</div>
+        <input id="pf-mdp1" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+        <input id="pf-mdp2" type="password" placeholder="Répète le nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+        <button class="btn-primary" onclick="doChangerMotDePasse()" style="width:100%;padding:10px;font-size:13px;">Changer mon mot de passe</button>
         <div id="pf-mdp-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-      </div>
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:6px;">🔔 Notifications</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Reçois une alerte sur cet appareil quand ton coach t'envoie un message.</div>
-        <button class="btn-primary" id="btnActiverPushClient" onclick="activerNotifications()">Activer les notifications</button>
-        <div id="pushStatusClient" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;color:var(--muted);"></div>
-      </div>
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:6px;">🔄 Mise à jour</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
-        <button class="btn-primary" onclick="forcerMiseAJour()">Vérifier les mises à jour</button>
       </div>`;
-  return `
-  <div id="app">
-    ${renderHeader('Profil', '', false)}
-    <div class="page">
-      <div class="card" style="text-align:center;padding:24px;">
-        <div style="display:flex;justify-content:center;margin-bottom:8px;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, sz, 'pf') : ''}</div>
-        <div style="font-size:20px;font-weight:700;">${(p.nom || S.client).split(' ')[0]}</div>
-        <div style="font-size:13px;color:${tc.c1};font-weight:600;">Niveau ${niveau}</div>
-        ${titreHtml}
-      </div>
-      ${infosHtml}
-      ${compteHtml}
-      <div class="card">
-        <div class="list-item" onclick="deconnexion()" style="color:var(--red);">
-          <div class="list-icon">🚪</div>
-          <div class="list-text"><div class="list-title">Se déconnecter</div></div>
-        </div>
-      </div>
-    </div>
-    ${renderNavBar('profil')}
-  </div>`;
 }
 
 async function doSauverInfosProfil() {
@@ -1436,15 +1400,15 @@ let _settingsGuideSub = 'application'; // 'application' | 'xp'
 let _settingsAccordion = null; // 'journee' | 'bilan' | 'mensurations' | 'titres' | null
 
 function ouvrirSettings(tab) {
-  if (tab === 'guide' || tab === 'bug') _settingsTab = tab;
+  if (tab === 'guide' || tab === 'bug' || tab === 'profil') _settingsTab = tab;
   const existing = document.getElementById('settingsPanel');
   if (existing) existing.remove();
   const el = document.createElement('div');
   el.id = 'settingsPanel';
   el.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.82);display:flex;align-items:flex-end;';
 
-  const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 0;font-size:13px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
-  const content = _settingsTab === 'bug' ? renderSettingsBug() : _settingsTab === 'guide' ? renderSettingsGuide() : renderSettingsGeneral();
+  const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 2px;font-size:12px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
+  const content = _settingsTab === 'bug' ? renderSettingsBug() : _settingsTab === 'guide' ? renderSettingsGuide() : _settingsTab === 'profil' ? renderSettingsProfil() : renderSettingsGeneral();
 
   el.innerHTML = `<div class="sheet-body" style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
     <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
@@ -1452,10 +1416,11 @@ function ouvrirSettings(tab) {
       <div style="font-size:17px;font-weight:700;color:#e8eaf0;">Paramètres</div>
       <button onclick="document.getElementById('settingsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
     </div>
-    <div style="display:flex;gap:8px;padding:14px 20px 0;flex-shrink:0;">
+    <div style="display:flex;gap:6px;padding:14px 20px 0;flex-shrink:0;">
       ${tabBtn('general', 'Général', _settingsTab === 'general')}
+      ${tabBtn('profil', 'Profil', _settingsTab === 'profil')}
       ${tabBtn('guide', 'Fonctionnement', _settingsTab === 'guide')}
-      ${tabBtn('bug', 'Rapport de bug', _settingsTab === 'bug')}
+      ${tabBtn('bug', 'Bug', _settingsTab === 'bug')}
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 20px 12px;-webkit-overflow-scrolling:touch;">
       ${content}
