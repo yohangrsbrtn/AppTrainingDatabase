@@ -17,8 +17,20 @@ function supaHeaders(extra) {
 // renseigné, on retombe sur dimanche (comportement calendaire précédent).
 const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
 
+// Normalise la casse avant recherche dans _JOURS_IDX_FR (clés capitalisées) — certains
+// client_profils.jour_bilan ont été saisis/migrés en minuscules ("lundi" au lieu de "Lundi").
+// Sans cette normalisation, `in _JOURS_IDX_FR` échoue silencieusement et la semaine retombe
+// sur le défaut Dimanche au lieu du jour réellement configuré (bug vécu : jour_bilan="lundi"
+// pour une cliente, dont toutes les semaines de bilan étaient calculées comme si elle n'avait
+// aucun jour_bilan réglé — labels "Du <dv> au <dv+6>" au lieu de "Du <dv-6> au <dv>").
+function _normJourBilan(s) {
+  if (!s) return null;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 function _bilanWeekBounds(jourBilanNom, refDate) {
   refDate = refDate || new Date();
+  jourBilanNom = _normJourBilan(jourBilanNom);
   const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
   const curIdx   = (refDate.getDay() + 6) % 7; // Lundi=0...Dimanche=6
   const delta    = (cibleIdx - curIdx + 7) % 7; // jours jusqu'à la prochaine occurrence (0 = aujourd'hui)

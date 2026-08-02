@@ -191,6 +191,7 @@ const _JOURS_NOMS = ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIM
 // d'affichage des cartes — j.idx (utilisé par sauverJourBilanSupa) reste inchangé.
 function _joursOrdreAffichage(jours, jourBilanNom) {
   if (!jours || !jours.length) return jours || [];
+  jourBilanNom = _normJourBilan(jourBilanNom);
   const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
   const startIdx = (cibleIdx + 1) % 7; // lendemain du jour de bilan = premier jour de la semaine
   return Array.from({ length: 7 }, (_, i) => jours[(startIdx + i) % 7]);
