@@ -629,10 +629,13 @@ function _dEditModalHtml(a) {
   return `<div style="background:#1a1d29;border-top:2px solid #a78bfa;padding:20px 16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));">
     <div style="font-size:13px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">${esc(a.nom)}</div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-      <label style="font-size:13px;color:var(--muted);white-space:nowrap;">Quantité (g)</label>
-      <input id="dEditQte" type="number" inputmode="decimal" value="${qte}" step="5" min="0"
-        style="flex:1;background:#2d3142;border:1px solid #444;color:#fff;border-radius:8px;padding:10px;font-size:16px;text-align:center;"
-        oninput="dLiveUpdateAliment(this.value)">
+      <label style="font-size:13px;color:var(--muted);white-space:nowrap;">Quantité</label>
+      <div style="flex:1;display:flex;align-items:baseline;justify-content:center;background:#2d3142;border:1px solid #444;border-radius:10px;padding:14px 12px;">
+        <input id="dEditQte" type="number" inputmode="decimal" value="${qte}" step="5" min="0"
+          style="width:80px;background:transparent;border:none;color:#fff;font-size:24px;font-weight:700;text-align:right;padding:0;"
+          oninput="dLiveUpdateAliment(this.value)">
+        <span style="font-size:18px;font-weight:600;color:var(--muted);margin-left:2px;">g</span>
+      </div>
     </div>
     <div id="dEditMacros" style="display:flex;justify-content:space-around;text-align:center;background:#2d3142;border-radius:10px;padding:12px;margin-bottom:16px;">
       <div><div style="font-size:18px;font-weight:700;">${cals}</div><div style="font-size:10px;color:var(--muted);">KCAL</div></div>

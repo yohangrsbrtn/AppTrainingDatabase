@@ -915,7 +915,35 @@ function _pcTickChrono() {
     overlay.innerHTML = `<div style="font-size:32px;font-weight:700;">✅ Repos terminé !</div>
       <div style="font-size:14px;margin-top:10px;cursor:pointer;opacity:.8;" onclick="pcStopChrono()">Fermer ✕</div>`;
     if (navigator.vibrate) navigator.vibrate([300,100,300,100,300]);
+    _pcJouerBeepFin();
   }
+}
+
+// Joue le bip de fin IMMÉDIATEMENT (jamais pré-programmé longtemps à l'avance)
+// — un AudioContext se fait suspendre par l'OS quand l'écran se verrouille ;
+// des oscillateurs programmés minutes à l'avance via start(t) se retrouvent
+// à sonner n'importe quand (souvent très en retard) une fois le contexte
+// relancé au retour au premier plan. Ce tick n'est de toute façon exécuté que
+// quand l'app est visible (foreground) ou vient de le redevenir
+// (visibilitychange ci-dessous) — jamais pendant que l'écran est verrouillé,
+// où seul le push serveur (voir pcDemarrerChrono) prend le relais.
+function _pcJouerBeepFin() {
+  try {
+    if (!_pcAudioCtx) _pcAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_pcAudioCtx.state === 'suspended') _pcAudioCtx.resume();
+    const debut = _pcAudioCtx.currentTime + 0.03;
+    for (let i = 0; i < 5; i++) {
+      const osc = _pcAudioCtx.createOscillator(), gain = _pcAudioCtx.createGain();
+      osc.connect(gain); gain.connect(_pcAudioCtx.destination);
+      osc.frequency.value = i < 3 ? 880 : 1047;
+      osc.type = 'sine';
+      const t = debut + i * 0.25;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
+      gain.gain.linearRampToValueAtTime(0, t + 0.18);
+      osc.start(t); osc.stop(t + 0.2);
+    }
+  } catch(e) {}
 }
 
 async function pcDemarrerChrono() {
@@ -933,23 +961,12 @@ async function pcDemarrerChrono() {
     }).then(r => r.ok ? r.json() : null).then(jobs => { if (jobs && jobs[0]) _pcJobId = jobs[0].id; }).catch(() => {});
   }
 
-  // Pré-programmer le son via AudioContext (joue même si onglet en arrière-plan)
+  // Le bip n'est plus pré-programmé ici (voir _pcJouerBeepFin) — seulement
+  // "réveiller" l'AudioContext sous le geste utilisateur du clic "Lancer",
+  // requis par les navigateurs pour autoriser l'audio plus tard.
   try {
     if (!_pcAudioCtx) _pcAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (_pcAudioCtx.state === 'suspended') _pcAudioCtx.resume();
-    const secLeft = (_pcEndTime - Date.now()) / 1000;
-    const debut = _pcAudioCtx.currentTime + secLeft;
-    for (let i = 0; i < 5; i++) {
-      const osc = _pcAudioCtx.createOscillator(), gain = _pcAudioCtx.createGain();
-      osc.connect(gain); gain.connect(_pcAudioCtx.destination);
-      osc.frequency.value = i < 3 ? 880 : 1047;
-      osc.type = 'sine';
-      const t = debut + i * 0.25;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
-      gain.gain.linearRampToValueAtTime(0, t + 0.18);
-      osc.start(t); osc.stop(t + 0.2);
-    }
   } catch(e) {}
 
   _pcTickChrono();

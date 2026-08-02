@@ -146,6 +146,11 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 .diete-bar  { position:absolute;top:0;left:0;bottom:0;width:3px;background:linear-gradient(180deg,#3ecf8e,#1a7a52);border-radius:12px 0 0 12px; }
 .diete-arrow { width:26px;height:26px;background:#3ecf8e22;border:1px solid #3ecf8e66;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;color:#3ecf8e;font-weight:600; }
 .macro-label { font-size:10px;color:var(--muted); }
+
+/* Grammage diète : pas de flèches de spinner natives (pas pratique sur mobile) */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+input[type="number"] { -moz-appearance:textfield; }
 </style>
 </head>
 <body>
@@ -153,14 +158,14 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=6"></script>
 <script src="bilan.js?v=11"></script>
-<script src="diete.js?v=12"></script>
+<script src="diete.js?v=13"></script>
 <script src="mensurations.js?v=7"></script>
 <script src="recettes.js?v=4"></script>
 <script src="progression.js?v=5"></script>
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=4"></script>
-<script src="programme-client.js?v=16"></script>
+<script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=4"></script>
 <script>

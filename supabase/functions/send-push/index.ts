@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: CORS_HEADERS });
   }
   try {
-    const { title, body, client_id } = await req.json();
+    const { title, body, client_id, urgent } = await req.json();
     const cid = client_id || "yohanp";
     const url = cid === "all"
       ? `${SUPABASE_URL}/rest/v1/push_subscriptions?select=endpoint,p256dh,auth`
@@ -47,6 +47,13 @@ Deno.serve(async (req) => {
           // ouvrir directement le panneau de notifications de l'app (voir
           // notificationclick dans sw.js) plutôt que juste l'accueil.
           JSON.stringify({ title: title || "AppTraining", body: body || "", data: { openNotifs: true } }),
+          // urgent (chrono repos) : priorité "high" + TTL court — un rappel de
+          // fin de repos n'a aucune valeur s'il est livré avec plusieurs minutes
+          // de retard (vécu : notification arrivée très en retard sur iOS avec
+          // les réglages par défaut). Les autres pushes (bilan reçu, séance
+          // validée...) gardent le TTL par défaut de la lib, pas de contrainte
+          // de fraîcheur aussi stricte.
+          urgent ? { TTL: 30, urgency: "high" } : undefined,
         );
       } catch (err) {
         const statusCode = (err as { statusCode?: number }).statusCode;
