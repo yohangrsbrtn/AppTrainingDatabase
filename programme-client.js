@@ -552,11 +552,11 @@ function renderPcSeancePage() {
       const equivCommentLog = _pcEquivLogs[equiv.id + '|' + _pcSemaine + '|1'] || {};
       bodyHtml = `
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-          <button onclick="pcEquivSliderAller(${ex.id},-1)" style="width:30px;height:30px;border-radius:50%;background:#378ADD22;border:1px solid #378ADD55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+          <button id="pcEquivPrev_${ex.id}" onclick="pcEquivSliderAller(${ex.id},-1)" style="width:30px;height:30px;border-radius:50%;background:#378ADD22;border:1px solid #378ADD55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#378ADD" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <div id="pcEquivDots_${ex.id}" style="flex:1;text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);">Exercice prévu</div>
-          <button onclick="pcEquivSliderAller(${ex.id},1)" style="width:30px;height:30px;border-radius:50%;background:#a78bfa22;border:1px solid #a78bfa55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+          <button id="pcEquivNext_${ex.id}" onclick="pcEquivSliderAller(${ex.id},1)" style="width:30px;height:30px;border-radius:50%;background:#a78bfa22;border:1px solid #a78bfa55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
@@ -597,11 +597,18 @@ function renderPcSeancePage() {
       const dots = document.getElementById(`pcEquivDots_${exId}`);
       if (!slider) return;
       const equiv = _pcEquivalents[exId];
+      const prevBtn = document.getElementById(`pcEquivPrev_${exId}`);
+      const nextBtn = document.getElementById(`pcEquivNext_${exId}`);
       const majLabel = () => {
         const optIdx = Math.min(1, Math.round(slider.scrollLeft / (slider.clientWidth || 1)));
-        if (!dots) return;
-        dots.textContent = optIdx === 0 ? 'Exercice prévu' : `≡ ${equiv ? equiv.nom : 'Équivalent'}`;
-        dots.style.color = optIdx === 0 ? '#378ADD' : '#a78bfa';
+        if (dots) {
+          dots.textContent = optIdx === 0 ? 'Exercice prévu' : `≡ ${equiv ? equiv.nom : 'Équivalent'}`;
+          dots.style.color = optIdx === 0 ? '#378ADD' : '#a78bfa';
+        }
+        // Rien avant le premier panneau, rien après le dernier — la flèche
+        // correspondante disparaît plutôt que de rester cliquable dans le vide.
+        if (prevBtn) prevBtn.style.visibility = optIdx === 0 ? 'hidden' : 'visible';
+        if (nextBtn) nextBtn.style.visibility = optIdx === 1 ? 'hidden' : 'visible';
       };
       slider.addEventListener('scroll', majLabel, { passive: true });
       majLabel();
