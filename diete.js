@@ -71,24 +71,7 @@ async function _guardAction(fn, btn) {
   }
 }
 
-async function loadDiete() {
-  if (isSupabase()) return loadDieteSupabase();
-  if (_pf.diete) {
-    _dDietes  = _pf.diete;
-    _pf.diete = null;
-    _dSubPage = 'list';
-    setPage('diete');
-    schedulerPrechargement();
-    return;
-  }
-  setPage('diete-loading');
-  try {
-    _dDietes  = await api('listerDietes');
-    _dSubPage = 'list';
-    setPage('diete');
-    schedulerPrechargement();
-  } catch(e) { setPage('home'); }
-}
+async function loadDiete() { return loadDieteSupabase(); }
 
 async function loadDieteSupabase() {
   setPage('diete-loading');
@@ -177,16 +160,6 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
   } catch(e) { setPage('home'); }
 }
 
-async function ouvrirDiete(ligne, col, nom) {
-  _dNom = nom;
-  setPage('diete-loading');
-  try {
-    _dDetail = await api('chargerDieteParPosition', { ligneTitre: ligne, colTitre: col });
-    _dSubPage = 'detail';
-    setPage('diete');
-  } catch(e) { setPage('diete'); }
-}
-
 async function switchDieteTab(tab) {
   _dSubPage = tab;
   if (tab === 'menus') _dMenuVue = 'liste';
@@ -208,26 +181,17 @@ async function switchDieteTab(tab) {
   setPage('diete');
 }
 
-// ── Mes menus / Mon journal — implémentation Supabase ─────────────────────────
-// Chaque fonction sbXxx() renvoie exactement la même forme que l'action GAS
-// équivalente (mêmes noms de champs : menuId, ligne, ref, label…) pour que tout
-// le reste de ce fichier (rendu, résolution des slots, etc.) fonctionne à
-// l'identique quel que soit le mode. Les wrappers _apiXxx() ci-dessous font le
-// seul aiguillage GAS/Supabase ; le reste du fichier appelle uniquement ces
-// wrappers, jamais sbXxx()/api() directement (sauf cas particuliers commentés).
-
-function _apiListerMenus()   { return isSupabase() ? sbListerMenus()   : api('listerMenus'); }
-function _apiListerJournal() { return isSupabase() ? sbListerJournal() : api('listerJournal'); }
-function _apiSupprimerMenu(menuId) { return isSupabase() ? sbSupprimerMenu(menuId) : api('supprimerMenu', { menuId }); }
-function _apiCreerMenu(nom, aliments) { return isSupabase() ? sbCreerMenu(nom, aliments) : api('creerMenu', { nom, aliments }); }
-function _apiModifierMenu(menuId, nom, aliments) { return isSupabase() ? sbModifierMenu(menuId, nom, aliments) : api('modifierMenu', { menuId, nom, aliments }); }
-function _apiAjouterSlotJournal(date, slot, type, ref, label) { return isSupabase() ? sbAjouterSlotJournal(date, slot, type, ref, label) : api('ajouterSlotJournal', { date, slot, type, ref, label }); }
-function _apiSupprimerSlotJournal(ligne) { return isSupabase() ? sbSupprimerSlotJournal(ligne) : api('supprimerSlotJournal', { ligne }); }
-function _apiChargerBaseAliments() { return isSupabase() ? sbChargerBaseAliments() : api('chargerBaseAliments'); }
-function _apiAjouterAlimentCommunaute(p) { return isSupabase() ? sbAjouterAlimentCommunaute(p) : api('ajouterAlimentCommunaute', p); }
-// Aliments récents : fonctionnalité Supabase-only (pas d'équivalent GAS), no-op silencieux en mode GAS.
-function _apiChargerAlimentsRecents() { return isSupabase() ? sbChargerAlimentsRecents() : Promise.resolve([]); }
-function _apiEnregistrerAlimentRecent(nom, source) { return isSupabase() ? sbEnregistrerAlimentRecent(nom, source) : Promise.resolve(); }
+function _apiListerMenus()   { return sbListerMenus(); }
+function _apiListerJournal() { return sbListerJournal(); }
+function _apiSupprimerMenu(menuId) { return sbSupprimerMenu(menuId); }
+function _apiCreerMenu(nom, aliments) { return sbCreerMenu(nom, aliments); }
+function _apiModifierMenu(menuId, nom, aliments) { return sbModifierMenu(menuId, nom, aliments); }
+function _apiAjouterSlotJournal(date, slot, type, ref, label) { return sbAjouterSlotJournal(date, slot, type, ref, label); }
+function _apiSupprimerSlotJournal(ligne) { return sbSupprimerSlotJournal(ligne); }
+function _apiChargerBaseAliments() { return sbChargerBaseAliments(); }
+function _apiAjouterAlimentCommunaute(p) { return sbAjouterAlimentCommunaute(p); }
+function _apiChargerAlimentsRecents() { return sbChargerAlimentsRecents(); }
+function _apiEnregistrerAlimentRecent(nom, source) { return sbEnregistrerAlimentRecent(nom, source); }
 
 function _sbDateToFr(iso)  { const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`; }
 function _sbDateToIso(fr)  { const [d,m,y] = fr.split('/'); return `${y}-${m}-${d}`; }
@@ -470,8 +434,7 @@ function renderDieteList() {
     ? `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">Aucune diète trouvée.</div></div>`
     : _dDietes.map(d => {
       const nom = (d.nom||'').replace(/'/g,"\\'");
-      const onclick = d._supabase ? `ouvrirDieteSupabase('${nom}',${d.id})` : `ouvrirDiete(${d.ligne},${d.col},'${nom}')`;
-      return `<div class="diete-item" onclick="${onclick}">
+      return `<div class="diete-item" onclick="ouvrirDieteSupabase('${nom}',${d.id})">
         <div class="diete-bar"></div>
         <span style="padding-left:8px;font-size:15px;font-weight:700;">${esc(d.nom)}</span>
         <div class="diete-arrow">›</div>
@@ -543,12 +506,12 @@ function renderDieteDetail() {
       options.forEach((opt, oIdx) => {
         repasHtml += `<div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
           ${oIdx > 0 ? `<div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(opt.nom)}</div>` : ''}
-          ${rendreCorpsRepas(opt, isSupabase() ? null : idx, isSupabase() ? null : oIdx)}
+          ${rendreCorpsRepas(opt, null, null)}
         </div>`;
       });
       repasHtml += `</div>`;
     } else {
-      repasHtml += rendreCorpsRepas(options[0], isSupabase() ? null : idx, isSupabase() ? null : 0);
+      repasHtml += rendreCorpsRepas(options[0], null, null);
     }
 
     repasHtml += `</div>`;
@@ -588,7 +551,7 @@ function renderDieteDetail() {
       </div>
     </div>
     <div class="page">
-      <button class="btn-secondary" onclick="${isSupabase() ? '_dSubPage=\'list\';setPage(\'diete\')' : 'loadDiete()'}" style="margin-bottom:12px;">← Retour</button>
+      <button class="btn-secondary" onclick="_dSubPage='list';setPage('diete')" style="margin-bottom:12px;">← Retour</button>
       ${repasHtml}
     </div>
     ${renderNavBar('diete')}
@@ -990,7 +953,7 @@ function fermerJourJournal() {
 
 async function _resoudreDieteDetail(refKey) {
   if (_dDieteDetailCache[refKey.cacheKey]) return _dDieteDetailCache[refKey.cacheKey];
-  const d = refKey.sb ? await sbResoudreDieteDetail(refKey.id) : await api('chargerDieteParPosition', { ligneTitre: refKey.ligne, colTitre: refKey.col });
+  const d = await sbResoudreDieteDetail(refKey.id);
   _dDieteDetailCache[refKey.cacheKey] = d;
   return d;
 }
@@ -1094,12 +1057,8 @@ async function choisirDieteCible(d) {
   try {
     const refKey = _refKeyForDiete(d);
     await _resoudreDieteDetail(refKey);
-    if (refKey.sb) {
-      const res = await sbDefinirDieteCibleJournal(_dJournalDateOuverte, refKey.id, d.nom);
-      if (!res || !res.ok) throw new Error('sauvegarde_cible_echouee');
-    } else {
-      await api('definirDieteCibleJournal', { date: _dJournalDateOuverte, ligneTitre: refKey.ligne, colTitre: refKey.col, nom: d.nom });
-    }
+    const res = await sbDefinirDieteCibleJournal(_dJournalDateOuverte, refKey.id, d.nom);
+    if (!res || !res.ok) throw new Error('sauvegarde_cible_echouee');
     _dJournal = await _apiListerJournal();
   } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
   _dJournalCibleEtape = null;
@@ -1352,7 +1311,7 @@ async function ajouterSlotCoach(idx) {
   const dc = _dJournalDieteChoisie;
   const r = dc && dc.repas[idx];
   if (!r) return;
-  const ref = dc.refKey.sb ? ('sb|' + dc.refKey.id + '|' + idx) : (dc.refKey.ligne + '|' + dc.refKey.col + '|' + idx);
+  const ref = 'sb|' + dc.refKey.id + '|' + idx;
   const label = r.nom + ' · ' + dc.nom;
   const slot = _dJournalSlotEnEdition;
   try {

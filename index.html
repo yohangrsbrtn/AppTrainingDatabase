@@ -151,16 +151,15 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 <body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=5"></script>
-<script src="bilan.js?v=8"></script>
-<script src="training.js?v=2"></script>
-<script src="diete.js?v=10"></script>
-<script src="mensurations.js?v=4"></script>
-<script src="recettes.js?v=3"></script>
-<script src="progression.js?v=4"></script>
-<script src="collection.js?v=2"></script>
-<script src="coach.js?v=4"></script>
-<script src="protocole.js?v=3"></script>
+<script src="api.js?v=6"></script>
+<script src="bilan.js?v=9"></script>
+<script src="diete.js?v=11"></script>
+<script src="mensurations.js?v=5"></script>
+<script src="recettes.js?v=4"></script>
+<script src="progression.js?v=5"></script>
+<script src="collection.js?v=3"></script>
+<script src="coach.js?v=5"></script>
+<script src="protocole.js?v=4"></script>
 <script src="programme-client.js?v=13"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=4"></script>
@@ -270,11 +269,6 @@ async function enterVueClient(clientId, andThen, retour) {
   _journeeData = null;
   _viewAsClientOverride = clientId;
   _vueClientRetour = retour || 'mes-clients';
-  // Le préchargement est propre à une identité client : on le réinitialise à
-  // chaque bascule pour ne jamais montrer les données préchargées d'un autre
-  // client (loadHome() relance le préchargement, mais andThen peut ouvrir
-  // bilan/mensurations directement sans repasser par l'accueil).
-  _resetPrechargement();
 
   let supabaseOnly = false;
   try {
@@ -300,7 +294,6 @@ function exitVueClient() {
   if (_coachSavedState.authMode) localStorage.setItem('at_auth_mode', _coachSavedState.authMode);
   else localStorage.removeItem('at_auth_mode');
   _coachSavedState = null;
-  _resetPrechargement();
   const banner = document.getElementById('coachRetourBanner');
   if (banner) banner.remove();
   setPage(_vueClientRetour || 'mes-clients');
@@ -312,11 +305,8 @@ function render() {
   switch (S.page) {
     case 'loading':       app.innerHTML = renderFullSpinner(); break;
     case 'login':         app.innerHTML = renderLogin();   bindLogin(); break;
-    case 'home':          document.body.innerHTML = renderHome(); break;
-    case 'home-erreur':   document.body.innerHTML = renderHomeErreur(); break;
     case 'home-supabase': document.body.innerHTML = renderHomeSupabase(); break;
     case 'training':
-    case 'training-loading': document.body.innerHTML = renderTrainingPage(); break;
     case 'bilan':
     case 'bilan-loading': document.body.innerHTML = renderBilanPage(); break;
     case 'diete':
@@ -338,10 +328,7 @@ function render() {
     case 'profil':               app.innerHTML = renderProfil(); setTimeout(_majStatutPushClient, 0); break;
     case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
     case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
-    case 'centre-bilans':        document.body.innerHTML = renderCentreBilans();         break;
-    case 'notifications-coach':  document.body.innerHTML = renderNotificationsCoach();   break;
     case 'rapports-bugs':        document.body.innerHTML = renderRapportsBugs();         break;
-    case 'mes-clients':          document.body.innerHTML = renderMesClients();           break;
     case 'protocole':            document.body.innerHTML = renderProtocolePage();        break;
     case 'programme-client':
     case 'programme-client-loading': document.body.innerHTML = renderProgrammeClientPage(); break;
@@ -396,7 +383,6 @@ function hideLoadingOverlay() {
 // passe" et "compte inexistant", donc on ne peut pas s'y fier après coup).
 let _loginStep   = 'identifiant'; // 'identifiant' | 'password' | 'create' | 'reset-password'
 let _loginClient = '';
-let _loginAuthMode = 'gas'; // 'gas' | 'supabase' — détecté via client_profils.supabase_only à l'étape identifiant
 let _loginAuthEmail = ''; // email réellement utilisé pour l'auth Supabase (fictif ou réel confirmé)
 let _loginEmailConfirme = false;
 
@@ -422,9 +408,7 @@ function renderLoginIdentifiant() {
 }
 
 function renderLoginPassword() {
-  const oublieHtml = _loginAuthMode === 'supabase'
-    ? `<div style="text-align:center;margin-top:4px;"><a href="javascript:void(0)" id="l-oublie" style="color:var(--muted);font-size:13px;text-decoration:underline;">Mot de passe oublié ?</a></div>`
-    : '';
+  const oublieHtml = `<div style="text-align:center;margin-top:4px;"><a href="javascript:void(0)" id="l-oublie" style="color:var(--muted);font-size:13px;text-decoration:underline;">Mot de passe oublié ?</a></div>`;
   return `
   <div class="login-page">
     <img class="login-logo" src="icons/icon-192.png" alt="">
@@ -477,11 +461,11 @@ function bindLogin() {
     btn.addEventListener('click', doVerifierClient);
     document.getElementById('l-client').addEventListener('keydown', e => { if (e.key === 'Enter') doVerifierClient(); });
   } else if (_loginStep === 'password') {
-    const handler = _loginAuthMode === 'supabase' ? doLoginSupabase : doLogin;
+    const handler = doLoginSupabase;
     btn.addEventListener('click', handler);
     document.getElementById('l-mdp').addEventListener('keydown', e => { if (e.key === 'Enter') handler(); });
   } else if (_loginStep === 'create') {
-    const handler = _loginAuthMode === 'supabase' ? doCreerMotDePasseSupabase : doCreerMotDePasse;
+    const handler = doCreerMotDePasseSupabase;
     btn.addEventListener('click', handler);
     const emailCreate = document.getElementById('l-email-create');
     if (emailCreate) emailCreate.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('l-mdp1').focus(); });
@@ -502,27 +486,15 @@ async function doVerifierClient() {
   btn.disabled = true; btn.textContent = '…';
   err.textContent = '';
   try {
-    // Client 100% Supabase (marqué client_profils.supabase_only) : flux d'auth Supabase, jamais GAS.
-    // Tous les autres identifiants suivent le flux GAS existant, inchangé.
     const resProfil = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(client)}&select=client_id,supabase_only,email,email_confirme,mdp_defini`, { headers: supaHeaders() });
     const profils = resProfil.ok ? await resProfil.json() : [];
-    if (profils[0] && profils[0].supabase_only) {
-      const p = profils[0];
-      _loginClient = client;
-      _loginAuthMode = 'supabase';
-      _loginEmailConfirme = !!p.email_confirme;
-      _loginAuthEmail = (p.email_confirme && p.email) ? p.email : (client + '@apptraining-users.com');
-      // mdp_defini connu à l'avance : on ne devine plus depuis l'erreur générique de signInWithPassword.
-      _loginStep = p.mdp_defini ? 'password' : 'create';
-      setPage('login');
-      return;
-    }
-    const res  = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'verifierClient', client }) });
-    const json = await res.json();
-    if (!json.ok || !json.existe) throw new Error('Identifiant inconnu.');
+    if (!profils[0] || !profils[0].supabase_only) throw new Error('Identifiant inconnu.');
+    const p = profils[0];
     _loginClient = client;
-    _loginAuthMode = 'gas';
-    _loginStep = 'password';
+    _loginEmailConfirme = !!p.email_confirme;
+    _loginAuthEmail = (p.email_confirme && p.email) ? p.email : (client + '@apptraining-users.com');
+    // mdp_defini connu à l'avance : on ne devine plus depuis l'erreur générique de signInWithPassword.
+    _loginStep = p.mdp_defini ? 'password' : 'create';
     setPage('login');
   } catch(e) {
     err.textContent = e.message || 'Erreur de connexion.';
@@ -677,7 +649,6 @@ async function _completerConnexionSupabase(session) {
   S.isCoach = estCoach;
   _loginStep = 'identifiant';
   _loginClient = '';
-  _loginAuthMode = 'gas';
   _loginAuthEmail = '';
   _loginEmailConfirme = false;
   // Trace la dernière connexion réelle (fire-and-forget, ne bloque jamais le login).
@@ -687,72 +658,7 @@ async function _completerConnexionSupabase(session) {
   await loadHomeSupabase();
 }
 
-async function doLogin() {
-  const mdp = document.getElementById('l-mdp').value;
-  const btn = document.getElementById('l-btn');
-  const err = document.getElementById('l-err');
-  if (!mdp) { err.textContent = 'Entre ton mot de passe.'; return; }
-  btn.disabled = true; btn.textContent = '…';
-  err.textContent = '';
-  try {
-    const res  = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'login', client: _loginClient, mdp })
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      if (json.error === 'sans_mot_de_passe') { _loginStep = 'create'; setPage('login'); return; }
-      throw new Error(json.error || 'Identifiants incorrects');
-    }
-    await _completerConnexion(json);
-  } catch(e) {
-    err.textContent = e.message === 'token_invalide' ? 'Identifiants incorrects.' : (e.message || 'Erreur de connexion.');
-    btn.disabled = false; btn.textContent = 'Se connecter';
-  }
-}
-
-async function doCreerMotDePasse() {
-  const mdp1 = document.getElementById('l-mdp1').value;
-  const mdp2 = document.getElementById('l-mdp2').value;
-  const btn  = document.getElementById('l-btn');
-  const err  = document.getElementById('l-err');
-  err.textContent = '';
-  if (mdp1.length < 4) { err.textContent = 'Minimum 4 caractères.'; return; }
-  if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
-  btn.disabled = true; btn.textContent = '…';
-  try {
-    const res  = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'creerMotDePasse', client: _loginClient, mdp: mdp1 })
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error === 'mdp_trop_court' ? 'Minimum 4 caractères.' : 'Erreur lors de la création.');
-    await _completerConnexion(json);
-  } catch(e) {
-    err.textContent = e.message || 'Erreur serveur.';
-    btn.disabled = false; btn.textContent = 'Créer mon mot de passe →';
-  }
-}
-
-async function _completerConnexion(json) {
-  localStorage.setItem('at_client', json.client);
-  localStorage.setItem('at_token',  json.token);
-  const isCoach = !!(json.coachMode || json.client === 'yohan');
-  localStorage.setItem('at_coach',  isCoach ? '1' : '0');
-  S.client  = json.client;
-  S.token   = json.token;
-  S.isCoach = isCoach;
-  _loginStep = 'identifiant';
-  _loginClient = '';
-  _resetPrechargement();
-  await loadHome();
-}
-
-// ── Home 100% Supabase (client sans Sheets) ────────────────────────────
-// Ne déclenche AUCUN appel api()/GAS — tant que diète/bilan/XP ne sont pas
-// reconstruits côté Supabase, cet accueil n'affiche que ce qui existe déjà.
+// ── Home ────────────────────────────────────────────────────────────
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
@@ -825,26 +731,6 @@ function renderHomeSupabase(){
       </div>` : ''}
 
       ${S.isCoach ? `
-      <div onclick="loadMesClients()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><circle cx="16" cy="15" r="5.5" fill="#4f8ef7" opacity="0.6"/><circle cx="28" cy="15" r="5.5" fill="#4f8ef7"/><path d="M5 36 Q5 26 16 26 Q22 26 22 26" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/><path d="M22 26 Q28 26 39 26 Q39 36 39 36" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mes clients</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Accéder aux profils</div>
-      </div>
-
-      <div onclick="loadCentreBilans()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #1D9E75;position:relative;-webkit-tap-highlight-color:transparent;">
-        <span id="badgeCentreBilans">${(S.data.coachBilansCount||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.coachBilansCount}</div>` : ''}</span>
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="10" y="7" width="24" height="30" rx="3" stroke="#1D9E75" stroke-width="1.5" fill="#1D9E75" fill-opacity="0.12"/><line x1="15" y1="15" x2="29" y2="15" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="21" x2="29" y2="21" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="27" x2="23" y2="27" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><circle cx="31" cy="31" r="6" fill="#1D9E75"/><polyline points="28,31 30,33 34,29" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Centre bilans</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bilans reçus à traiter</div>
-      </div>
-
-      <div onclick="loadNotificationsCoach()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;position:relative;-webkit-tap-highlight-color:transparent;">
-        <span id="badgeNotifs">${(S.data.notifsNonLues||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e05c5c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.notifsNonLues}</div>` : ''}</span>
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M22 6 C15 6 11 12 11 20 L11 29 L7 33 L37 33 L33 29 L33 20 C33 12 29 6 22 6 Z" fill="#4f8ef7" opacity="0.15" stroke="#4f8ef7" stroke-width="1.5"/><path d="M18 33 Q18 37 22 37 Q26 37 26 33" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Notifications</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Activité clients</div>
-      </div>
-
       <div onclick="loadRapportsBugs()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #555e7a;position:relative;-webkit-tap-highlight-color:transparent;">
         <span id="badgeRapports">${(S.data.bugsNonLus||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.bugsNonLus}</div>` : ''}</span>
         <div style="font-size:38px;margin-bottom:8px;line-height:1;">🐛</div>
@@ -870,110 +756,6 @@ let _journeeData = null;
 // (setPage direct, sans spinner) puis repasse en fetch normal si on la
 // revisite sans être repassé par l'accueil entre-temps — les validations et
 // saisies restent, elles, toujours en direct.
-let _pf = { home: null, bilan: null, tInfos: null, tFeuilles: null, tSemaines: null, tSeances: null, diete: null, mens: null };
-let _pfInFlight = false;
-let _pfSession  = 0; // incrémenté à chaque bascule d'identité (login, vue client) pour ignorer les résultats d'un préchargement lancé pour un autre client
-
-function _resetPrechargement() {
-  _pfSession++;
-  _pf = { home: null, bilan: null, tInfos: null, tFeuilles: null, tSemaines: null, tSeances: null, diete: null, mens: null };
-  _pfInFlight = false;
-}
-
-function schedulerPrechargement() {
-  if (_pfInFlight) return;
-  _pfInFlight = true;
-  const maSession = _pfSession;
-  setTimeout(() => { precharger(maSession).finally(() => { _pfInFlight = false; }); }, 400);
-}
-
-async function precharger(maSession) {
-  // Les 5 chargements (accueil compris) sont indépendants entre eux et
-  // peuvent tourner en parallèle. chargerBilan et chargerJourneeEnCours
-  // passent par apiEtendreBilan (voir api.js) pour ne jamais tourner en
-  // même temps l'une que l'autre.
-  const pHome = Promise.all([
-    api('chargerProgressionClient'),
-    apiEtendreBilan('chargerJourneeEnCours')
-  ]).then(([prog, journee]) => { if (_pfSession === maSession) _pf.home = { prog, journee }; }).catch(() => {});
-  const pBilan = apiEtendreBilan('chargerBilan').then(d => { if (_pfSession === maSession) _pf.bilan = d; }).catch(() => {});
-  const pTraining = (async () => {
-    const [infos, feuilles] = await Promise.all([
-      api('chargerInfosActivite'),
-      api('lireFeuillesActives')
-    ]);
-    if (_pfSession !== maSession) return;
-    _pf.tInfos = infos || {};
-    _pf.tFeuilles = Array.isArray(feuilles) ? feuilles : [feuilles].filter(Boolean);
-    const feuilleActive = _pf.tFeuilles[0];
-    if (feuilleActive) {
-      const [semaines, seances] = await Promise.all([
-        api('listerSemaines', { nomFeuille: feuilleActive }),
-        api('listerSeances',  { nomFeuille: feuilleActive })
-      ]);
-      if (_pfSession !== maSession) return;
-      _pf.tSemaines = semaines || [];
-      _pf.tSeances  = seances  || [];
-    }
-  })().catch(() => {});
-  const pDiete = api('listerDietes').then(d => { if (_pfSession === maSession) _pf.diete = d; }).catch(() => {});
-  const pMens  = api('chargerMensurations').then(d => { if (_pfSession === maSession) _pf.mens = d; }).catch(() => {});
-  await Promise.allSettled([pHome, pBilan, pTraining, pDiete, pMens]);
-}
-
-async function loadHome() {
-  if (_pf.home) {
-    S.data.prog  = _pf.home.prog;
-    _journeeData = _pf.home.journee;
-    _pf.home = null;
-    setPage('home');
-    schedulerPrechargement();
-    _apresChargementHome();
-    return;
-  }
-  showLoadingOverlay('Chargement…');
-  try {
-    // Note : chargerBilan() n'est PAS appelée ici (comme en GAS, qui ne l'appelle
-    // que sur la page Bilan) — chargerBilan et chargerJourneeEnCours appellent
-    // toutes les deux etendreBilan() côté serveur ; apiEtendreBilan() (api.js)
-    // les sérialise pour empêcher toute écriture concurrente.
-    const [prog, journee] = await Promise.all([
-      api('chargerProgressionClient'),
-      apiEtendreBilan('chargerJourneeEnCours')
-    ]);
-    S.data.prog  = prog;
-    _journeeData = journee;
-    hideLoadingOverlay();
-    setPage('home');
-    schedulerPrechargement();
-    _apresChargementHome();
-  } catch(e) {
-    hideLoadingOverlay();
-    if (e.message === 'token_invalide') {
-      // Session réellement invalide côté serveur (token expiré/rejeté) — là seulement on déconnecte.
-      localStorage.removeItem('at_token');
-      _loginStep = 'identifiant'; _loginClient = '';
-      setPage('login');
-    } else {
-      // Erreur réseau/API transitoire (GAS lent, coupure...) : on garde la session intacte,
-      // sinon un simple aléa réseau déconnecte silencieusement le client (bug observé après
-      // un retour arrière qui relance le chargement de l'accueil).
-      setPage('home-erreur');
-    }
-  }
-}
-
-function renderHomeErreur() {
-  return `
-  <div id="app">
-    <div class="page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;text-align:center;gap:16px;">
-      <div style="font-size:40px;">📡</div>
-      <div style="font-size:15px;color:var(--muted);">Impossible de charger tes données.<br>Vérifie ta connexion.</div>
-      <button class="btn-primary" onclick="loadHome()" style="max-width:220px;">Réessayer</button>
-      <div class="list-item" onclick="deconnexion()" style="color:var(--red);">Se déconnecter</div>
-    </div>
-  </div>`;
-}
 
 // Extrait de _apresChargementHome pour pouvoir aussi être rappelé quand on
 // désactive le mode simplifié en cours de session (toggleModeSimplifie),
@@ -981,26 +763,20 @@ function renderHomeErreur() {
 function _chargerTop5Home() {
   setTimeout(async () => {
     try {
-      let cl;
-      if (isSupabase()) {
-        const [progRes, profilRes] = await Promise.all([
-          fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
-          fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
-        ]);
-        const progRows = progRes.ok ? await progRes.json() : [];
-        const profils = profilRes.ok ? await profilRes.json() : [];
-        const profilMap = {};
-        // Mode simplifié = ne pas apparaître dans le classement des autres.
-        profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
-        cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
-          id: p.client_id, nom: profilMap[p.client_id],
-          xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
-          titreActif: p.titre_actif || null,
-        }));
-      } else {
-        const raw = await api('listerClassement');
-        cl = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
-      }
+      const [progRes, profilRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
+      ]);
+      const progRows = progRes.ok ? await progRes.json() : [];
+      const profils = profilRes.ok ? await profilRes.json() : [];
+      const profilMap = {};
+      // Mode simplifié = ne pas apparaître dans le classement des autres.
+      profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+      const cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
+        id: p.client_id, nom: profilMap[p.client_id],
+        xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+        titreActif: p.titre_actif || null,
+      }));
       S.data.classement = cl;
       const el = document.getElementById('top5Home');
       if (el) el.outerHTML = renderTop5Home(cl);
@@ -1019,38 +795,25 @@ function _apresChargementHome() {
     setTimeout(() => ouvrirNotificationsClient(), 300);
   }
   // Détection déblocages niveau/titres — le coach voit ses propres passages
-  // de niveau/titres comme n'importe quel client (comme en GAS), seule la
-  // vue client (coach qui consulte le profil d'un autre) est exclue.
+  // de niveau/titres comme n'importe quel client, seule la vue client (coach
+  // qui consulte le profil d'un autre) est exclue.
   if (!_viewAsClientOverride) {
     setTimeout(() => verifierDeblocages(S.data.prog), 300);
   }
-  // fire-and-forget classement — lit un spreadsheet séparé (LOG_SHEET_ID), safe en concurrent
-  // Pas d'appel du tout en mode simplifié (comme le GAS : chargerTop5() n'est
-  // même pas invoquée), pas juste un masquage visuel.
+  // fire-and-forget classement, pas d'appel du tout en mode simplifié (le
+  // client ne doit pas apparaître dans le classement des autres).
   if (!modeSimplifieActif()) _chargerTop5Home();
-  // Badges coach : chargés en parallèle en arrière-plan, injectés dans le DOM
-  // dès que dispo (au lieu de bloquer l'affichage de l'accueil comme avant)
+  // Badge coach "Rapports" : chargé en parallèle en arrière-plan, injecté
+  // dans le DOM dès que dispo (au lieu de bloquer l'affichage de l'accueil).
   if (S.isCoach) {
-    api('listerBilansCoach').then(bilans => {
-      S.data.coachBilans = bilans;
-      const n = (bilans || []).filter(b => !b.coachTraite).length;
-      S.data.coachBilansCount = n;
-      const el = document.getElementById('badgeCentreBilans');
-      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
-    }).catch(() => { S.data.coachBilansCount = 0; });
-    api('chargerRapportsBugs').then(rapports => {
-      const n = rapports?.nonLus || 0;
-      S.data.bugsNonLus = n;
-      const el = document.getElementById('badgeRapports');
-      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
-    }).catch(() => { S.data.bugsNonLus = 0; });
-    api('chargerTousLesLogs').then(result => {
-      const lastSeen = result?.lastSeen || 0;
-      const n = (result?.logs || []).filter(l => l.tms > lastSeen).length;
-      S.data.notifsNonLues = n;
-      const el = document.getElementById('badgeNotifs');
-      if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e05c5c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
-    }).catch(() => { S.data.notifsNonLues = 0; });
+    fetch(`${SUPABASE_URL}/rest/v1/rapports_bugs?lu=eq.false&select=id`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        const n = rows.length;
+        S.data.bugsNonLus = n;
+        const el = document.getElementById('badgeRapports');
+        if (el) el.innerHTML = n > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${n}</div>` : '';
+      }).catch(() => { S.data.bugsNonLus = 0; });
   }
 }
 
@@ -1143,7 +906,7 @@ async function toggleModeSimplifie() {
   // réécrit document.body.innerHTML et détruirait le panneau réglages qu'on
   // vient de réafficher juste au-dessus (c'était le bug : le toggle semblait
   // ne prendre effet qu'après avoir rechargé l'app).
-  if (S.page === 'home') {
+  if (S.page === 'home-supabase') {
     _majCarteHeader();
     const top5El = document.getElementById('top5Home');
     if (nouveau) { if (top5El) top5El.innerHTML = ''; }
@@ -1292,126 +1055,31 @@ function ouvrirNotificationsClient() {
   }
 }
 
-function renderHome() {
-  const p = S.data.prog || {};
-  const nBilans = S.data.coachBilansCount || 0;
-
-  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(80px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
-
-    ${renderCarteHeader()}
-
-    ${renderCarteJournee(_journeeData)}
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-
-      <div onclick="goTo('training')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="2" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="35" y="18" width="7" height="8" rx="1.5" fill="#4f8ef7" opacity="0.3"/><rect x="8" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="31" y="14" width="5" height="16" rx="1.5" fill="#4f8ef7" opacity="0.6"/><rect x="13" y="20" width="18" height="4" rx="2" fill="#4f8ef7"/><circle cx="22" cy="9" r="3.5" fill="#6fa8ff" opacity="0.8"/><path d="M17 32 L19 40 L22 35 L25 40 L27 32" stroke="#6fa8ff" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Entraînement</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Saisir mes séances</div>
-      </div>
-
-      <div onclick="goTo('diete')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #3ecf8e;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M8 28 Q8 16 22 16 Q36 16 36 28 L34 32 H10 Z" fill="#3ecf8e" opacity="0.15"/><path d="M10 28 Q10 18 22 18 Q34 18 34 28" stroke="#3ecf8e" stroke-width="1.5" fill="none"/><rect x="8" y="28" width="28" height="4" rx="2" fill="#3ecf8e"/><path d="M18 16 Q18 8 22 6 Q26 8 26 16" stroke="#3ecf8e" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="22" cy="6" r="2.5" fill="#3ecf8e"/><line x1="14" y1="22" x2="30" y2="22" stroke="#3ecf8e" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Ma Diète</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Mon alimentation</div>
-      </div>
-
-      <div onclick="goTo('mensurations')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #a78bfa;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="4" y="36" width="7" height="4" rx="1" fill="#a78bfa" opacity="0.3"/><rect x="13" y="28" width="7" height="12" rx="1" fill="#a78bfa" opacity="0.5"/><rect x="22" y="20" width="7" height="20" rx="1" fill="#a78bfa" opacity="0.7"/><rect x="31" y="12" width="7" height="28" rx="1" fill="#a78bfa"/><polyline points="7.5,34 16.5,26 25.5,18 34.5,10" stroke="#c4b5fd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="34" r="2.5" fill="#c4b5fd"/><circle cx="34.5" cy="10" r="2.5" fill="#c4b5fd"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mensurations</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Ma progression</div>
-      </div>
-
-      <div onclick="goTo('bilan')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #f59e0b;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="8" y="5" width="26" height="34" rx="3" fill="#f59e0b" opacity="0.1"/><rect x="8" y="5" width="26" height="34" rx="3" stroke="#f59e0b" stroke-width="1.5"/><rect x="16" y="1" width="10" height="7" rx="2" fill="#f59e0b"/><line x1="14" y1="16" x2="30" y2="16" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="22" x2="30" y2="22" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><line x1="14" y1="28" x2="24" y2="28" stroke="#f59e0b" stroke-width="1" opacity="0.4"/><polyline points="15,34 19,38 29,28" stroke="#3ecf8e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mon Bilan</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bilan semaine</div>
-      </div>
-
-      <div onclick="goTo('recettes')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #f97316;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M10 12 Q10 8 22 8 Q34 8 34 12 L34 36 Q34 38 22 38 Q10 38 10 36 Z" fill="#f97316" fill-opacity="0.12" stroke="#f97316" stroke-width="1.5"/><line x1="16" y1="17" x2="28" y2="17" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="22" x2="28" y2="22" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><line x1="16" y1="27" x2="24" y2="27" stroke="#f97316" stroke-width="1.5" stroke-linecap="round"/><circle cx="30" cy="10" r="4" fill="#f97316"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Recettes</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Mes recettes coaching</div>
-      </div>
-
-      ${p.chimieActif ? `
-      <div onclick="loadProtocole()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #a78bfa;-webkit-tap-highlight-color:transparent;">
-        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🧬</div>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Protocole</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Cycle en cours</div>
-      </div>` : ''}
-
-      ${S.isCoach ? `
-      <div onclick="loadMesClients()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;">
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><circle cx="16" cy="15" r="5.5" fill="#4f8ef7" opacity="0.6"/><circle cx="28" cy="15" r="5.5" fill="#4f8ef7"/><path d="M5 36 Q5 26 16 26 Q22 26 22 26" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.6"/><path d="M22 26 Q28 26 39 26 Q39 36 39 36" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Mes clients</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Accéder aux profils</div>
-      </div>
-
-      <div onclick="loadCentreBilans()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #1D9E75;position:relative;-webkit-tap-highlight-color:transparent;">
-        <span id="badgeCentreBilans">${(S.data.coachBilansCount||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#1D9E75;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.coachBilansCount}</div>` : ''}</span>
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><rect x="10" y="7" width="24" height="30" rx="3" stroke="#1D9E75" stroke-width="1.5" fill="#1D9E75" fill-opacity="0.12"/><line x1="15" y1="15" x2="29" y2="15" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="21" x2="29" y2="21" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="27" x2="23" y2="27" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round"/><circle cx="31" cy="31" r="6" fill="#1D9E75"/><polyline points="28,31 30,33 34,29" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Centre bilans</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bilans reçus à traiter</div>
-      </div>
-
-      <div onclick="loadNotificationsCoach()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #4f8ef7;position:relative;-webkit-tap-highlight-color:transparent;">
-        <span id="badgeNotifs">${(S.data.notifsNonLues||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e05c5c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.notifsNonLues}</div>` : ''}</span>
-        <svg width="38" height="38" viewBox="0 0 44 44" fill="none" style="margin-bottom:8px;"><path d="M22 6 C15 6 11 12 11 20 L11 29 L7 33 L37 33 L33 29 L33 20 C33 12 29 6 22 6 Z" fill="#4f8ef7" opacity="0.15" stroke="#4f8ef7" stroke-width="1.5"/><path d="M18 33 Q18 37 22 37 Q26 37 26 33" stroke="#4f8ef7" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Notifications</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Activité clients</div>
-      </div>
-
-      <div onclick="loadRapportsBugs()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:18px 14px;text-align:center;cursor:pointer;border-top:3px solid #555e7a;position:relative;-webkit-tap-highlight-color:transparent;">
-        <span id="badgeRapports">${(S.data.bugsNonLus||0) > 0 ? `<div style="position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${S.data.bugsNonLus}</div>` : ''}</span>
-        <div style="font-size:38px;margin-bottom:8px;line-height:1;">🐛</div>
-        <div style="font-size:13px;font-weight:600;color:#e8eaf0;">Rapports</div>
-        <div style="font-size:11px;color:#8892a4;margin-top:3px;">Bugs signalés</div>
-      </div>
-` : ''}
-
-    </div>
-
-    <div id="top5Home"></div>
-
-  ${renderNavBar('home')}
-  </div>`;
-}
-
-
-
-// ── Classement ────────────────────────────────────────────────────────
 async function loadClassement() {
   showLoadingOverlay('Chargement…');
   try {
-    if (isSupabase()) {
-      // Classement Supabase : uniquement les clients supabase_only
-      const [progRes, profilRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
-        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
-      ]);
-      const progRows = progRes.ok ? await progRes.json() : [];
-      const profils = profilRes.ok ? await profilRes.json() : [];
-      const profilMap = {};
-      // Mode simplifié = ne pas apparaître dans le classement des autres.
-      profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
-      // Garde uniquement les clients supabase_only ayant une progression
-      S.data.classement = progRows
-        .filter(p => profilMap[p.client_id])
-        .map(p => ({
-          id: p.client_id,
-          nom: profilMap[p.client_id],
-          xpTotal: p.xp_total || 0,
-          niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
-          titreActif: p.titre_actif || null,
-        }));
-    } else {
-      const raw = await api('listerClassement');
-      S.data.classement = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
-    }
+    // Classement : uniquement les clients supabase_only ayant une progression
+    const [progRes, profilRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
+    ]);
+    const progRows = progRes.ok ? await progRes.json() : [];
+    const profils = profilRes.ok ? await profilRes.json() : [];
+    const profilMap = {};
+    // Mode simplifié = ne pas apparaître dans le classement des autres.
+    profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+    S.data.classement = progRows
+      .filter(p => profilMap[p.client_id])
+      .map(p => ({
+        id: p.client_id,
+        nom: profilMap[p.client_id],
+        xpTotal: p.xp_total || 0,
+        niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+        titreActif: p.titre_actif || null,
+      }));
     hideLoadingOverlay();
     setPage('classement');
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); loadHomeSupabase(); }
 }
 
 function renderClassement() {
@@ -2007,7 +1675,11 @@ async function envoyerBugReport() {
   const btn = panel?.querySelector('button[onclick="envoyerBugReport()"]');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi...'; }
   try {
-    await api('envoyerRapportBug', { message: desc });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rapports_bugs`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ client_id: S.client, message: desc })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     if (panel) panel.remove();
     showToast('✅ Rapport envoyé, ton coach a été prévenu.', '#1D9E75');
   } catch(e) {
@@ -2018,17 +1690,8 @@ async function envoyerBugReport() {
 
 // ── Journée en cours modal ────────────────────────────────────────────
 function ouvrirJourneeModal() {
-  if (isSupabase()) { if (!_journeeData || _journeeData.aucun || _journeeData.valide) return; _afficherModalJourneeSupabase(); return; }
-  if (!_journeeData || _journeeData.aucun) return;
-  if (_journeeData.valide) return; // déjà validée, la carte l'affiche
-  // La fenêtre s'ouvre tout de suite avec les données déjà connues (celles de
-  // la carte accueil) ; on rafraîchit ensuite en arrière-plan sans bloquer.
-  _afficherModalJournee(true);
-  api('chargerDonneesJournee', { ligne: _journeeData.ligne }).then(fresh => {
-    if (fresh) { _journeeData.diete = fresh.diete; _journeeData.steps = fresh.steps; _journeeData.training = fresh.training; _journeeData.cardio = fresh.cardio; }
-  }).catch(() => {}).finally(() => {
-    if (document.getElementById('modalJournee')) _afficherModalJournee(false);
-  });
+  if (!_journeeData || _journeeData.aucun || _journeeData.valide) return;
+  _afficherModalJourneeSupabase();
 }
 
 function _majCarteJournee() {
@@ -2036,100 +1699,11 @@ function _majCarteJournee() {
   if (carte) carte.outerHTML = renderCarteJournee(_journeeData);
 }
 
-function _afficherModalJournee(refreshing) {
-  const existant = document.getElementById('modalJournee');
-  if (existant) existant.remove();
-  const d = _journeeData;
-  const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
-  const jourNom = JOURS[new Date(Date.now() - 2*3600*1000).getDay()];
-  const modal = document.createElement('div');
-  modal.id = 'modalJournee';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
-  modal.innerHTML = `
-    <div class="sheet-body" style="position:relative;background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;">
-      ${refreshing ? `<div style="position:absolute;inset:0;background:rgba(26,31,53,0.85);border-radius:20px 20px 0 0;z-index:2;display:flex;align-items:center;justify-content:center;"><div class="spin"></div></div>` : ''}
-      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:0 auto 20px;"></div>
-      <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Journée en cours</div>
-      <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:20px;">${jourNom}</div>
-      <div style="display:flex;gap:8px;margin-bottom:16px;">
-        <button id="jTogDiete" onclick="toggleJourneeField('diete')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.diete?'#1D9E75':'#2d3142'};">${d.diete?'✓ ':''}Diète</button>
-        <button id="jTogTraining" onclick="toggleJourneeField('training')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.training?'#1D9E75':'#2d3142'};">${d.training?'✓ ':''}Training</button>
-        <button id="jTogCardio" onclick="toggleJourneeField('cardio')" style="flex:1;padding:12px 6px;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;background:${d.cardio?'#1D9E75':'#2d3142'};">${d.cardio?'✓ ':''}Cardio</button>
-      </div>
-      <div style="margin-bottom:20px;">
-        <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">STEPS</div>
-        <input id="jSteps" type="text" inputmode="numeric" value="${fmtFR(d.steps)}" placeholder="ex: 10200"
-          onchange="sauverStepsJournee(this.value)"
-          style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
-        <div id="jStepsErr" style="display:none;font-size:11px;color:#e05252;margin-top:4px;">⚠️ Rentre tes steps en nombre entier (ex: 10200 pour 10 200 pas)</div>
-      </div>
-      <button id="btnValiderJournee" onclick="validerJourneeClient()" style="width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75,#167a5a);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">✅ Valider ma journée</button>
-      <button onclick="document.getElementById('modalJournee').remove()" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-  attacherSwipeFermeture(modal);
-}
-
-function toggleJourneeField(type) {
-  if (isSupabase()) { toggleJourneeFieldSupabase(type); return; }
-  if (!_journeeData) return;
-  _journeeData[type] = !_journeeData[type];
-  const cols = { diete: 14, training: 18, cardio: 19 };
-  api('enregistrerValeur', { nomFeuille: 'Bilan', ligne: _journeeData.ligne, colonne: cols[type], valeur: _journeeData[type] }).catch(() => {});
-  const labels = { diete: 'Diète', training: 'Training', cardio: 'Cardio' };
-  const id = { diete: 'jTogDiete', training: 'jTogTraining', cardio: 'jTogCardio' };
-  const btn = document.getElementById(id[type]);
-  if (btn) { btn.style.background = _journeeData[type] ? '#1D9E75' : '#2d3142'; btn.textContent = (_journeeData[type] ? '✓ ' : '') + labels[type]; }
-}
-
-function sauverStepsJournee(val) {
-  if (isSupabase()) { sauverStepsJourneeSupabase(val); return; }
-  if (!_journeeData) return;
-  const v = parseSteps(val);
-  const errEl = document.getElementById('jStepsErr');
-  if (errEl) errEl.style.display = (v !== '' && v > 0 && v < 1000) ? 'block' : 'none';
-  _journeeData.steps = v;
-  // pasTotal (chargerProgressionClient) compte les steps de la semaine en
-  // cours même non validée — un titre "pas cumulés" peut donc se débloquer
-  // dès la saisie, sans attendre "Valider ma journée".
-  api('enregistrerValeur', { nomFeuille: 'Bilan', ligne: _journeeData.ligne, colonne: 17, valeur: v })
-    .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
-    .catch(() => {});
-}
-
+function toggleJourneeField(type) { toggleJourneeFieldSupabase(type); }
+function sauverStepsJournee(val) { sauverStepsJourneeSupabase(val); }
 async function validerJourneeClient() {
-  if (isSupabase()) { await validerJourneeClientSupabase(); return; }
-  if (!_journeeData) return;
-  const stepsEl = document.getElementById('jSteps');
-  if (stepsEl) sauverStepsJournee(stepsEl.value);
-  const btn = document.getElementById('btnValiderJournee');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
-  try {
-    const res = await api('validerJournee', { ligne: _journeeData.ligne, semaine: _journeeData.semaine });
-    _journeeData.valide = true;
-    const modal = document.getElementById('modalJournee');
-    if (modal) modal.remove();
-    _majCarteJournee();
-    setTimeout(() => rafraichirProgressionEtDeblocages(), 300);
-    const xpBase = (res && typeof res === 'object') ? (res.xp || 0) : (res || 0);
-    const bonusPas = (res && typeof res === 'object') ? (res.bonusPas || 0) : 0;
-    const xpTotal = xpBase + bonusPas;
-    if (xpTotal > 0) {
-      const flash = document.createElement('div');
-      flash.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1D9E75;color:#fff;padding:20px 32px;border-radius:18px;font-size:22px;font-weight:700;z-index:9999;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);';
-      flash.innerHTML = '🎉 +' + xpTotal + ' XP'
-        + (bonusPas > 0 ? '<div style="font-size:12px;margin-top:4px;opacity:.85;">🦶 Objectif pas atteint !</div>' : '')
-        + '<div style="font-size:13px;margin-top:6px;font-weight:400;opacity:.85;">Journée validée !</div>';
-      document.body.appendChild(flash);
-      setTimeout(() => { flash.style.transition = 'opacity .5s'; flash.style.opacity = '0'; setTimeout(() => flash.remove(), 500); }, 2200);
-    }
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
-    alert('Erreur lors de la validation.');
-  }
+  await validerJourneeClientSupabase();
 }
-
 // ── Journée en cours — mode Supabase ─────────────────────────────────
 // La carte "Journée en cours" écrit directement dans jours[jourIdx] du
 // bilan hebdo Supabase en cours (même source de vérité que la page Bilan
@@ -2286,14 +1860,13 @@ function _showLevelUpModal(niveau) {
 }
 
 function deconnexion() {
-  if (localStorage.getItem('at_auth_mode') === 'supabase') { sbAuth.auth.signOut().catch(()=>{}); }
+  sbAuth.auth.signOut().catch(()=>{});
   localStorage.removeItem('at_token');
   localStorage.removeItem('at_client');
   localStorage.removeItem('at_coach');
   localStorage.removeItem('at_auth_mode');
   S.client = ''; S.token = ''; S.isCoach = false; S.data = {};
-  _loginStep = 'identifiant'; _loginClient = ''; _loginAuthMode = 'gas';
-  _resetPrechargement();
+  _loginStep = 'identifiant'; _loginClient = '';
   setPage('login');
 }
 
@@ -2346,20 +1919,16 @@ function renderNavBar(active) {
 function bindNav() {}
 
 function goTo(page) {
-  if (isSupabase()) {
-    if (page === 'home')     { loadHomeSupabase(); return; }
-    if (page === 'training') { loadProgrammeClient(); return; }
-  }
-  if (page === 'home')        loadHome();
-  else if (page === 'bilan')    loadBilan();
-  else if (page === 'training') loadTraining();
-  else if (page === 'diete')         loadDiete();
-  else if (page === 'mensurations')  loadMensurations();
-  else if (page === 'recettes')      loadRecettes();
-  else if (page === 'roadmap')       loadRoadmap();
-  else if (page === 'classement')   loadClassement();
-  else if (page === 'progression')  loadProgression();
-  else if (page === 'collection')   loadCollection();
+  if (page === 'home')             loadHomeSupabase();
+  else if (page === 'training')    loadProgrammeClient();
+  else if (page === 'bilan')       loadBilan();
+  else if (page === 'diete')       loadDiete();
+  else if (page === 'mensurations') loadMensurations();
+  else if (page === 'recettes')    loadRecettes();
+  else if (page === 'roadmap')     loadRoadmap();
+  else if (page === 'classement')  loadClassement();
+  else if (page === 'progression') loadProgression();
+  else if (page === 'collection')  loadCollection();
   else if (page === 'programme-client') loadProgrammeClient();
   else setPage(page);
 }
@@ -2411,7 +1980,7 @@ if (S.token && S.client) {
         if (estCoachReel !== S.isCoach) {
           S.isCoach = estCoachReel;
           localStorage.setItem('at_coach', estCoachReel ? '1' : '0');
-          if (S.page === 'home') loadHomeSupabase();
+          if (S.page === 'home-supabase') loadHomeSupabase();
         }
       }).catch(() => {});
     loadHomeSupabase();

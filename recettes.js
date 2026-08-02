@@ -8,31 +8,18 @@ let _rNom     = '';
 async function loadRecettes() {
   setPage('recettes-loading');
   try {
-    if (isSupabase()) {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/recettes?order=nom.asc`, { headers: supaHeaders() });
-      _rList = res.ok ? await res.json() : [];
-    } else {
-      _rList = await api('listerRecettes');
-    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/recettes?order=nom.asc`, { headers: supaHeaders() });
+    _rList = res.ok ? await res.json() : [];
     _rSubPage = 'list';
     setPage('recettes');
-  } catch(e) { setPage('home'); }
+  } catch(e) { loadHomeSupabase(); }
 }
 
-async function ouvrirRecette(idOuFileId, nom) {
+async function ouvrirRecette(id, nom) {
   _rNom = nom;
-  if (isSupabase()) {
-    _rDetail  = _rList.find(r => r.id == idOuFileId) || null;
-    _rSubPage = 'detail';
-    setPage('recettes');
-    return;
-  }
-  setPage('recettes-loading');
-  try {
-    _rDetail  = await api('chargerRecette', { fileId: idOuFileId });
-    _rSubPage = 'detail';
-    setPage('recettes');
-  } catch(e) { setPage('recettes'); }
+  _rDetail  = _rList.find(r => r.id == id) || null;
+  _rSubPage = 'detail';
+  setPage('recettes');
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -56,7 +43,7 @@ function renderRecetteList() {
 
   const rows = _rList.map(r => {
     const emoji = r.emoji || '🍽️';
-    const id    = isSupabase() ? r.id : r.id;
+    const id    = r.id;
     const nom   = r.nom || '';
     const meta  = [
       r.categorie    ? r.categorie                        : '',
@@ -91,37 +78,7 @@ function renderRecetteList() {
 }
 
 function renderRecetteDetail() {
-  const data = _rDetail;
-  // Mode Supabase : structure { nom, emoji, description, categorie, ingredients (jsonb), etapes (jsonb), macros }
-  if (isSupabase()) return renderRecetteDetailSupabase(data);
-
-  // Mode GAS : elements []
-  let html = '';
-  let inList = false;
-  (data.elements || []).forEach(el => {
-    if (el.type === 'li') {
-      if (!inList) { html += '<div style="background:#0f1117;border-radius:10px;padding:12px 16px;margin-bottom:10px;"><ul style="margin:0;padding-left:18px;">'; inList = true; }
-      html += `<li style="color:#c8d0e0;font-size:14px;margin-bottom:7px;line-height:1.6;padding-left:${(el.indent||0)*12}px;">${el.text}</li>`;
-    } else {
-      if (inList) { html += '</ul></div>'; inList = false; }
-      if      (el.type === 'h1') html += `<div style="font-size:17px;font-weight:700;color:#f97316;margin:20px 0 10px;padding-bottom:8px;border-bottom:1px solid #f9731633;">${el.text}</div>`;
-      else if (el.type === 'h2') html += `<div style="font-size:15px;font-weight:700;margin:16px 0 8px;">${el.text}</div>`;
-      else if (el.type === 'h3') html += `<div style="font-size:12px;font-weight:700;color:#f97316cc;margin:12px 0 6px;text-transform:uppercase;letter-spacing:1px;">${el.text}</div>`;
-      else if (el.type === 'p')  html += `<div style="font-size:14px;color:#c8d0e0;line-height:1.7;margin-bottom:8px;">${el.text}</div>`;
-      else if (el.type === 'br') html += '<div style="height:6px;"></div>';
-    }
-  });
-  if (inList) html += '</ul></div>';
-
-  return `<div id="app">
-    ${renderHeader(esc(_rNom || data.nom || 'Recette'), '', false)}
-    <div class="page">
-      <button class="btn-secondary" onclick="loadRecettes()" style="margin-bottom:16px;">← Toutes les recettes</button>
-      <div style="font-size:20px;font-weight:700;color:#f97316;margin-bottom:18px;line-height:1.3;">${esc(data.nom || _rNom)}</div>
-      ${html}
-    </div>
-    ${renderNavBar('recettes')}
-  </div>`;
+  return renderRecetteDetailSupabase(_rDetail);
 }
 
 function renderRecetteDetailSupabase(r) {

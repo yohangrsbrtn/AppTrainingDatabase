@@ -118,14 +118,10 @@ function sauvegarderSeenTitresSupabase(count) {
 async function loadProgression() {
   showLoadingOverlay('Chargement…');
   try {
-    if (isSupabase()) {
-      S.data.prog = await chargerProgressionSupabase();
-    } else {
-      S.data.prog = await api('chargerProgressionClient');
-    }
+    S.data.prog = await chargerProgressionSupabase();
     hideLoadingOverlay();
     setPage('progression');
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+  } catch(e) { hideLoadingOverlay(); loadHomeSupabase(); }
 }
 
 // Jauge en demi-cercle (séances / bilans / assiduité) — identique au GAS

@@ -102,8 +102,7 @@ async function loadCollection() {
   showLoadingOverlay('Chargement…');
   try {
     if (!S.data.prog) {
-      if (isSupabase()) S.data.prog = await chargerProgressionSupabase();
-      else S.data.prog = await api('chargerProgressionClient');
+      S.data.prog = await chargerProgressionSupabase();
     }
     try {
       _colTitreActif = localStorage.getItem('titreActif_' + S.client)
@@ -118,9 +117,8 @@ async function loadCollection() {
     const totalDebloques = TITRES_DEF.filter(b => (b.cat==='pas'?pt:b.cat==='bilan'?nb:b.cat==='seance'?(p.seancesValidees||0):(p.niveau||0)) >= b.seuil).length;
     try { localStorage.setItem('seenTitres_' + S.client, totalDebloques); } catch(e) {}
     p.seenTitres = totalDebloques;
-    if (isSupabase()) sauvegarderSeenTitresSupabase(totalDebloques);
-    else api('sauvegarderSeenTitres', { count: totalDebloques }).catch(() => {});
-  } catch(e) { hideLoadingOverlay(); setPage('home'); }
+    sauvegarderSeenTitresSupabase(totalDebloques);
+  } catch(e) { hideLoadingOverlay(); loadHomeSupabase(); }
 }
 
 function _colVal(cat) {
@@ -137,8 +135,7 @@ function activerTitre(id) {
   if (!def || _colVal(def.cat) < def.seuil) return;
   _colTitreActif = (_colTitreActif === id) ? null : id;
   try { localStorage.setItem('titreActif_' + S.client, _colTitreActif || ''); } catch(e) {}
-  if (isSupabase()) sauvegarderTitreActifSupabase(_colTitreActif);
-  else api('sauvegarderTitreActif', { titreId: _colTitreActif || '' }).catch(() => {});
+  sauvegarderTitreActifSupabase(_colTitreActif);
   setPage('collection');
 }
 
@@ -277,10 +274,9 @@ function verifierDeblocages(p) {
 async function rafraichirProgressionEtDeblocages() {
   if (_viewAsClientOverride) return;
   try {
-    const p = isSupabase() ? await chargerProgressionSupabase() : await api('chargerProgressionClient');
+    const p = await chargerProgressionSupabase();
     S.data.prog = p;
-    if (typeof _pf !== 'undefined' && _pf.home) _pf.home.prog = p;
-    if (S.page === 'home' && typeof _majCarteHeader === 'function') _majCarteHeader();
+    if (S.page === 'home-supabase' && typeof _majCarteHeader === 'function') _majCarteHeader();
     verifierDeblocages(p);
   } catch(e) {}
 }
