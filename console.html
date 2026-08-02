@@ -576,6 +576,9 @@ let _bilanNavSource = null; // 'fiche' | 'bilans'
 let _ficheMensurationsClientId = null;
 let _ficheMensurations = null;
 let _ficheMensurationsLoading = false;
+// Filtre période pour les graphes/écart de la fiche client : mode 'tout' (tout l'historique),
+// 'phase' (une valeur de mensurations.phase précise) ou 'custom' (plage de dates libre).
+let _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
 let _ficheProtocoleClientId = null;
 let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
 let _ficheProtocoleLoading = false;
@@ -4647,6 +4650,82 @@ function _mensHoverOut(cid) {
   const tip=document.getElementById(cid+'_tip'); if(tip) tip.style.display='none';
 }
 
+// ── Filtre période (phase ou plage de dates libre) — fiche client Mensurations ──────────
+// rows doit être trié par date croissante. Ne filtre QUE ce qui alimente graphes/écart —
+// le tableau d'historique en dessous reste complet (édition toujours possible sur tout
+// l'historique, indépendamment du filtre d'affichage).
+function _mensFiltrerParPeriode(rows, filtre) {
+  if (!filtre || filtre.mode === 'tout') return rows;
+  if (filtre.mode === 'phase') return rows.filter(r => (r.phase || null) === filtre.phase);
+  if (filtre.mode === 'custom') {
+    return rows.filter(r => r.date && (!filtre.debut || r.date >= filtre.debut) && (!filtre.fin || r.date <= filtre.fin));
+  }
+  return rows;
+}
+
+// Liste des phases distinctes présentes dans l'historique complet (pas le filtré), les plus
+// récentes d'abord — sert à peupler le sélecteur de période.
+function _mensPhasesDisponibles(rowsAsc) {
+  const seen = new Set(); const out = [];
+  for (let i = rowsAsc.length - 1; i >= 0; i--) {
+    const p = rowsAsc[i].phase;
+    if (p && !seen.has(p)) { seen.add(p); out.push(p); }
+  }
+  return out;
+}
+
+// Premier/dernier point non-null (chronologique) pour chaque métrique disponible dans la
+// sélection — "écart de poids et des autres mensurations" sur la période choisie.
+function _mensEcartHtml(rowsFiltres) {
+  if (!rowsFiltres || rowsFiltres.length < 2) return '';
+  const metriques = [{ k:'poids', label:'Poids', unit:' kg' }, { k:'mesure', label:'Tour de taille', unit:' cm' }]
+    .concat(MENS_COLS.map((k,i) => ({ k, label: MENS_LABELS[i], unit:' cm' })));
+  const cards = metriques.map(m => {
+    const pts = rowsFiltres.map(r => parseFloat(r[m.k])).map((v,i) => ({ v, date: rowsFiltres[i].date })).filter(p => !isNaN(p.v) && p.v > 0);
+    if (pts.length < 2) return '';
+    const debut = pts[0].v, fin = pts[pts.length-1].v;
+    const delta = Math.round((fin - debut) * 10) / 10;
+    const signe = delta > 0 ? '+' : '';
+    const col = delta === 0 ? 'var(--text-faint)' : (delta < 0 ? 'var(--success)' : 'var(--critical)');
+    return `<div class="table-card" style="flex:1;min-width:130px;padding:10px 14px;">
+      <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">${esc(m.label)}</div>
+      <div style="font-size:13px;color:var(--text-muted);">${debut}${m.unit} → ${fin}${m.unit}</div>
+      <div style="font-size:16px;font-weight:700;color:${col};">${signe}${delta}${m.unit}</div>
+    </div>`;
+  }).filter(Boolean).join('');
+  if (!cards) return '';
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">${cards}</div>`;
+}
+
+// Sélecteur de période (dropdown phase/plage + inputs date si 'custom') — mode et setter
+// paramétrés pour être réutilisable sur la fiche client comme sur la page Mensurations autonome.
+function _renderMensPeriodeFiltre(rowsAsc, filtre, onChangeFnName) {
+  const phases = _mensPhasesDisponibles(rowsAsc);
+  const opts = `<option value="tout" ${filtre.mode==='tout'?'selected':''}>Tout l'historique</option>`
+    + phases.map(p => `<option value="phase:${esc(p)}" ${filtre.mode==='phase'&&filtre.phase===p?'selected':''}>Phase : ${esc(p)}</option>`).join('')
+    + `<option value="custom" ${filtre.mode==='custom'?'selected':''}>Plage de dates…</option>`;
+  const dateInputs = filtre.mode === 'custom' ? `
+    <input type="date" value="${esc(filtre.debut||'')}" onchange="${onChangeFnName}('custom:debut:'+this.value)" style="font-size:13px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;">
+    <span style="color:var(--text-faint);font-size:12px;">→</span>
+    <input type="date" value="${esc(filtre.fin||'')}" onchange="${onChangeFnName}('custom:fin:'+this.value)" style="font-size:13px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;">` : '';
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">Période</label>
+    <select onchange="${onChangeFnName}(this.value)" style="font-size:13px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;">${opts}</select>
+    ${dateInputs}
+  </div>`;
+}
+
+function _setFicheMensPeriode(val) {
+  if (val.startsWith('custom:debut:')) _ficheMensPeriode = { ..._ficheMensPeriode, mode:'custom', debut: val.slice(13) || null };
+  else if (val.startsWith('custom:fin:')) _ficheMensPeriode = { ..._ficheMensPeriode, mode:'custom', fin: val.slice(11) || null };
+  else if (val === 'custom') _ficheMensPeriode = { mode:'custom', phase:null, debut:_ficheMensPeriode.debut||null, fin:_ficheMensPeriode.fin||null };
+  else if (val.startsWith('phase:')) _ficheMensPeriode = { mode:'phase', phase: val.slice(6), debut:null, fin:null };
+  else _ficheMensPeriode = { mode:'tout', phase:null, debut:null, fin:null };
+  const c = data.clients.find(x => x.id === _ficheMensurationsClientId);
+  const el = document.getElementById('ficheTabContent');
+  if (el && ficheTab === 'mensurations') el.innerHTML = renderFicheMensurationsTab(c);
+}
+
 // selKeys : Set des mensurations actives — multi-sélection, chaque pill toggle son
 // appartenance au Set (au moins une reste sélectionnée) pour superposer plusieurs
 // courbes sur le même graphique (_buildMensChart accepte déjà keys/colors/labels en tableau).
@@ -4686,6 +4765,7 @@ function renderFicheMensurationsTab(c){
     _ficheMensurationsClientId = c.id;
     _ficheMensurations = null;
     _ficheMensurationsLoading = false;
+    _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
   }
   if (_ficheMensurations === null) {
     if (!_ficheMensurationsLoading) {
@@ -4715,9 +4795,14 @@ function renderFicheMensurationsTab(c){
   }
 
   const rows = _ficheMensurations;
-  const chart1 = rows.length>=2 ? _buildMensChart('fiche_c1', rows, ['poids','mesure'], ['var(--accent)','#4caf50'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
-  const hasAutres = rows.some(r=>MENS_COLS.some(k=>parseFloat(r[k])>0));
-  const chart2Section = hasAutres ? _renderMens2Section(rows,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2') : '';
+  const rowsFiltres = _mensFiltrerParPeriode(rows, _ficheMensPeriode);
+  const periodeFiltreHtml = _renderMensPeriodeFiltre(rows, _ficheMensPeriode, '_setFicheMensPeriode');
+  const ecartHtml = _mensEcartHtml(rowsFiltres);
+  const chart1 = rowsFiltres.length>=2 ? _buildMensChart('fiche_c1', rowsFiltres, ['poids','mesure'], ['var(--accent)','#4caf50'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
+  const hasAutres = rowsFiltres.some(r=>MENS_COLS.some(k=>parseFloat(r[k])>0));
+  const chart2Section = hasAutres ? _renderMens2Section(rowsFiltres,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2') : '';
+  const chartsVides = !chart1 && !chart2Section
+    ? `<div style="font-size:13px;color:var(--text-faint);text-align:center;padding:20px;">Pas assez de données sur cette période.</div>` : '';
 
   const tableRows = [...rows].reverse().map(r => {
     const dateFr = (r.date||'').split('-').reverse().join('/');
@@ -4743,8 +4828,11 @@ function renderFicheMensurationsTab(c){
     <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
       <button class="btn primary" onclick="ouvrirModalMensuration('${c.id}',null)">+ Ajouter</button>
     </div>
+    ${periodeFiltreHtml}
+    ${ecartHtml}
     ${chart1 ? `<h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin:0 0 10px;">Poids &amp; Tour de taille</h4>${chart1}` : ''}
     ${chart2Section ? `<h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin:20px 0 10px;">Autres mensurations</h4><div id="ficheMensChart2">${chart2Section}</div>` : ''}
+    ${chartsVides}
     <div class="table-scroll" style="margin-top:20px;"><table class="alim-table">
       <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th><th></th></tr></thead>
       <tbody>${tableRows}</tbody>
