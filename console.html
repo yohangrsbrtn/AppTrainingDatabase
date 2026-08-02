@@ -1335,16 +1335,47 @@ async function chargerHistoriqueNotifs(){
   const ids = envois.map(e => e.id);
   let luByKey = {};
   if (ids.length) {
-    const resLu = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?envoi_id=in.(${ids.join(',')})&select=envoi_id,client_id,lu`, { headers: supaHeaders() });
-    if (resLu.ok) (await resLu.json()).forEach(r => { luByKey[r.envoi_id + '|' + r.client_id] = r.lu; });
+    const resLu = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?envoi_id=in.(${ids.join(',')})&select=envoi_id,client_id,lu,lu_at`, { headers: supaHeaders() });
+    if (resLu.ok) (await resLu.json()).forEach(r => { luByKey[r.envoi_id + '|' + r.client_id] = { lu: r.lu, lu_at: r.lu_at }; });
   }
   notifHistoData = { loaded: true, envois: envois.map(e => ({
     ...e,
-    destinataires: (e.notif_envoi_destinataires || []).map(d => ({
-      client_id: d.client_id, supprime: d.supprime,
-      lu: luByKey[e.id + '|' + d.client_id] === true
-    }))
+    destinataires: (e.notif_envoi_destinataires || []).map(d => {
+      const info = luByKey[e.id + '|' + d.client_id] || {};
+      return { client_id: d.client_id, supprime: d.supprime, lu: info.lu === true, lu_at: info.lu_at || null };
+    })
   })) };
+}
+
+// ── Onglet "Rappels automatiques" (bilan + journée) ─────────────────────
+let notifRappelsData = { loaded:false, rows:[] };
+
+async function chargerNotifsRappels(){
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/client_notifications?source=in.(rappel_bilan,rappel_journee)&order=created_at.desc&limit=300&select=id,client_id,title,body,source,lu,lu_at,created_at`,
+    { headers: supaHeaders() }
+  );
+  notifRappelsData = { loaded: true, rows: res.ok ? await res.json() : [] };
+}
+
+function _fmtNotifDate(iso){
+  return iso ? new Date(iso).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+}
+
+function _renderNotifRappelsList(){
+  const rows = notifRappelsData.rows;
+  if (!rows.length) return `<div class="fiche-prog-empty" style="text-align:center;padding:32px;"><div style="font-size:14px;color:var(--text-muted);">Aucun rappel automatique envoyé pour l'instant.</div></div>`;
+  const labelSource = s => s === 'rappel_bilan' ? 'RAPPEL BILAN' : 'RAPPEL JOURNÉE';
+  return rows.map(r => `
+    <div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
+      <div style="display:flex;justify-content:space-between;width:100%;gap:10px;">
+        <div style="min-width:0;">
+          <div class="p-nom">${esc(_nomClient(r.client_id))} <span style="font-size:10px;font-weight:700;color:var(--accent);">${labelSource(r.source)}</span></div>
+          <div class="p-meta" style="white-space:normal;">${esc(r.title)} — ${esc(r.body)}</div>
+        </div>
+      </div>
+      <div class="p-meta">Envoyé le ${_fmtNotifDate(r.created_at)} · ${r.lu ? `Lu le ${_fmtNotifDate(r.lu_at)}` : 'Non lu'}</div>
+    </div>`).join('');
 }
 
 let _notifSelClients = new Set();
@@ -1352,17 +1383,38 @@ let _notifSelTitre = '';
 let _notifSelCorps = '';
 let _notifSelPlein = false;
 
+let _notifTab = 'manuel'; // 'manuel' | 'rappels'
+
+function setNotifTab(tab){
+  _notifTab = tab;
+  renderMain();
+}
+
 function renderNotificationsPage(el){
+  const spinner = '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>';
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Notifications</h1></div>
       <button class="btn primary" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
     </div>
-    ${_renderNotifEnvoyerSection()}
-    <h2 style="font-size:15px;margin:28px 0 12px;">Historique</h2>
-    <div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>'}</div>`;
-  if (!notifHistoData.loaded) {
-    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications') renderMain(); });
+    <div class="fiche-tabs" style="margin-bottom:16px;">
+      <button class="fiche-tab ${_notifTab==='manuel'?'active':''}" onclick="setNotifTab('manuel')">Envoi manuel</button>
+      <button class="fiche-tab ${_notifTab==='rappels'?'active':''}" onclick="setNotifTab('rappels')">Rappels automatiques</button>
+    </div>
+    ${_notifTab === 'manuel' ? `
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:1;min-width:340px;">${_renderNotifEnvoyerSection()}</div>
+        <div style="flex:1;min-width:340px;">
+          <h2 style="font-size:15px;margin:0 0 12px;">Historique</h2>
+          <div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : spinner}</div>
+        </div>
+      </div>` : `
+      <div id="notifRappelsList">${notifRappelsData.loaded ? _renderNotifRappelsList() : spinner}</div>`}`;
+  if (_notifTab === 'manuel' && !notifHistoData.loaded) {
+    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications' && _notifTab === 'manuel') renderMain(); });
+  }
+  if (_notifTab === 'rappels' && !notifRappelsData.loaded) {
+    chargerNotifsRappels().then(() => { if (state.nav === 'notifications' && _notifTab === 'rappels') renderMain(); });
   }
 }
 
@@ -1443,7 +1495,7 @@ function _renderNotifHistoList(){
     const dest = e.destinataires;
     const actifs = dest.filter(d => !d.supprime);
     const luCount = actifs.filter(d => d.lu).length;
-    const noms = dest.map(d => `${esc(_nomClient(d.client_id))}${d.supprime ? ' (supprimée)' : (d.lu ? ' ✓ lu' : '')}`).join(', ');
+    const noms = dest.map(d => `${esc(_nomClient(d.client_id))}${d.supprime ? ' (supprimée)' : (d.lu ? ` ✓ lu le ${_fmtNotifDate(d.lu_at)}` : ' (non lu)')}`).join(', ');
     return `
     <div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
       <div style="display:flex;justify-content:space-between;width:100%;gap:10px;">
@@ -1451,7 +1503,7 @@ function _renderNotifHistoList(){
           <div class="p-nom">${esc(e.title)}${e.plein_ecran ? ' <span style="font-size:10px;font-weight:700;color:var(--accent);">PLEIN ÉCRAN</span>' : ''}</div>
           <div class="p-meta" style="white-space:normal;">${esc(e.body)}</div>
         </div>
-        <div class="p-meta" style="flex-shrink:0;text-align:right;">${new Date(e.created_at).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+        <div class="p-meta" style="flex-shrink:0;text-align:right;">Envoyé le ${_fmtNotifDate(e.created_at)}</div>
       </div>
       <div class="p-meta" style="white-space:normal;">Envoyé à : ${noms || '—'} · ${luCount}/${actifs.length || 0} lue${luCount>1?'s':''}</div>
       <div style="display:flex;gap:8px;margin-top:2px;">

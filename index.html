@@ -1009,7 +1009,7 @@ function afficherNotifPleinEcran(n) {
 function _fermerNotifPleinEcran(id) {
   document.getElementById('notifPleinEcran')?.remove();
   fetch(`${SUPABASE_URL}/rest/v1/client_notifications?id=eq.${id}`, {
-    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true })
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true, lu_at: new Date().toISOString() })
   }).then(() => {
     const n = _notifsClient.find(x => x.id === id);
     if (n) n.lu = true;
@@ -1046,7 +1046,7 @@ function ouvrirNotificationsClient() {
   attacherSwipeFermeture(el);
   if (_notifsClientCount > 0) {
     fetch(`${SUPABASE_URL}/rest/v1/client_notifications?client_id=eq.${encodeURIComponent(S.client)}&lu=eq.false`, {
-      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true })
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true, lu_at: new Date().toISOString() })
     }).then(() => {
       _notifsClient.forEach(n => n.lu = true);
       _notifsClientCount = 0;
