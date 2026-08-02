@@ -348,7 +348,7 @@ async function sbResoudreDieteDetail(clientDieteId) {
     const prot = (a.prot_par_100g || 0) / diviseur;
     const glu  = (a.glu_par_100g  || 0) / diviseur;
     const lip  = (a.lip_par_100g  || 0) / diviseur;
-    return { nom: a.nom || '?', unite: a.unite || 'g', cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
+    return { nom: a.nom || '?', unite: a.unite || 'g', qte: q, cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
   });
   return { nom: templateNom, repas: repasRaw.slice().sort((a,b)=>a.ordre-b.ordre).map(r => ({ nom: r.nom, aliments: toAliments(r) })) };
 }
