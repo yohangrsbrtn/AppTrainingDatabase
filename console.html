@@ -956,6 +956,7 @@ async function chargerDonnees(){
       dernier_mois_paye: p.dernier_mois_paye || null,
       mode_paiement: p.mode_paiement || null,
       jour_paiement: p.jour_paiement || null,
+      date_fin_coaching: p.date_fin_coaching || null,
       pushActif: clientsAvecPush.has(p.client_id),
     };
   });
@@ -3597,6 +3598,17 @@ function renderDashboard(el){
   });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
 
+  // Fins de coaching à venir (GoCardless) : offre 6 mois/1 an payée d'avance,
+  // aucun rappel de paiement mensuel n'existe pour ces clients (prélèvement
+  // déjà fait) — le coach doit être alerté à J-15 pour éventuellement mettre
+  // en place un nouveau prélèvement s'ils reconduisent. Reste affiché tant que
+  // la date n'est pas mise à jour (y compris si déjà dépassée), comme "Bilans
+  // en retard".
+  const _joursRestants = dStr => Math.ceil((new Date(dStr+'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+  const finsCoachingProches = data.clients
+    .filter(c => c.mode_paiement === 'gocardless' && c.date_fin_coaching && _joursRestants(c.date_fin_coaching) <= 15)
+    .sort((a,b) => a.date_fin_coaching.localeCompare(b.date_fin_coaching));
+
   // Activité 7 jours : nombre de logs par jour calendaire (à partir de tms)
   const jourKey = tms => { const d = new Date(tms); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); };
   const counts = {};
@@ -3638,6 +3650,17 @@ function renderDashboard(el){
               <span class="chip late"><span class="dot"></span>Retard</span>
             </div>`).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Tous vos clients sont à jour.</div>`}
+      </div>
+      <div class="card">
+        <div class="card-head">${iClipboard()}<span class="t">Fins de coaching à venir (GoCardless)</span>${finsCoachingProches.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${finsCoachingProches.length}</span>`:''}</div>
+        ${finsCoachingProches.length ? `<div class="card-list">
+          ${finsCoachingProches.map(c => { const j = _joursRestants(c.date_fin_coaching); return `
+            <div class="card-list-row" onclick="allerFicheTab('${c.id}','profil')">
+              <div class="mini-avatar">${initials(c.nom)}</div>
+              <div><div class="t">${esc(c.nom)}</div><div class="s">Fin le ${new Date(c.date_fin_coaching+'T00:00:00').toLocaleDateString('fr-FR')}</div></div>
+              <span class="chip ${j<0?'late':'off'}"><span class="dot"></span>${j<0?`${-j}j de retard`:(j===0?"Aujourd'hui":`J-${j}`)}</span>
+            </div>`; }).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucune échéance dans les 15 prochains jours.</div>`}
       </div>
       <div class="card timeline-card" style="grid-row: span 2;">
         <div class="card-head">${iGrid()}<span class="t">Activité récente</span></div>
@@ -4577,55 +4600,72 @@ function renderFicheMensurationsTab(c){
 function renderFicheProfilTab(c){
   const p = ficheData.profil || {};
   const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  const finProche = p.mode_paiement === 'gocardless' && p.date_fin_coaching
+    ? Math.ceil((new Date(p.date_fin_coaching+'T00:00:00') - new Date(new Date().toDateString())) / 86400000)
+    : null;
   return `
-    <div class="fiche-card">
-      <h3>Identité</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
-        <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;">
+      <div class="fiche-card" style="margin-bottom:0;">
+        <h3>Informations personnelles</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
+          <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
+        </div>
+        <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
+        <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
+        <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
       </div>
-      <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
-      <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
-      <div class="fiche-field"><label>Date de première connexion</label><input id="fDateCreationCompte" type="date" value="${esc(p.date_creation_compte||'')}">
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Enregistrée automatiquement à la toute première connexion du client — ne se réinitialise jamais ensuite (changement de mot de passe, reconnexions...). Pour un client migré depuis la PWA, reporter la date depuis le fichier Excel de log clients. Sert de référence pour le nombre de séances/bilans attendus (distinct du "Début du coaching" ci-dessous).</div>
-      </div>
-      <h3 style="margin-top:16px;">Suivi coaching</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
+
+      <div class="fiche-card" style="margin-bottom:0;">
+        <h3>Informations coaching</h3>
+        <div class="fiche-field"><label>Date de première connexion</label><input id="fDateCreationCompte" type="date" value="${esc(p.date_creation_compte||'')}">
+          <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Enregistrée automatiquement à la toute première connexion — ne se réinitialise jamais ensuite. Pour un client migré, reporter la date depuis le fichier Excel de log clients.</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Début du coaching</label><input id="fDebut" type="date" value="${esc(p.date_debut||'')}"></div>
+          <div class="fiche-field"><label>Fin du coaching</label><input id="fFinCoaching" type="date" value="${esc(p.date_fin_coaching||'')}">
+            ${finProche !== null ? `<div style="font-size:11px;margin-top:4px;color:${finProche<15?'var(--critical)':'var(--text-faint)'};">${finProche<0?`Dépassée de ${-finProche} j`:(finProche<=15?`Dans ${finProche} j — GoCardless, penser au renouvellement`:'')}</div>` : ''}
+          </div>
+        </div>
         <div class="fiche-field"><label>Jour de bilan</label>
           <select id="fJourBilan">
             <option value="">—</option>
             ${jours.map(j=>`<option value="${j}" ${p.jour_bilan===j?'selected':''}>${j}</option>`).join('')}
           </select>
         </div>
+        <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
       </div>
-      <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
-      <div class="fiche-field"><label>Objectif</label><textarea id="fObjectif" rows="2">${esc(p.objectif||'')}</textarea></div>
-      <h3 style="margin-top:16px;">Objectifs assignés</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="fiche-field"><label>Pas / jour demandés</label><input id="fStepsCible" type="number" min="0" step="500" placeholder="ex: 8000" value="${esc(p.steps_cible||'')}"></div>
-        <div class="fiche-field"><label>Séances / semaine</label><input id="fSeancesCible" type="number" min="0" max="14" value="${esc(p.seances_cible||'')}"></div>
-      </div>
-      <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
-      <h3 style="margin-top:16px;">Facturation</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
-          <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
-          <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
+
+      <div class="fiche-card" style="margin-bottom:0;">
+        <h3>Activité physique</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Pas / jour demandés</label><input id="fStepsCible" type="number" min="0" step="500" placeholder="ex: 8000" value="${esc(p.steps_cible||'')}"></div>
+          <div class="fiche-field"><label>Séances / semaine</label><input id="fSeancesCible" type="number" min="0" max="14" value="${esc(p.seances_cible||'')}"></div>
         </div>
-        <div class="fiche-field"><label>Mode de paiement</label>
-          <select id="fModePaiement">
-            <option value="">—</option>
-            <option value="virement" ${p.mode_paiement==='virement'?'selected':''}>Virement</option>
-            <option value="espece" ${p.mode_paiement==='espece'?'selected':''}>Espèces</option>
-            <option value="gocardless" ${p.mode_paiement==='gocardless'?'selected':''}>GoCardless</option>
-          </select>
-        </div>
+        <div class="fiche-field"><label>Cardio (consigne libre)</label><input id="fCardioConsigne" type="text" placeholder="ex: 25 min post séance, ou 25 min à jeun" value="${esc(p.cardio_consigne||'')}"></div>
       </div>
-      <div style="font-size:11px;color:var(--text-faint);margin-top:-4px;margin-bottom:10px;">En GoCardless (prélèvement automatique), aucun rappel de paiement n'est jamais envoyé. Sinon, un rappel (visible uniquement dans la cloche de l'app, pas une notification poussée) part 3 jours après le jour de facturation, tant que le mois n'a pas été marqué payé ci-dessous.</div>
-      ${_ficheRenderStatutPaiement(p, c.id)}
-      <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>
-    </div>`;
+
+      <div class="fiche-card" style="margin-bottom:0;">
+        <h3>Facturation</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
+            <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
+            <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
+          </div>
+          <div class="fiche-field"><label>Mode de paiement</label>
+            <select id="fModePaiement">
+              <option value="">—</option>
+              <option value="virement" ${p.mode_paiement==='virement'?'selected':''}>Virement</option>
+              <option value="espece" ${p.mode_paiement==='espece'?'selected':''}>Espèces</option>
+              <option value="gocardless" ${p.mode_paiement==='gocardless'?'selected':''}>GoCardless</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:-4px;margin-bottom:10px;">En GoCardless (prélèvement automatique), aucun rappel de paiement mensuel n'est jamais envoyé — seule la "Fin du coaching" ci-contre déclenche une alerte dashboard à J-15.</div>
+        ${_ficheRenderStatutPaiement(p, c.id)}
+      </div>
+    </div>
+    <button id="ficheSaveBtn" class="btn primary" style="width:100%;justify-content:center;margin-top:14px;" onclick="sauvegarderFicheSandbox('${c.id}')">Enregistrer les informations</button>`;
 }
 
 const _MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -5831,6 +5871,7 @@ async function sauvegarderFicheSandbox(clientId){
     email: document.getElementById('fEmail').value.trim(),
     date_creation_compte: document.getElementById('fDateCreationCompte').value || null,
     date_debut: document.getElementById('fDebut').value || null,
+    date_fin_coaching: document.getElementById('fFinCoaching').value || null,
     jour_bilan: document.getElementById('fJourBilan').value || null,
     taille_cm: parseInt(document.getElementById('fTaille').value)||null,
     objectif: document.getElementById('fObjectif').value.trim() || null,
