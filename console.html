@@ -1762,7 +1762,9 @@ function renderBilanDetailPage(el) {
         ${dateValidation?`<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Validé le ${esc(dateValidation)}</div>`:''}
         ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
       </div>
-      ${!bilanDetailState.coachTraite&&(bilanDetailState.ts||bilanDetailState._supabaseBilanId)?`<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite('${bilanDetailState.client}','${esc(bilanDetailState.ts||'')}')">Marquer traité</button>`:''}
+      ${bilanDetailState._supabaseBilanId ? (bilanDetailState.coachTraite
+        ? `<button class="btn" style="flex-shrink:0;" onclick="marquerNonTraite()">Marquer non traité</button>`
+        : `<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite()">Marquer traité</button>`) : ''}
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
@@ -3472,6 +3474,27 @@ async function marquerTraite(){
     }
     const ba = (data.bilansAll || []).find(b => b.id === bilanDetailState._supabaseBilanId);
     if (ba) ba.coach_traite = true;
+    if (state.nav === 'bilan-detail') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// Repasse un bilan marqué traité par erreur en "à traiter" — utile depuis la
+// vue détail quand le coach se rend compte d'une erreur de clic.
+async function marquerNonTraite(){
+  if (!bilanDetailState._supabaseBilanId) return;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: false }) }
+    );
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    bilanDetailState.coachTraite = false;
+    if (_ficheBilans) {
+      const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
+      if (b) b.coach_traite = false;
+    }
+    const ba = (data.bilansAll || []).find(b => b.id === bilanDetailState._supabaseBilanId);
+    if (ba) ba.coach_traite = false;
     if (state.nav === 'bilan-detail') renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
 }
