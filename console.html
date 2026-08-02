@@ -6606,7 +6606,7 @@ function renderEditeurDietePage(el) {
 }
 
 function retourDepuisEditeurDiete() {
-  if (_ficheEditClientId) { _ficheEditClientId = null; setNav('fiche-client'); }
+  if (_ficheEditClientId) { _ficheEditClientId = null; _ficheEditClientDieteId = null; setNav('fiche-client'); }
   else if (_ficheCreateClientId) { _ficheCreateClientId = null; setNav('fiche-client'); }
   else { setNav(_dietNavBack || 'dietes'); }
 }
@@ -6947,7 +6947,20 @@ async function sauvegarderDieteTemplate(){
     dieteTemplatesData = await chargerDieteTemplates();
     if (_ficheEditClientId) {
       const cid = _ficheEditClientId;
+      const cdid = _ficheEditClientDieteId;
       _ficheEditClientId = null;
+      _ficheEditClientDieteId = null;
+      // client_dietes.nom est une copie indépendante du nom du template au
+      // moment de l'assignation (pas une référence live) — un renommage
+      // depuis l'éditeur ne se répercutait jamais dessus, la fiche client
+      // continuait d'afficher l'ancien nom. Resynchronise ici.
+      try {
+        if (cdid) {
+          await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${cdid}`, { method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ nom }) });
+        } else {
+          await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(cid)}&diete_template_id=eq.${tplId}`, { method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ nom }) });
+        }
+      } catch(e) {}
       await openPanel(cid);
       setFicheTab('diete');
       setNav('fiche-client');
@@ -9059,6 +9072,7 @@ async function migrerProgressionGAS(clientId) {
 
 let _ficheCreateClientId = null; // clientId en cours de création
 let _ficheEditClientId = null;   // clientId en cours d'édition diète
+let _ficheEditClientDieteId = null; // client_dietes.id en cours d'édition — pour resynchroniser son nom après renommage du template
 
 function ouvrirCreerDietePourClient(clientId) {
   _ficheCreateClientId = clientId;
@@ -9110,6 +9124,7 @@ async function sauvegarderDietePourClient() {
 
 async function editerDieteClient(nomDiete, clientId, clientDieteId) {
   _ficheEditClientId = clientId;
+  _ficheEditClientDieteId = clientDieteId || null;
   _dietNavBack = 'fiche-client';
   // Résout via client_dietes.diete_template_id quand disponible (fiable) — sinon fallback
   // par nom (diètes assignées avant l'ajout de cette colonne). Le fallback par nom peut
@@ -9125,9 +9140,9 @@ async function editerDieteClient(nomDiete, clientId, clientDieteId) {
   }
   if (!tpl) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(nomDiete)}&order=id.desc&limit=1&select=*`, { headers: supaHeaders() });
-    if (!res.ok) { alert('Erreur chargement template'); _ficheEditClientId = null; return; }
+    if (!res.ok) { alert('Erreur chargement template'); _ficheEditClientId = null; _ficheEditClientDieteId = null; return; }
     const tpls = await res.json();
-    if (!tpls.length) { alert(`Aucun template trouvé pour la diète "${nomDiete}"`); _ficheEditClientId = null; return; }
+    if (!tpls.length) { alert(`Aucun template trouvé pour la diète "${nomDiete}"`); _ficheEditClientId = null; _ficheEditClientDieteId = null; return; }
     tpl = tpls[0];
   }
   const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers: supaHeaders() });
