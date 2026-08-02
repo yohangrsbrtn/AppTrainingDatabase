@@ -4286,15 +4286,17 @@ function renderFicheBilansTab(c){
   const rows = _ficheBilans.map((b, idx) => {
     const dateRaw = b.date_validation || '';
     const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
+    const periode = _bilanPeriodeLabel(b, c.jour_bilan);
     const traite = b.coach_traite;
-    const chip = traite
-      ? `<span class="chip ok"><span class="dot"></span>Traité</span>`
-      : `<span class="chip late"><span class="dot"></span>À traiter</span>`;
+    const chip = b.envoye_coach
+      ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
+      : `<span class="chip off"><span class="dot"></span>En cours</span>`;
     const checked = _ficheBilansSel.has(b.id);
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td style="width:32px;text-align:center;" onclick="event.stopPropagation();">
         <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanSel(${b.id}, this.checked)">
       </td>
+      <td>${esc(periode)}</td>
       <td>${dateFr}</td>
       <td>${chip}</td>
     </tr>`;
@@ -4317,12 +4319,32 @@ function renderFicheBilansTab(c){
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="color:var(--text-faint);font-size:11px;text-transform:uppercase;">
         <th></th>
-        <th style="text-align:left;padding:6px 8px;">Date</th>
+        <th style="text-align:left;padding:6px 8px;">Période</th>
+        <th style="text-align:left;padding:6px 8px;">Validé le</th>
         <th style="text-align:left;padding:6px 8px;">Statut</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+// Plage de dates de la semaine couverte par un bilan : bornée par date_validation (fin réelle)
+// quand disponible, sinon par la prochaine échéance jour_bilan calculée depuis created_at (bilan
+// encore en cours) — cohérent avec _weekRange (page de détail) et le libellé semaine_label
+// auto-corrigé côté client (bilan.js). Ne dépend PAS de jour_bilan quand date_validation est
+// connue (fin - 6 jours suffit, indépendant du jour de la semaine).
+function _bilanPeriodeLabel(b, jourBilanNom) {
+  let fin;
+  if (b.date_validation) {
+    fin = new Date(b.date_validation + 'T12:00:00');
+  } else if (b.created_at) {
+    fin = _bilanWeekBounds(jourBilanNom, new Date(b.created_at)).fin;
+  } else {
+    return b.semaine_label || '—';
+  }
+  const debut = new Date(fin); debut.setDate(fin.getDate() - 6);
+  const fmt = d => d.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+  return `${fmt(debut)} → ${fmt(fin)}`;
 }
 
 function _renderFicheBilansCorbeille(c){
