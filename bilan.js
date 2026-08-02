@@ -42,13 +42,19 @@ async function _supaGetOrCreateBilanCourant(clientId) {
   const profilArr = profilRes.ok ? await profilRes.json() : [];
   const jourBilanNom = (profilArr[0] && profilArr[0].jour_bilan) || null;
 
-  // archive=eq.false : un bilan non-envoyé mis à la corbeille par le coach (doublon supprimé
-  // depuis la console) ne doit jamais être repris comme "bilan en cours" — sans ce filtre, le
-  // client récupérait le doublon archivé (bug vécu : bilan de la semaine passée qui réapparaît
-  // "en cours" après suppression du doublon côté coach, alors que le vrai bilan de cette
-  // semaine a déjà été envoyé).
+  // Dernier bilan non archivé (envoyé ou pas) — s'il est encore dans sa PROPRE semaine (le
+  // jour_bilan qu'il couvre n'est pas encore passé), c'est TOUJOURS le bilan "en cours" pour
+  // les saisies du jour (journée validée, séance, steps...), MÊME s'il a déjà été envoyé au
+  // coach : un bilan envoyé reste modifiable jusqu'à la fin de sa semaine (bannière "Bilan
+  // envoyé au coach — toujours modifiable"). Filtrer avant sur envoye_coach=eq.false était le
+  // bug : un client qui envoie son bilan le jour même de son jour_bilan puis valide sa journée
+  // dans la foulée voyait sa saisie partir dans un TOUT NOUVEAU bilan pour la semaine suivante
+  // au lieu de continuer à remplir celui qui vient d'être envoyé (bug vécu : Perrine valide sa
+  // journée de dimanche, ça remplit le dimanche de la semaine PROCHAINE au lieu de celui du
+  // bilan déjà envoyé). archive=eq.false : un doublon supprimé par le coach ne doit jamais être
+  // repris comme "bilan en cours" (bug distinct, déjà corrigé).
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.desc&limit=1`,
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=created_at.desc&limit=1`,
     { headers: supaHeaders() }
   );
   const arr = res.ok ? await res.json() : [];
@@ -56,10 +62,10 @@ async function _supaGetOrCreateBilanCourant(clientId) {
     const { fin } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
     if (new Date() <= fin) {
       // semaine_label est figé au moment de la création du bilan — si le client modifie
-      // jour_bilan pendant que ce bilan (non-envoyé) est en cours, le libellé affiché reste
-      // celui calculé avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. On
-      // recalcule à chaque ouverture et on réécrit en base si le jour_bilan a changé entre
-      // temps (bug vécu : jour_bilan passé à Mercredi, bilan encore affiché "lundi→dimanche").
+      // jour_bilan pendant que ce bilan est en cours, le libellé affiché reste celui calculé
+      // avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. On recalcule à chaque
+      // ouverture et on réécrit en base si le jour_bilan a changé entre temps (bug vécu :
+      // jour_bilan passé à Mercredi, bilan encore affiché "lundi→dimanche").
       const labelAttendu = _supaGetSemaineLabel(jourBilanNom, new Date(arr[0].created_at));
       if (arr[0].semaine_label !== labelAttendu) {
         arr[0].semaine_label = labelAttendu;
@@ -71,35 +77,29 @@ async function _supaGetOrCreateBilanCourant(clientId) {
       return { row: arr[0], jourBilanNom };
     }
   }
-  // Référence de la semaine du nouveau bilan : "maintenant" par défaut, SAUF
-  // si le tout dernier bilan de ce client (envoyé ou non) couvre déjà une
-  // semaine dont la fin tombe aujourd'hui ou plus tard — dans ce cas on
-  // démarre pile le lendemain de cette fin. Sans ce garde-fou, un client qui
-  // envoie son bilan LE jour même de son jour_bilan assigné puis rouvre
-  // l'app dans la foulée se retrouve avec un second bilan dupliquant la même
-  // semaine (delta=0 dans _bilanWeekBounds quand aujourd'hui == jour_bilan).
+  // Référence de la semaine du nouveau bilan : "maintenant" par défaut, SAUF si ce dernier
+  // bilan (déjà chargé ci-dessus, sa semaine vient d'être vérifiée comme terminée) couvre une
+  // semaine dont la fin tombe aujourd'hui ou plus tard — dans ce cas on démarre pile le
+  // lendemain de cette fin. Sans ce garde-fou, un client qui envoie son bilan LE jour même de
+  // son jour_bilan assigné puis rouvre l'app dans la foulée se retrouve avec un second bilan
+  // dupliquant la même semaine (delta=0 dans _bilanWeekBounds quand aujourd'hui == jour_bilan).
   let refDate = new Date();
-  try {
-    const derRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=created_at`,
-      { headers: supaHeaders() }
-    );
-    const derArr = derRes.ok ? await derRes.json() : [];
-    if (derArr.length) {
-      const { fin: finDernier } = _bilanWeekBounds(jourBilanNom, new Date(derArr[0].created_at));
-      const finDernierJour = new Date(finDernier); finDernierJour.setHours(0, 0, 0, 0);
-      const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
-      if (finDernierJour >= aujourdhui) {
-        refDate = new Date(finDernier);
-        refDate.setDate(refDate.getDate() + 1);
-        refDate.setHours(12, 0, 0, 0);
-      }
+  if (arr.length) {
+    const { fin: finDernier } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
+    const finDernierJour = new Date(finDernier); finDernierJour.setHours(0, 0, 0, 0);
+    const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
+    if (finDernierJour >= aujourdhui) {
+      refDate = new Date(finDernier);
+      refDate.setDate(refDate.getDate() + 1);
+      refDate.setHours(12, 0, 0, 0);
     }
-  } catch(e) {}
+  }
   const row = await _supaCreerNouveauBilan(clientId, jourBilanNom, refDate);
   return { row, jourBilanNom };
 }
 
+// Malgré son nom (conservé pour ne pas casser les appelants), peut désormais renvoyer un
+// bilan déjà ENVOYÉ si sa semaine n'est pas terminée — voir _supaGetOrCreateBilanCourant.
 async function _supaBilanNonEnvoye(clientId) {
   const { row } = await _supaGetOrCreateBilanCourant(clientId);
   return { id: row.id, jours: row.jours || [] };
@@ -113,9 +113,11 @@ async function _supaLoadBilan() {
     _bilanData = _normaliserBilanSupa(row);
     _bilanId   = row.id;
     _bilanJourBilanNom = jourBilanNom;
-    // Chercher le bilan précédent (dernier envoyé)
+    // Chercher le bilan précédent (dernier envoyé) — exclut explicitement le bilan courant :
+    // depuis que celui-ci peut lui-même être déjà envoyé (voir _supaGetOrCreateBilanCourant),
+    // sans ce filtre "précédent" pointait sur le même bilan que le courant.
     const prevRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.true&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.true&id=neq.${row.id}&order=created_at.desc&limit=1`,
       { headers: supaHeaders() }
     );
     const prevArr = await prevRes.json();
