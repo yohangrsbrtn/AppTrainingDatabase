@@ -6800,28 +6800,50 @@ function _selectionnerOFF(idx){
   _ouvrirSaisieQuantite(r.nom, r.kcal, r.prot, r.glu, r.lip);
 }
 
+// Bande de macros pour LA QUANTITÉ SAISIE (pas une référence statique "/100g"
+// figée) — recalculée à chaque frappe dans le champ quantité (voir
+// _majMacroBandSelection) : demande explicite du coach, "je change le
+// chiffre, les calories ne bougent pas".
+function _macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qte, uniteLabel){
+  return `
+    <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*qte)}</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>`;
+}
+
+function _majMacroBandSelection(kcal_pg, prot_pg, glu_pg, lip_pg, uniteLabel){
+  const band = document.getElementById('aSelMacroBand');
+  if (!band) return;
+  const qte = parseFloat(document.getElementById('aQteSelected')?.value) || 0;
+  band.innerHTML = _macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qte, uniteLabel);
+}
+
 function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
   unite = unite || 'g';
   const isG = unite === 'g';
-  const refMult = isG ? 100 : 1;
-  const refLabel = isG ? '/ 100g' : '/ ' + unite;
   const qteLabel = isG ? 'Quantité (g)' : 'Nombre de ' + unite + 's';
   const qteDefault = isG ? 100 : 1;
+  const uniteLabel = isG ? 'pour cette quantité' : 'pour cette quantité';
+  // Nom JS-échappé (apostrophes) une seule fois — un aliment comme "Huile
+  // d'olive" cassait silencieusement les boutons Ajouter/Entrée sans cet
+  // échappement (l'apostrophe fermait prématurément la chaîne JS de l'attribut
+  // onclick), symptôme signalé : "je ne peux rien faire, ça ne fait rien".
+  const nomJs = esc(nom).replace(/'/g, "\\'");
   const modal = document.getElementById('modal-ajout-aliment');
   const box = modal.querySelector('.modal-box');
   box.innerHTML = `
     <h3 style="margin-bottom:4px;">${esc(nom)}</h3>
     ${_ajoutAlimCount > 0 ? `<div style="font-size:11px;color:var(--success);margin-bottom:10px;">✓ ${_ajoutAlimCount} aliment${_ajoutAlimCount>1?'s':''} ajouté${_ajoutAlimCount>1?'s':''} à ce repas</div>` : ''}
-    <div class="macro-band" style="border-radius:var(--radius-sm);margin-bottom:16px;">
-      <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*refMult)}</div><div class="mu">${refLabel}</div></div>
-      <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
-      <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
-      <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*refMult*10)/10}g</div><div class="mu">${refLabel}</div></div>
+    <div class="macro-band" id="aSelMacroBand" style="border-radius:var(--radius-sm);margin-bottom:16px;">
+      ${_macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qteDefault, uniteLabel)}
     </div>
-    <div class="field-row"><label>${qteLabel}</label><input id="aQteSelected" type="number" min="1" value="${qteDefault}" style="font-size:16px;" onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')"></div>
+    <div class="field-row"><label>${qteLabel}</label><input id="aQteSelected" type="number" min="1" value="${qteDefault}" style="font-size:16px;"
+      oninput="_majMacroBandSelection(${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${uniteLabel}')"
+      onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${nomJs}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')"></div>
     <div class="modal-actions">
       <button class="btn" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">← Retour</button>
-      <button class="btn primary" onclick="_confirmerAlimSelectionne('${esc(nom)}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')">Ajouter</button>
+      <button class="btn primary" onclick="_confirmerAlimSelectionne('${nomJs}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')">Ajouter</button>
     </div>`;
   setTimeout(()=>document.getElementById('aQteSelected')?.select(), 50);
 }
