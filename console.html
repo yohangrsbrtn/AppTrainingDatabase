@@ -1741,6 +1741,10 @@ function openBilanDetailSupabase(bilan) {
       commentaireAlim: bilan.commentaire_alim || '',
       commentaireJour: bilan.commentaire_jour || '',
       commentaireActivite: bilan.commentaire_activite || '',
+      fatigueGenerale: bilan.fatigue_generale || 0,
+      commentaireFatigue: bilan.commentaire_fatigue || '',
+      qualiteSommeil: bilan.qualite_sommeil || 0,
+      commentaireSommeil: bilan.commentaire_sommeil || '',
     },
     error: null,
     _supabaseBilanId: bilan.id,
@@ -2094,12 +2098,22 @@ function renderBilanDetailPage(el) {
       </table></div>
     </div>`:''}
 
-    ${(d.commentaireAlim||d.commentaireJour||d.commentaireActivite)?`<div class="table-card">
+    ${(d.fatigueGenerale||d.qualiteSommeil)?`<div class="table-card" style="margin-bottom:16px;">
+      <div class="table-toolbar"><div class="title">Ressenti</div></div>
+      <div style="padding:0 20px 16px;display:flex;gap:24px;flex-wrap:wrap;">
+        ${d.fatigueGenerale?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Fatigue générale</div>${score(d.fatigueGenerale)}</div>`:''}
+        ${d.qualiteSommeil?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Qualité du sommeil</div>${score(d.qualiteSommeil)}</div>`:''}
+      </div>
+    </div>`:''}
+
+    ${(d.commentaireAlim||d.commentaireJour||d.commentaireActivite||d.commentaireFatigue||d.commentaireSommeil)?`<div class="table-card">
       <div class="table-toolbar"><div class="title">Commentaires client</div></div>
       <div style="padding:0 20px 16px;display:flex;flex-direction:column;gap:12px;">
         ${d.commentaireAlim?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Nutrition</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireAlim)}</div></div>`:''}
         ${d.commentaireJour?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Journée</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireJour)}</div></div>`:''}
         ${d.commentaireActivite?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Activité</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireActivite)}</div></div>`:''}
+        ${d.commentaireFatigue?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Fatigue</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireFatigue)}</div></div>`:''}
+        ${d.commentaireSommeil?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Sommeil</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireSommeil)}</div></div>`:''}
       </div>
     </div>`:''}
 
