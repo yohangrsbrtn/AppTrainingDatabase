@@ -579,6 +579,9 @@ let _ficheMensurationsLoading = false;
 // Filtre période pour les graphes/écart de la fiche client : mode 'tout' (tout l'historique),
 // 'phase' (une valeur de mensurations.phase précise) ou 'custom' (plage de dates libre).
 let _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
+let _ficheXpHistoClientId = null;
+let _ficheXpHistorique = null; // null = pas encore chargé
+let _ficheXpHistoLoading = false;
 let _ficheProtocoleClientId = null;
 let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
 let _ficheProtocoleLoading = false;
@@ -4569,9 +4572,22 @@ async function marquerFicheBilansSelTraite(clientId) {
 
 // ── Mensuration charts — helpers partagés ────────────────────────────────────
 window._mensCharts = {};
-const MENS_PHASES = ['Sèche','Prise de masse','Maintien','Recomposition'];
-const MENS_PHASE_COLORS = { 'Sèche':'#e05c5c', 'Prise de masse':'#3ecf8e', 'Maintien':'#4f8ef7', 'Recomposition':'#a78bfa' };
-function _mensPhaseColor(p) { return MENS_PHASE_COLORS[p] || '#8892a4'; }
+// Les phases de mensurations s'appuient sur les types de phase de la Roadmap
+// (ROADMAP_TYPES, définis plus bas dans ce fichier — référencé uniquement à l'intérieur de
+// fonctions, jamais au chargement du script, donc l'ordre de déclaration n'a pas d'importance)
+// : mêmes libellés, mêmes couleurs. De nombreuses mensurations portent une valeur de phase
+// libre héritée de la migration (CUT, PDM, REFEED, REVERSE...) — MENS_PHASE_ALIASES les fait
+// correspondre au bon type Roadmap (ex: "CUT" → type 'cut' → libellé "Cut", couleur rouge)
+// au lieu de rester une valeur orpheline sans couleur ni correspondance dans le sélecteur.
+const MENS_PHASE_ALIASES = { PDM:'prise_masse', MAINTIEN:'maintenance', STABILISATION:'maintenance' };
+function _mensPhaseRoadmapType(phase) {
+  if (!phase) return null;
+  const upper = phase.trim().toUpperCase();
+  const aliasKey = MENS_PHASE_ALIASES[upper];
+  if (aliasKey) return _roadmapType(aliasKey);
+  return ROADMAP_TYPES.find(t => t.label.toUpperCase() === upper || t.key.toUpperCase() === upper) || null;
+}
+function _mensPhaseColor(p) { const t = _mensPhaseRoadmapType(p); return t ? t.color : '#8892a4'; }
 const MENS_COLS   = ['fessiers','cuisses','mollets','poitrine','epaules','bras'];
 const MENS_COLORS = ['#f59e0b','#a78bfa','#3ecf8e','#f97316','#4f8ef7','#e05c5c'];
 const MENS_LABELS = ['Fessiers','Cuisses','Mollets','Poitrine','Épaules','Bras'];
@@ -4645,7 +4661,7 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
     ${keys.map((k,i)=>`<span><span style="color:${colors[i]};margin-right:3px;">●</span>${labels[i]}</span>`).join('')}
   </div>`;
   const phaseLegend = phasesPresentes.size ? `<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--text-faint);margin-bottom:4px;">
-    ${MENS_PHASES.filter(p=>phasesPresentes.has(p)).map(p=>`<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${_mensPhaseColor(p)};margin-right:4px;vertical-align:middle;"></span>${esc(p)}</span>`).join('')}
+    ${[...phasesPresentes].map(p=>`<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${_mensPhaseColor(p)};margin-right:4px;vertical-align:middle;"></span>${esc(p)}</span>`).join('')}
   </div>` : '';
   return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${phaseTransitions}${phaseBand}${areas}${lines}${dots}${vline}${ov}</svg></div>${phaseLegend}${legend}`;
 }
@@ -4728,18 +4744,16 @@ function _mensEcartHtml(rowsFiltres) {
 }
 
 // Select inline dans la ligne du tableau — édite la phase sans ouvrir la modale complète.
-// De nombreuses mensurations (migrées ou saisies avant l'existence de cette liste fixe)
-// portent une valeur libre hors des 4 options standard (ex: "CUT", "PDM", "REFEED",
-// "REVERSE"...) — sans les inclure comme option, le select retombe sur "—" par défaut
-// (aucune <option> ne correspond), ce qui donnait l'impression que la phase avait
-// disparu alors que la donnée en base était intacte (bug vécu juste après l'ajout de ce
-// select). On ajoute donc la valeur actuelle comme option supplémentaire si elle ne fait
-// pas partie de la liste standard, pour ne jamais perdre l'affichage d'une valeur existante.
+// Les options viennent des types de phase de la Roadmap (ROADMAP_TYPES) — une valeur libre
+// existante (migrée) comme "CUT" est reconnue via _mensPhaseRoadmapType (alias/casse) et
+// sélectionne directement "Cut" ; seule une valeur vraiment inconnue (ex: "TEST DIGESTION",
+// sans équivalent Roadmap) est ajoutée comme option à part pour ne jamais perdre l'affichage
+// d'une valeur existante en base.
 function _mensPhaseSelectHtml(rowId, clientId, currentPhase) {
-  const estStandard = !currentPhase || MENS_PHASES.includes(currentPhase);
+  const matched = _mensPhaseRoadmapType(currentPhase);
   const opts = `<option value="" ${!currentPhase?'selected':''}>—</option>`
-    + (estStandard ? '' : `<option value="${esc(currentPhase)}" selected>${esc(currentPhase)}</option>`)
-    + MENS_PHASES.map(p => `<option value="${esc(p)}" ${currentPhase===p?'selected':''}>${esc(p)}</option>`).join('');
+    + (currentPhase && !matched ? `<option value="${esc(currentPhase)}" selected>${esc(currentPhase)}</option>` : '')
+    + ROADMAP_TYPES.map(t => `<option value="${esc(t.label)}" ${matched && matched.key===t.key?'selected':''}>${esc(t.label)}</option>`).join('');
   return `<select onclick="event.stopPropagation();" onchange="event.stopPropagation();changerPhaseMensurationInline(${rowId},'${esc(clientId)}',this.value)"
     style="font-size:12px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:3px 6px;">${opts}</select>`;
 }
@@ -5095,8 +5109,6 @@ function _dieteMacrosBadge(d){
 }
 
 function renderFicheProgressionTab(){
-  const progression = Array.isArray(ficheData.progression) ? ficheData.progression : [];
-  const poidsPts = progression.map(s=>parseFloat(s.poids_moyen)).filter(v=>!isNaN(v));
   const xp = ficheData.xpData || null;
 
   const xpCard = xp ? (() => {
@@ -5146,25 +5158,46 @@ function renderFicheProgressionTab(){
     </div>`;
   })() : (ficheData.loaded ? `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Pas encore de données XP (aucun bilan validé).</p></div>` : `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Chargement XP…</p></div>`);
 
+  // Historique XP : reprend les mêmes événements réels (activite_events) que "Activité
+  // récente" du dashboard (bilan envoyé, séance validée, journée validée), mais pour CE
+  // client et sans limite de 7 jours — tout l'historique. Remplace l'ancienne "Progression
+  // poids" (doublon de la courbe déjà présente dans l'onglet Mensurations, jugée inutile ici).
+  const clientId = ficheData.profil && ficheData.profil.client_id;
+  if (_ficheXpHistoClientId !== clientId) {
+    _ficheXpHistoClientId = clientId;
+    _ficheXpHistorique = null;
+    _ficheXpHistoLoading = false;
+  }
+  if (clientId && _ficheXpHistorique === null && !_ficheXpHistoLoading) {
+    _ficheXpHistoLoading = true;
+    const fmtTs = iso => { const d = new Date(iso); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); };
+    fetch(`${SUPABASE_URL}/rest/v1/activite_events?client_id=eq.${encodeURIComponent(clientId)}&type=in.(bilan_envoye,seance_validee,journee_validee)&order=created_at.desc&limit=300&select=type,meta,created_at`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        _ficheXpHistorique = rows.map(r => ({ type: r.type, semaine: r.meta && r.meta.semaine_label, ts: fmtTs(r.created_at) }));
+        _ficheXpHistoLoading = false;
+        const el = document.getElementById('ficheTabContent');
+        if (el && ficheTab === 'progression') el.innerHTML = renderFicheProgressionTab();
+      })
+      .catch(() => { _ficheXpHistorique = []; _ficheXpHistoLoading = false; });
+  }
+  const xpHistoRows = (_ficheXpHistorique || []).map(l => {
+    const info = libelleLog(l);
+    return `<div class="fiche-hist-row">
+      <span style="color:var(--text-muted);">${info.icon} ${esc(info.txt)}${info.sub ? ' · ' + esc(info.sub) : ''}</span>
+      <span style="color:var(--text-faint);font-size:11px;">${esc(l.ts)}</span>
+    </div>`;
+  }).join('');
+  const xpHistoContent = _ficheXpHistorique === null
+    ? `<div class="fiche-prog-empty">Chargement…</div>`
+    : (_ficheXpHistorique.length ? xpHistoRows : `<div class="fiche-prog-empty">Aucun événement enregistré.</div>`);
+
   return `
     ${xpCard}
     <div class="fiche-card">
-      <h3>Progression poids (bilans)</h3>
-      ${poidsPts.length >= 2 ? `
-        ${progressionChart(poidsPts, 'var(--accent)')}
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);margin-top:6px;">
-          <span>${poidsPts[0].toFixed(1)} kg</span>
-          <span>${(poidsPts[poidsPts.length-1]-poidsPts[0]>=0?'+':'')+(poidsPts[poidsPts.length-1]-poidsPts[0]).toFixed(1)} kg</span>
-          <span>${poidsPts[poidsPts.length-1].toFixed(1)} kg</span>
-        </div>` : `<div class="fiche-prog-empty">Pas encore de données (min. 2 bilans).</div>`}
-      ${progression.length ? `
-        <div style="margin-top:14px;">
-          ${progression.slice().reverse().slice(0,8).map(s=>`
-            <div class="fiche-hist-row">
-              <span style="color:var(--text-muted);">Semaine ${esc(s.semaine||'?')}</span>
-              <span>${s.poids_moyen ? parseFloat(s.poids_moyen).toFixed(1)+' kg' : '—'}${s.jours_diete_ok!=null?' · diète '+s.jours_diete_ok+'/7':''}</span>
-            </div>`).join('')}
-        </div>` : ''}
+      <h3>Historique XP</h3>
+      <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">Tout ce qui fait gagner de l'XP : bilans envoyés, séances et journées validées.</div>
+      ${xpHistoContent}
     </div>`;
 }
 
@@ -7589,7 +7622,8 @@ async function sauverRecette() {
 function ouvrirModalMensuration(clientId, rowId) {
   const row = rowId ? (_ficheMensurations||_pageMensurationsRows||[]).find(r=>r.id===rowId) || {} : {};
   const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
-  const phases = MENS_PHASES;
+  const phases = ROADMAP_TYPES.map(t=>t.label);
+  const phaseMatchee = _mensPhaseRoadmapType(row.phase);
   const field = (id, label, val, type='number', extra='') =>
     `<div class="fiche-field"><label>${label}</label><input id="mm-${id}" type="${type}" value="${esc(val!=null?val:'')}" style="font-size:16px;" ${extra}></div>`;
 
@@ -7603,7 +7637,8 @@ function ouvrirModalMensuration(clientId, rowId) {
         <div class="fiche-field"><label>Phase</label>
           <select id="mm-phase" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;">
             <option value="">—</option>
-            ${phases.map(p=>`<option value="${p}" ${row.phase===p?'selected':''}>${p}</option>`).join('')}
+            ${row.phase && !phaseMatchee ? `<option value="${esc(row.phase)}" selected>${esc(row.phase)}</option>` : ''}
+            ${phases.map(p=>`<option value="${p}" ${(phaseMatchee ? phaseMatchee.label===p : row.phase===p) ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
         ${field('poids','Poids (kg)',row.poids,'number','step="0.1" min="0"')}
