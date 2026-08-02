@@ -6205,7 +6205,7 @@ async function ouvrirEditeurDiete(id){
     const repasRaw = res.ok ? await res.json() : tpl.repas||[];
     dieteTplEnEdition = {
       id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
+      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme,modifie:!!a.modifie})) }))
     };
     if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   } else {
@@ -6229,6 +6229,10 @@ function _renderAlimListHtml(ri) {
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
         <span class="a-unite">${a.unite&&a.unite!=='g'?esc(a.unite):'g'}</span>
         <span class="macro-pills">${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+        <label title="Afficher une pastille « modifié » côté app client" style="display:flex;align-items:center;gap:3px;flex-shrink:0;font-size:9px;color:${a.modifie?'#f59e0b':'var(--text-faint)'};font-weight:700;cursor:pointer;">
+          <input type="checkbox" ${a.modifie?'checked':''} onchange="alimToggleModifie(${ri},${ai},this.checked)" style="width:13px;height:13px;flex-shrink:0;">
+          modifié
+        </label>
         <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
       </div>`).join('')}
     ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}">
@@ -6381,8 +6385,18 @@ function supprimerAlimentDiete(ri, ai){
 // iOS en locale FR insère une virgule comme séparateur décimal, cf. programme-client.js).
 function alimChangerQuantite(ri, ai, valeur){
   const q = parseFloat((valeur+'').replace(',','.'));
-  dieteTplEnEdition.repas[ri].aliments[ai].quantite_g = isNaN(q) ? 0 : q;
+  const a = dieteTplEnEdition.repas[ri].aliments[ai];
+  const ancien = a.quantite_g;
+  a.quantite_g = isNaN(q) ? 0 : q;
+  // Aliment déjà existant (a un id) dont le grammage change réellement : on
+  // coche automatiquement "modifié" — le coach peut décocher s'il ne veut pas
+  // afficher la pastille côté client.
+  if (a.id != null && ancien !== a.quantite_g) a.modifie = true;
   _updateAlimentsDom(ri);
+}
+
+function alimToggleModifie(ri, ai, checked){
+  dieteTplEnEdition.repas[ri].aliments[ai].modifie = checked;
 }
 
 // Réordonner les aliments d'un repas par glisser-déposer — même pattern que
@@ -6619,7 +6633,7 @@ async function sauvegarderDieteTemplate(){
       if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai, modifie:!!a.modifie }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
@@ -8740,7 +8754,7 @@ async function sauvegarderDietePourClient() {
       if (!rRes.ok) throw new Error('repas ' + rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai, modifie:!!a.modifie }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
@@ -8785,7 +8799,7 @@ async function editerDieteClient(nomDiete, clientId, clientDieteId) {
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   dieteTplEnEdition = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme})) }))
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme,modifie:!!a.modifie})) }))
   };
   if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   setNav('editeur-diete');

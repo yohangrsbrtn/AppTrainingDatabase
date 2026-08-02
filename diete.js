@@ -114,7 +114,7 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
     }
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
-      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
+      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,modifie)`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
@@ -140,7 +140,8 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
         prot: Math.round(prot*q*10)/10,
         glu:  Math.round(glu*q*10)/10,
         lip:  Math.round(lip*q*10)/10,
-        kcalPG: kcal, protPG: prot, gluPG: glu, lipPG: lip };
+        kcalPG: kcal, protPG: prot, gluPG: glu, lipPG: lip,
+        modifie: !!a.modifie };
     });
 
     _dDetail = {
