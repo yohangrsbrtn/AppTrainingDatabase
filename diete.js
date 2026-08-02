@@ -1799,7 +1799,12 @@ function _afficherModalAjout(loading) {
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) { _arreterScan(); modal.remove(); } });
   attacherSwipeFermeture(modal, () => { _arreterScan(); modal.remove(); });
-  if (!loading && _dAjoutEtape === 'scan') _demarrerScan();
+  // Ne PAS auto-démarrer le scan ici pour l'étape 'scan' : ouvrirScanCodeBarre() (seul
+  // endroit qui positionne _dAjoutEtape='scan') appelle déjà _demarrerScan() explicitement
+  // une fois la lib chargée. Le faire aussi ici créait un double démarrage de caméra dès que
+  // la lib était déjà en cache (2e scan de la session) : deux instances Html5Qrcode
+  // démarraient en parallèle sur le même conteneur → flux vidéo dédoublé "miroir", et
+  // l'instance jamais vraiment stoppée redéclenchait onScanSuccess seule au scan suivant.
   if (!loading && _dAjoutEtape === 'quantite') _majPreviewAjout(); // initialise l'aperçu (utile surtout en édition, quantité déjà pré-remplie)
 }
 
