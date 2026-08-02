@@ -597,7 +597,7 @@ function rendreCorpsRepas(r, ri, vi) {
       ${canEdit ? `onclick="ouvrirEditAliment(${ri},${vi},${ai})"` : ''}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <div style="font-size:13px;flex:1;line-height:1.3;">${esc(a.nom)}${a.modifie ? `<span style="font-size:8px;font-weight:700;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">modifié</span>` : ''}</div>
-        <div class="d-alim-qte" style="font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;">${qte}${a.unite ? ' ' + a.unite : 'g'}</div>
+        <div class="d-alim-qte" style="font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;">${qte}${a.unite==='unite'?' u.':a.unite==='portion'?' portion':(a.unite?' '+a.unite:'g')}</div>
       </div>
       <div style="display:flex;gap:8px;margin-top:3px;align-items:center;">
         <span class="d-alim-cals" style="font-size:11px;font-weight:600;">${Math.round(cals)} kcal</span>

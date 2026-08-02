@@ -2509,6 +2509,12 @@ async function _confirmerImportOFF(idx){
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
 }
 
+function _afRefLabelTexte(unite){
+  if (unite === 'unite') return 'Valeurs par unité (ex: 1 œuf)';
+  if (unite === 'portion') return 'Valeurs par portion';
+  return 'Valeurs pour 100g';
+}
+
 function ouvrirFormulaireAliment(id){
   const a = id ? (alimentsCoachData||[]).find(x=>x.id===id) : null;
   const modal = document.createElement('div');
@@ -2526,12 +2532,13 @@ function ouvrirFormulaireAliment(id){
         </select>
       </div>
       <div class="field-row"><label>Unité</label>
-        <select id="afUnite" style="font-size:16px;" onchange="document.getElementById('afRefLabel').textContent=this.value==='g'?'Valeurs pour 100g':'Valeurs par unité (1 portion)'">
+        <select id="afUnite" style="font-size:16px;" onchange="document.getElementById('afRefLabel').textContent=_afRefLabelTexte(this.value)">
           <option value="g" ${!a?.unite||a.unite==='g'?'selected':''}>Grammes (g)</option>
-          <option value="portion" ${a?.unite==='portion'?'selected':''}>Portions</option>
+          <option value="unite" ${a?.unite==='unite'?'selected':''}>Unité (ex: 1 œuf, 1 fruit)</option>
+          <option value="portion" ${a?.unite==='portion'?'selected':''}>Portion (ex: 1 part de recette)</option>
         </select>
       </div>
-      <p id="afRefLabel" style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">${!a?.unite||a.unite==='g'?'Valeurs pour 100g':'Valeurs par unité (1 portion)'}</p>
+      <p id="afRefLabel" style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">${_afRefLabelTexte(a?.unite||'g')}</p>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
         <div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
         <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
@@ -6490,7 +6497,7 @@ function _renderAlimListHtml(ri) {
         <input type="number" class="a-qte" inputmode="decimal" min="0" step="1" value="${a.quantite_g!=null?a.quantite_g:''}"
           onchange="alimChangerQuantite(${ri},${ai},this.value)"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
-        <span class="a-unite">${a.unite&&a.unite!=='g'?esc(a.unite):'g'}</span>
+        <span class="a-unite">${a.unite==='unite'?'u.':a.unite==='portion'?'portion':(a.unite&&a.unite!=='g'?esc(a.unite):'g')}</span>
         <span class="macro-pills">${(() => {
           const d=(a.unite||'g')==='g'?100:1; const q=a.quantite_g||0;
           const k = Math.round(q*(a.kcal_par_100g||0)/d);
@@ -6845,7 +6852,7 @@ function _ouvrirSaisieQuantite(nom, kcal100, prot100, glu100, lip100, unite){
   unite = unite || 'g';
   const isG = unite === 'g';
   const diviseur = isG ? 100 : 1;
-  const qteLabel = isG ? 'Quantité (g)' : 'Nombre de ' + unite + 's';
+  const qteLabel = unite === 'unite' ? "Nombre d'unités" : unite === 'portion' ? 'Nombre de portions' : (isG ? 'Quantité (g)' : 'Nombre de ' + unite + 's');
   const qteDefault = isG ? 100 : 1;
   const uniteLabel = 'pour cette quantité';
   // Nom JS-échappé (apostrophes) une seule fois — un aliment comme "Huile
