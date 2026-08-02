@@ -411,7 +411,7 @@
     <div class="topbar-actions">
       <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="window.location.href='index.html?mobile=1&t='+Date.now()" title="Basculer vers la vue application mobile">📱 Vue mobile</button>
       <div class="dropdown">
-        <button class="icon-btn" onclick="toggleMenu(event,'notif')" aria-label="Notifications">
+        <button class="icon-btn" onclick="ouvrirClocheNotifConsole(event)" aria-label="Notifications">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
           <span class="badge-dot" id="notifCount" style="display:none;"></span>
         </button>
@@ -1385,9 +1385,15 @@ let _notifSelCorps = '';
 let _notifSelPlein = false;
 
 let _notifHistoTab = 'manuel'; // 'manuel' | 'auto' — bascule côté colonne Historique uniquement
+let _notifPageTab = 'client'; // 'client' | 'coach' — onglet racine de la page Notifications
 
 function setNotifHistoTab(tab){
   _notifHistoTab = tab;
+  renderMain();
+}
+
+function setNotifPageTab(tab){
+  _notifPageTab = tab;
   renderMain();
 }
 
@@ -1396,26 +1402,75 @@ function renderNotificationsPage(el){
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Notifications</h1></div>
-      <button class="btn primary" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
     </div>
-    <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-      <div style="flex:1;min-width:340px;">${_renderNotifEnvoyerSection()}</div>
-      <div style="flex:1;min-width:340px;">
-        <div class="fiche-tabs" style="margin-bottom:12px;">
-          <button class="fiche-tab ${_notifHistoTab==='manuel'?'active':''}" onclick="setNotifHistoTab('manuel')">Historique manuel</button>
-          <button class="fiche-tab ${_notifHistoTab==='auto'?'active':''}" onclick="setNotifHistoTab('auto')">Historique automatique</button>
+    <div class="fiche-tabs" style="margin-bottom:16px;">
+      <button class="fiche-tab ${_notifPageTab==='client'?'active':''}" onclick="setNotifPageTab('client')">Notifications client</button>
+      <button class="fiche-tab ${_notifPageTab==='coach'?'active':''}" onclick="setNotifPageTab('coach')">Mes notifications</button>
+    </div>
+    ${_notifPageTab === 'client' ? `
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:1;min-width:340px;">${_renderNotifEnvoyerSection()}</div>
+        <div style="flex:1;min-width:340px;">
+          <div class="fiche-tabs" style="margin-bottom:12px;">
+            <button class="fiche-tab ${_notifHistoTab==='manuel'?'active':''}" onclick="setNotifHistoTab('manuel')">Historique manuel</button>
+            <button class="fiche-tab ${_notifHistoTab==='auto'?'active':''}" onclick="setNotifHistoTab('auto')">Historique automatique</button>
+          </div>
+          ${_notifHistoTab === 'manuel'
+            ? `<div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : spinner}</div>`
+            : `<div id="notifRappelsList">${notifRappelsData.loaded ? _renderNotifRappelsList() : spinner}</div>`}
         </div>
-        ${_notifHistoTab === 'manuel'
-          ? `<div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : spinner}</div>`
-          : `<div id="notifRappelsList">${notifRappelsData.loaded ? _renderNotifRappelsList() : spinner}</div>`}
-      </div>
+      </div>` : `
+      <div id="notifCoachList">${notifCoachData.loaded ? _renderNotifCoachList() : spinner}</div>`}`;
+  if (_notifPageTab === 'client' && _notifHistoTab === 'manuel' && !notifHistoData.loaded) {
+    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications' && _notifPageTab === 'client' && _notifHistoTab === 'manuel') renderMain(); });
+  }
+  if (_notifPageTab === 'client' && _notifHistoTab === 'auto' && !notifRappelsData.loaded) {
+    chargerNotifsRappels().then(() => { if (state.nav === 'notifications' && _notifPageTab === 'client' && _notifHistoTab === 'auto') renderMain(); });
+  }
+  if (_notifPageTab === 'coach' && !notifCoachData.loaded) {
+    chargerNotifsCoach().then(() => { if (state.nav === 'notifications' && _notifPageTab === 'coach') renderMain(); });
+  }
+}
+
+// ── Onglet "Mes notifications" (coach) ──────────────────────────────────
+// Fusionne les événements réellement poussés au coach (activite_events —
+// bilan reçu / séance validée / journée validée, cf. coach_notif_prefs) et les
+// rappels de paiement envoyés aux clients (utile au coach comme journal :
+// "tel client a été relancé tel jour"), triés par date desc.
+let notifCoachData = { loaded:false, rows:[] };
+
+async function chargerNotifsCoach(){
+  const [resEvents, resPaiement] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/activite_events?order=created_at.desc&limit=200&select=client_id,type,meta,created_at`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_notifications?source=eq.rappel_paiement&order=created_at.desc&limit=100&select=client_id,title,body,created_at`, { headers: supaHeaders() }),
+  ]);
+  const events = resEvents.ok ? await resEvents.json() : [];
+  const paiements = resPaiement.ok ? await resPaiement.json() : [];
+  const rows = [
+    ...events.map(e => ({ kind:'event', client_id:e.client_id, type:e.type, meta:e.meta, created_at:e.created_at })),
+    ...paiements.map(p => ({ kind:'paiement', client_id:p.client_id, title:p.title, body:p.body, created_at:p.created_at })),
+  ].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  notifCoachData = { loaded:true, rows };
+}
+
+function _renderNotifCoachList(){
+  const rows = notifCoachData.rows;
+  if (!rows.length) return `<div class="fiche-prog-empty" style="text-align:center;padding:32px;"><div style="font-size:14px;color:var(--text-muted);">Aucune notification pour l'instant.</div></div>`;
+  return rows.map(r => {
+    if (r.kind === 'paiement') {
+      return `<div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
+        <div class="p-nom">${esc(_nomClient(r.client_id))} <span style="font-size:10px;font-weight:700;color:var(--accent);">RAPPEL PAIEMENT ENVOYÉ</span></div>
+        <div class="p-meta" style="white-space:normal;">${esc(r.title)} — ${esc(r.body)}</div>
+        <div class="p-meta">${_fmtNotifDate(r.created_at)}</div>
+      </div>`;
+    }
+    const lib = libelleLog({ type: r.type, meta: r.meta, semaine: r.meta && r.meta.semaine_label });
+    return `<div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
+      <div class="p-nom">${lib.icon} ${esc(_nomClient(r.client_id))} — ${esc(lib.txt)}</div>
+      ${lib.sub ? `<div class="p-meta">${esc(lib.sub)}</div>` : ''}
+      <div class="p-meta">${_fmtNotifDate(r.created_at)}</div>
     </div>`;
-  if (_notifHistoTab === 'manuel' && !notifHistoData.loaded) {
-    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications' && _notifHistoTab === 'manuel') renderMain(); });
-  }
-  if (_notifHistoTab === 'auto' && !notifRappelsData.loaded) {
-    chargerNotifsRappels().then(() => { if (state.nav === 'notifications' && _notifHistoTab === 'auto') renderMain(); });
-  }
+  }).join('');
 }
 
 // ── Section "Envoyer à une sélection de clients" ─────────────────────────
@@ -1969,8 +2024,8 @@ function renderBilanDetailPage(el) {
         ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
       </div>
       ${bilanDetailState._supabaseBilanId ? (bilanDetailState.coachTraite
-        ? `<button class="btn" style="flex-shrink:0;" onclick="marquerNonTraite()">Marquer non traité</button>`
-        : `<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite()">Marquer traité</button>`) : ''}
+        ? `<button class="btn" style="flex-shrink:0;" onclick="marquerNonTraite()">↩ Repasser à traiter</button>`
+        : `<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite()">✓ Marquer comme traité</button>`) : ''}
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
@@ -6210,6 +6265,23 @@ function toggleMenu(ev, id){
 }
 document.addEventListener('click', () => document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')));
 
+// Le badge de la cloche ne doit pas rester bloqué à un chiffre qui ne baisse
+// jamais tant que les bilans/retards sous-jacents ne sont pas réellement
+// traités par le coach — "ouvrir la cloche" doit pouvoir la faire disparaître
+// (comme n'importe quelle appli), sans pour autant modifier l'état réel des
+// bilans (ça, c'est le rôle du bouton "Marquer traité" dans le détail bilan).
+// On distingue donc deux choses : la liste (toujours le vrai "à traiter" actuel)
+// et le badge (compte seulement les éléments jamais encore "vus" en ouvrant la
+// cloche, mémorisé par clé stable dans localStorage).
+function _notifSeenKeys(){
+  try { return new Set(JSON.parse(localStorage.getItem('at_notif_seen_keys') || '[]')); } catch(e) { return new Set(); }
+}
+function _notifMarquerVues(keys){
+  const seen = _notifSeenKeys();
+  keys.forEach(k => seen.add(k));
+  try { localStorage.setItem('at_notif_seen_keys', JSON.stringify([...seen])); } catch(e) {}
+}
+
 function renderNotifMenu(){
   const bilans = data.bilansCoach.filter(b=>!b.coachTraite).slice(0,3);
   const retards = data.clients.filter(c=>c.enRetard).slice(0,3);
@@ -6219,9 +6291,24 @@ function renderNotifMenu(){
   ];
   const menu = document.getElementById('menu-notif');
   menu.innerHTML = `<div class="menu-label">À traiter</div>` + (items.length ? items.join('') : `<div class="menu-item" style="color:var(--text-faint);">Rien à signaler.</div>`);
-  const count = bilans.length + retards.length;
+  const keys = [...bilans.map(b => 'bilan:'+b.client+'|'+b.ts), ...retards.map(c => 'retard:'+c.id)];
+  menu.dataset.keys = JSON.stringify(keys);
+  const seen = _notifSeenKeys();
+  const nonVus = keys.filter(k => !seen.has(k)).length;
   const badge = document.getElementById('notifCount');
-  if (count) { badge.style.display='flex'; badge.textContent = count; } else { badge.style.display='none'; }
+  if (nonVus) { badge.style.display='flex'; badge.textContent = nonVus; } else { badge.style.display='none'; }
+}
+
+function ouvrirClocheNotifConsole(ev){
+  toggleMenu(ev, 'notif');
+  const menu = document.getElementById('menu-notif');
+  let keys = [];
+  try { keys = JSON.parse(menu.dataset.keys || '[]'); } catch(e) {}
+  if (keys.length) {
+    _notifMarquerVues(keys);
+    const badge = document.getElementById('notifCount');
+    if (badge) badge.style.display = 'none';
+  }
 }
 
 // ── Voir les assignés d'un template programme ─────────────────────────
