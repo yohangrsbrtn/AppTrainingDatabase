@@ -1589,12 +1589,13 @@ function _demarrerScan() {
   const formats = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E];
   // fps relevé 10→15 (décodage plus fréquent = détection plus rapide) et
   // qrbox élargi (280x160, un code-barres est large et bas, une boîte plus
-  // proche de son ratio réel laisse plus de marge d'alignement). focusMode
-  // continu demandé en constraint caméra — ignoré silencieusement sur les
-  // navigateurs/appareils qui ne le supportent pas (iOS Safari notamment),
-  // mais accélère nettement la mise au point sur Android Chrome.
+  // proche de son ratio réel laisse plus de marge d'alignement).
+  // La contrainte "advanced: [{focusMode:'continuous'}]" a été retirée : elle
+  // faisait échouer getUserMedia (caméra totalement inaccessible) sur les
+  // appareils du coach — regression constatée juste après son ajout. La
+  // demande d'autofocus continu n'était qu'un bonus, la fiabilité prime.
   _dScanInstance.start(
-    { facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] },
+    { facingMode: 'environment' },
     { fps: 15, qrbox: { width: 280, height: 160 }, formatsToSupport: formats },
     onScanSuccess
   )
