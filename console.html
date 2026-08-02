@@ -4570,6 +4570,8 @@ async function marquerFicheBilansSelTraite(clientId) {
 // ── Mensuration charts — helpers partagés ────────────────────────────────────
 window._mensCharts = {};
 const MENS_PHASES = ['Sèche','Prise de masse','Maintien','Recomposition'];
+const MENS_PHASE_COLORS = { 'Sèche':'#e05c5c', 'Prise de masse':'#3ecf8e', 'Maintien':'#4f8ef7', 'Recomposition':'#a78bfa' };
+function _mensPhaseColor(p) { return MENS_PHASE_COLORS[p] || '#8892a4'; }
 const MENS_COLS   = ['fessiers','cuisses','mollets','poitrine','epaules','bras'];
 const MENS_COLORS = ['#f59e0b','#a78bfa','#3ecf8e','#f97316','#4f8ef7','#e05c5c'];
 const MENS_LABELS = ['Fessiers','Cuisses','Mollets','Poitrine','Épaules','Bras'];
@@ -4612,13 +4614,40 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   }).join('')).join('');
   const axes=`<line x1="${PL}" y1="${PT}" x2="${PL}" y2="${PT+ch}" stroke="var(--hairline)" stroke-width="1"/>
     <line x1="${PL}" y1="${PT+ch}" x2="${PL+cw}" y2="${PT+ch}" stroke="var(--hairline)" stroke-width="1"/>`;
+  // Phases : un trait fin vertical à chaque changement de phase entre deux relevés
+  // consécutifs, + une fine bande colorée collée à l'axe des dates indiquant la phase
+  // couvrant chaque segment (regroupe les relevés consécutifs de même phase).
+  let phaseBand = '', phaseTransitions = '';
+  const phasesPresentes = new Set();
+  if (rows.some(r => r.phase)) {
+    const bandY = PT + ch - 4, bandH = 4;
+    let start = 0;
+    for (let i = 1; i <= n; i++) {
+      if (i === n || (rows[i].phase || '') !== (rows[start].phase || '')) {
+        const p = rows[start].phase;
+        if (p) {
+          phasesPresentes.add(p);
+          const x1 = xs[start], x2 = xs[i - 1];
+          phaseBand += `<rect x="${x1}" y="${bandY}" width="${Math.max(x2 - x1, 3)}" height="${bandH}" rx="1" fill="${_mensPhaseColor(p)}" opacity="0.85"/>`;
+        }
+        if (i < n) {
+          const xt = +((xs[i - 1] + xs[i]) / 2).toFixed(2);
+          phaseTransitions += `<line x1="${xt}" y1="${PT}" x2="${xt}" y2="${PT+ch}" stroke="var(--text-faint)" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.45"/>`;
+        }
+        start = i;
+      }
+    }
+  }
   const vline=`<line id="${id}_vl" x1="${xs[0]}" y1="${PT}" x2="${xs[0]}" y2="${PT+ch}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5" display="none"/>`;
   const ov=`<rect x="${PL}" y="${PT}" width="${cw}" height="${ch}" fill="transparent" onmousemove="_mensHover(event,'${id}')" onmouseleave="_mensHoverOut('${id}')"/>`;
   const tip=`<div id="${id}_tip" style="display:none;position:absolute;top:10px;left:10px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text);pointer-events:none;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.2);white-space:nowrap;"></div>`;
   const legend=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);margin-top:8px;margin-bottom:4px;">
     ${keys.map((k,i)=>`<span><span style="color:${colors[i]};margin-right:3px;">●</span>${labels[i]}</span>`).join('')}
   </div>`;
-  return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${areas}${lines}${dots}${vline}${ov}</svg></div>${legend}`;
+  const phaseLegend = phasesPresentes.size ? `<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--text-faint);margin-bottom:4px;">
+    ${MENS_PHASES.filter(p=>phasesPresentes.has(p)).map(p=>`<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${_mensPhaseColor(p)};margin-right:4px;vertical-align:middle;"></span>${esc(p)}</span>`).join('')}
+  </div>` : '';
+  return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${phaseTransitions}${phaseBand}${areas}${lines}${dots}${vline}${ov}</svg></div>${phaseLegend}${legend}`;
 }
 
 function _mensHover(evt, cid) {
