@@ -1587,7 +1587,17 @@ function _demarrerScan() {
   if (!el || !window.Html5Qrcode) return;
   _dScanInstance = new Html5Qrcode('dScanViewport');
   const formats = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E];
-  _dScanInstance.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 160 }, formatsToSupport: formats }, onScanSuccess)
+  // fps relevé 10→15 (décodage plus fréquent = détection plus rapide) et
+  // qrbox élargi (280x160, un code-barres est large et bas, une boîte plus
+  // proche de son ratio réel laisse plus de marge d'alignement). focusMode
+  // continu demandé en constraint caméra — ignoré silencieusement sur les
+  // navigateurs/appareils qui ne le supportent pas (iOS Safari notamment),
+  // mais accélère nettement la mise au point sur Android Chrome.
+  _dScanInstance.start(
+    { facingMode: 'environment', advanced: [{ focusMode: 'continuous' }] },
+    { fps: 15, qrbox: { width: 280, height: 160 }, formatsToSupport: formats },
+    onScanSuccess
+  )
     .catch(() => {
       showToast('Impossible d\'accéder à la caméra.', '#c0392b');
       _dAjoutEtape = 'recherche';
