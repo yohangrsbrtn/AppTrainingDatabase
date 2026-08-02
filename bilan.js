@@ -363,12 +363,16 @@ function toggleJourBilanSupa(jourIdx, field, elemId) {
 
 function noterRepasSupa(repasIdx, field, valeur, groupeId) {
   if (!_bilanData) return;
-  _bilanData.repas[repasIdx][field] = valeur;
-  _bilanNotes[groupeId] = valeur;
+  // Recliquer sur la note déjà sélectionnée la désélectionne (0 = pas de note) — pratique
+  // pour annuler une note posée par erreur sans devoir en choisir une autre à la place.
+  const actuelle = _bilanData.repas[repasIdx][field];
+  const nouvelleValeur = actuelle === valeur ? 0 : valeur;
+  _bilanData.repas[repasIdx][field] = nouvelleValeur;
+  _bilanNotes[groupeId] = nouvelleValeur;
   const palette = _paletteNote(groupeId);
   for (let i = 1; i <= 5; i++) {
     const btn = document.getElementById(groupeId + '_' + i);
-    if (btn) btn.style.cssText = 'flex:1;padding:8px 0;' + _styleNoteBtn(i, valeur, palette) + 'border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;';
+    if (btn) btn.style.cssText = 'flex:1;padding:8px 0;' + _styleNoteBtn(i, nouvelleValeur, palette) + 'border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;';
   }
   _supaUpdateBilan({ repas_eval: _bilanData.repas.map(r => ({ num: r.num, adhesion: r.adhesion, digestion: r.digestion, appetit: r.appetit })) }).catch(() => {});
 }
@@ -387,13 +391,16 @@ function sauverCommentaireBilanSupa(field, value) {
 // noterRepasSupa mais pour une valeur unique par bilan (pas par repas).
 function noterGlobalSupa(field, dbField, valeur, groupeId) {
   if (!_bilanData) return;
-  _bilanData[field] = valeur;
+  // Même bascule de désélection que noterRepasSupa (reclique = annule la note).
+  const actuelle = _bilanData[field];
+  const nouvelleValeur = actuelle === valeur ? 0 : valeur;
+  _bilanData[field] = nouvelleValeur;
   const palette = _paletteNote(groupeId);
   for (let i = 1; i <= 5; i++) {
     const btn = document.getElementById(groupeId + '_' + i);
-    if (btn) btn.style.cssText = 'flex:1;padding:8px 0;' + _styleNoteBtn(i, valeur, palette) + 'border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;';
+    if (btn) btn.style.cssText = 'flex:1;padding:8px 0;' + _styleNoteBtn(i, nouvelleValeur, palette) + 'border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;';
   }
-  _supaUpdateBilan({ [dbField]: valeur }).catch(() => {});
+  _supaUpdateBilan({ [dbField]: nouvelleValeur }).catch(() => {});
 }
 
 function _renderNoteGlobaleSupa(field, dbField, groupeId, valActuelle) {
