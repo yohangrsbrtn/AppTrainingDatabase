@@ -6652,7 +6652,7 @@ function renderEditeurDietePage(el) {
     : tpl.id ? 'Modifier template' : 'Nouveau template';
 
   el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10;">
+    <div id="ed-toolbar" style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10;">
       <button class="btn" onclick="retourDepuisEditeurDiete()">← Retour</button>
       <div style="flex:1;">
         <div class="eyebrow">${isClient ? 'Diète client' : 'Template diète'}</div>
@@ -6664,7 +6664,7 @@ function renderEditeurDietePage(el) {
       <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
       <div class="field-row"><label>Description (optionnelle)</label><input id="dDesc" type="text" value="${esc(tpl.description||'')}" placeholder="Contexte, objectifs…"></div>
       ${isClient ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" ${!_ficheCreateClientId?'':'checked'}> Enregistrer comme template réutilisable</label>` : ''}
-      <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;${totalM.kcal?'':'display:none;'}">
+      <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;position:sticky;z-index:9;box-shadow:0 8px 12px -6px rgba(0,0,0,.35);${totalM.kcal?'':'display:none;'}">
         ${totalM.kcal ? `
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
@@ -6675,6 +6675,14 @@ function renderEditeurDietePage(el) {
       <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px;" onclick="ajouterRepas()">+ Ajouter un repas</button>
       <div id="dErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
     </div>`;
+  // Cale le bandeau de totaux (sticky) juste sous la barre d'outils (sticky elle aussi,
+  // hauteur variable) pour qu'ils ne se chevauchent pas au scroll — même technique que
+  // initDieteStickyMacros côté client (diete.js).
+  setTimeout(() => {
+    const toolbar = document.getElementById('ed-toolbar');
+    const bar = document.getElementById('ed-total-macros');
+    if (toolbar && bar) bar.style.top = toolbar.offsetHeight + 'px';
+  }, 0);
 }
 
 function retourDepuisEditeurDiete() {
