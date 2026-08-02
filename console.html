@@ -4728,8 +4728,17 @@ function _mensEcartHtml(rowsFiltres) {
 }
 
 // Select inline dans la ligne du tableau — édite la phase sans ouvrir la modale complète.
+// De nombreuses mensurations (migrées ou saisies avant l'existence de cette liste fixe)
+// portent une valeur libre hors des 4 options standard (ex: "CUT", "PDM", "REFEED",
+// "REVERSE"...) — sans les inclure comme option, le select retombe sur "—" par défaut
+// (aucune <option> ne correspond), ce qui donnait l'impression que la phase avait
+// disparu alors que la donnée en base était intacte (bug vécu juste après l'ajout de ce
+// select). On ajoute donc la valeur actuelle comme option supplémentaire si elle ne fait
+// pas partie de la liste standard, pour ne jamais perdre l'affichage d'une valeur existante.
 function _mensPhaseSelectHtml(rowId, clientId, currentPhase) {
+  const estStandard = !currentPhase || MENS_PHASES.includes(currentPhase);
   const opts = `<option value="" ${!currentPhase?'selected':''}>—</option>`
+    + (estStandard ? '' : `<option value="${esc(currentPhase)}" selected>${esc(currentPhase)}</option>`)
     + MENS_PHASES.map(p => `<option value="${esc(p)}" ${currentPhase===p?'selected':''}>${esc(p)}</option>`).join('');
   return `<select onclick="event.stopPropagation();" onchange="event.stopPropagation();changerPhaseMensurationInline(${rowId},'${esc(clientId)}',this.value)"
     style="font-size:12px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:3px 6px;">${opts}</select>`;
