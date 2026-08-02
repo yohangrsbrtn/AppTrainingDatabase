@@ -4665,16 +4665,17 @@ function _renderMens2Section(rows, idBase, selKeys, setterFn) {
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div>${chart}`;
 }
 
+// Sélection unique (pas de superposition de courbes) — même comportement que l'app mobile
+// (_toggleMChart2 dans mensurations.js) : la multi-sélection était peu pratique (courbes qui
+// se chevauchent, légende encombrée).
 function _setFicheMensChart2(key) {
-  if(_ficheMensChart2Keys.has(key)){ if(_ficheMensChart2Keys.size>1) _ficheMensChart2Keys.delete(key); }
-  else _ficheMensChart2Keys.add(key);
+  _ficheMensChart2Keys = new Set([key]);
   const el=document.getElementById('ficheMensChart2');
   if(el&&_ficheMensurations) el.innerHTML=_renderMens2Section(_ficheMensurations,'fiche_c2',_ficheMensChart2Keys,'_setFicheMensChart2');
 }
 
 function _setPageMensChart2(key) {
-  if(_pageMensChart2Keys.has(key)){ if(_pageMensChart2Keys.size>1) _pageMensChart2Keys.delete(key); }
-  else _pageMensChart2Keys.add(key);
+  _pageMensChart2Keys = new Set([key]);
   const el=document.getElementById('pageMensChart2');
   if(el&&_pageMensurationsRows.length) el.innerHTML=_renderMens2Section(_pageMensurationsRows,'page_c2',_pageMensChart2Keys,'_setPageMensChart2');
 }
