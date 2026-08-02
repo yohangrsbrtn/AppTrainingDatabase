@@ -51,7 +51,32 @@ async function _supaGetOrCreateBilanCourant(clientId) {
     const { fin } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
     if (new Date() <= fin) return { row: arr[0], jourBilanNom };
   }
-  const row = await _supaCreerNouveauBilan(clientId, jourBilanNom);
+  // Référence de la semaine du nouveau bilan : "maintenant" par défaut, SAUF
+  // si le tout dernier bilan de ce client (envoyé ou non) couvre déjà une
+  // semaine dont la fin tombe aujourd'hui ou plus tard — dans ce cas on
+  // démarre pile le lendemain de cette fin. Sans ce garde-fou, un client qui
+  // envoie son bilan LE jour même de son jour_bilan assigné puis rouvre
+  // l'app dans la foulée se retrouve avec un second bilan dupliquant la même
+  // semaine (delta=0 dans _bilanWeekBounds quand aujourd'hui == jour_bilan).
+  let refDate = new Date();
+  try {
+    const derRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=created_at`,
+      { headers: supaHeaders() }
+    );
+    const derArr = derRes.ok ? await derRes.json() : [];
+    if (derArr.length) {
+      const { fin: finDernier } = _bilanWeekBounds(jourBilanNom, new Date(derArr[0].created_at));
+      const finDernierJour = new Date(finDernier); finDernierJour.setHours(0, 0, 0, 0);
+      const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
+      if (finDernierJour >= aujourdhui) {
+        refDate = new Date(finDernier);
+        refDate.setDate(refDate.getDate() + 1);
+        refDate.setHours(12, 0, 0, 0);
+      }
+    }
+  } catch(e) {}
+  const row = await _supaCreerNouveauBilan(clientId, jourBilanNom, refDate);
   return { row, jourBilanNom };
 }
 
@@ -163,7 +188,7 @@ function _normaliserBilanSupa(row) {
   };
 }
 
-async function _supaCreerNouveauBilan(clientId, jourBilanNom) {
+async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
   let nbRepas = 4;
   if (jourBilanNom === undefined) {
     jourBilanNom = null;
@@ -197,12 +222,18 @@ async function _supaCreerNouveauBilan(clientId, jourBilanNom) {
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
   const body = {
     client_id:    clientId,
-    semaine_label: _supaGetSemaineLabel(jourBilanNom),
+    semaine_label: _supaGetSemaineLabel(jourBilanNom, refDate),
     jours,
     repas_eval:   repasEval,
     envoye_coach: false,
     coach_traite: false,
   };
+  // created_at sert de référence partout ailleurs (_supaGetOrCreateBilanCourant,
+  // reporterMesureDansBilan…) pour recalculer la fenêtre de la semaine de ce
+  // bilan — il DOIT donc tomber dans la semaine décrite par semaine_label, pas
+  // rester au moment réel de création si refDate a été avancée (cf. garde-fou
+  // anti-doublon ci-dessus).
+  if (refDate) body.created_at = refDate.toISOString();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans`, {
     method: 'POST',
     headers: supaHeaders({ Prefer: 'return=representation' }),
@@ -214,8 +245,8 @@ async function _supaCreerNouveauBilan(clientId, jourBilanNom) {
 
 // La semaine du bilan se termine le jour_bilan assigné au client (ou
 // dimanche par défaut) — voir _bilanWeekBounds (api.js).
-function _supaGetSemaineLabel(jourBilanNom) {
-  const { debut: lun, fin: dim } = _bilanWeekBounds(jourBilanNom, new Date());
+function _supaGetSemaineLabel(jourBilanNom, refDate) {
+  const { debut: lun, fin: dim } = _bilanWeekBounds(jourBilanNom, refDate || new Date());
   const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
   const fmt  = d => d.getDate() + ' ' + MOIS[d.getMonth()];
   return 'Du ' + fmt(lun) + ' au ' + fmt(dim);
