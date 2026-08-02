@@ -4858,6 +4858,7 @@ function renderFicheDieteTab(c){
           <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
         </div>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="dupliquerDieteClient(${d.id},'${c.id}')" title="Créer une copie indépendante de cette diète pour ce client">Dupliquer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d'être mise à jour.')" title="Notifier">🔔</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
       </div>`).join('') : `
@@ -7088,6 +7089,35 @@ async function _dupliquerTemplateDiete(sourceTemplateId, nom){
     }
   }
   return newTpl.id;
+}
+
+// Duplique une diète déjà assignée à un client → nouvelle copie indépendante
+// (client_only, jamais partagée) assignée au même client, sous le nom
+// "X (copie)". Réutilise _dupliquerTemplateDiete (même mécanique que
+// l'assignation d'un template depuis la bibliothèque).
+async function dupliquerDieteClient(clientDieteId, clientId){
+  const d = (ficheData.tous_dietes||[]).find(x=>x.id===clientDieteId);
+  if (!d) return;
+  if (!confirm(`Dupliquer la diète "${d.nom}" pour ce client ?`)) return;
+  try {
+    let tplId = d.diete_template_id;
+    if (!tplId) {
+      // Fallback par nom pour les diètes assignées avant l'ajout de la colonne
+      // diete_template_id — même limite documentée qu'ailleurs (editerDieteClient).
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(d.nom)}&order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+      const tpls = res.ok ? await res.json() : [];
+      if (!tpls.length) { alert('Template introuvable pour cette diète.'); return; }
+      tplId = tpls[0].id;
+    }
+    const nomCopie = d.nom + ' (copie)';
+    const newTplId = await _dupliquerTemplateDiete(tplId, nomCopie);
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`, {
+      method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }),
+      body: JSON.stringify({ client_id: clientId, nom: nomCopie, diete_template_id: newTplId, actif: true })
+    });
+    ficheData.tous_dietes = await chargerTousDietes(clientId);
+    setFicheTab('diete');
+  } catch(e){ alert('Erreur : '+e.message); }
 }
 
 async function retirerDieteClient(dieteId, clientId){
