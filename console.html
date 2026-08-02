@@ -958,6 +958,7 @@ async function chargerDonnees(){
       mode_paiement: p.mode_paiement || null,
       jour_paiement: p.jour_paiement || null,
       date_fin_coaching: p.date_fin_coaching || null,
+      jour_bilan: p.jour_bilan || null,
       pushActif: clientsAvecPush.has(p.client_id),
     };
   });
@@ -3674,7 +3675,13 @@ function renderDashboard(el){
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
   const bilansSupaATrait = (data.bilansSupa || []).map(b => {
     const c = data.clients.find(x=>x.id===b.client_id);
-    return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id };
+    // semaine_label est figé à la création du bilan — s'il a changé de jour_bilan entre
+    // temps, ce libellé stocké peut ne plus correspondre à sa propre date_validation (bug
+    // vécu : bilan validé le 2 août affichant "3 août → 9 août"). On le recalcule ici à
+    // partir de la date de validation réelle + jour_bilan actuel du client, cohérent avec
+    // ce qu'affiche la page de détail (_weekRange(dateValidation)).
+    const labelFrais = b.date_validation ? _semaineLabelFromSheetDate(b.date_validation.slice(0,10), c ? c.jour_bilan : null) : null;
+    return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id, semaine_label: labelFrais || b.semaine_label };
   });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
 

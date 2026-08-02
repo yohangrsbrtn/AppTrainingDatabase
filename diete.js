@@ -300,10 +300,11 @@ async function sbSupprimerSlotJournal(ligne) {
   return { ok: res.ok };
 }
 
-// Résout une diète assignée au client (client_dietes) en {nom, repas:[{nom,aliments}]} —
-// même logique que ouvrirDieteSupabase(), mais renvoie l'objet au lieu de peupler _dDetail.
-// Ne prend que la variante de base (variante_index=0) de chaque repas : les équivalences
-// n'ont pas de sens pour une cible du journal (une seule valeur de comparaison par repas).
+// Résout une diète assignée au client (client_dietes) en {nom, repas:[{nom,aliments,equivalences}]} —
+// même logique que ouvrirDieteSupabase(). Renvoie toutes les variantes (équivalences incluses) :
+// utilisées pour choisir un repas à ajouter au journal (choisirDieteJournal). Pour la diète
+// CIBLE du jour, seule la variante de base (equivalences[0], index 0) est utilisée par les
+// appelants — une seule valeur de comparaison par repas a du sens pour une cible.
 // Attention : lève une exception sur un échec réseau/HTTP plutôt que de renvoyer
 // silencieusement { repas: [] } — le résultat est mis en cache indéfiniment par
 // _resoudreDieteDetail (jamais invalidé pendant la session), donc masquer une panne
@@ -334,8 +335,8 @@ async function sbResoudreDieteDetail(clientDieteId) {
   // systématiquement en 400 (PGRST200, relationship introuvable). On lit uniquement les
   // colonnes directes de repas_aliments, comme le fait déjà ouvrirDieteSupabase() plus haut.
   const repasRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templateId}&variante_index=eq.0&order=ordre.asc` +
-    `&select=nom,ordre,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g)`,
+    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templateId}&order=ordre.asc,variante_index.asc` +
+    `&select=nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g)`,
     { headers: supaHeaders() }
   );
   if (!repasRes.ok) throw new Error('repas_' + repasRes.status);
@@ -350,7 +351,15 @@ async function sbResoudreDieteDetail(clientDieteId) {
     const lip  = (a.lip_par_100g  || 0) / diviseur;
     return { nom: a.nom || '?', unite: a.unite || 'g', qte: q, cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
   });
-  return { nom: templateNom, repas: repasRaw.slice().sort((a,b)=>a.ordre-b.ordre).map(r => ({ nom: r.nom, aliments: toAliments(r) })) };
+  // Groupe par ordre : variantes au même ordre = équivalences (même logique que ouvrirDieteSupabase).
+  const grouped = {};
+  repasRaw.forEach(r => { (grouped[r.ordre] = grouped[r.ordre] || []).push(r); });
+  const repas = Object.keys(grouped).map(Number).sort((a,b)=>a-b).map(ordre => {
+    const variants = grouped[ordre];
+    const main = variants[0];
+    return { nom: main.nom, aliments: toAliments(main), equivalences: variants.slice(1).map(v => ({ nom: v.nom, aliments: toAliments(v) })) };
+  });
+  return { nom: templateNom, repas };
 }
 
 async function sbChargerBaseAliments() {
@@ -421,8 +430,10 @@ function _refKeyForDiete(d) {
 
 function _parseDieteRef(ref) {
   if (ref.startsWith('sb|')) {
-    const [, id, idx] = ref.split('|');
-    return { sb: true, id, idx: idx !== undefined ? parseInt(idx) : undefined, cacheKey: 'sb|' + id };
+    // 4e segment optionnel = index de variante (0=repas de base, N=equivalences[N-1]) —
+    // absent sur les refs créées avant l'ajout du choix d'équivalence dans le journal (défaut 0).
+    const [, id, idx, vi] = ref.split('|');
+    return { sb: true, id, idx: idx !== undefined ? parseInt(idx) : undefined, vi: vi !== undefined ? parseInt(vi) : 0, cacheKey: 'sb|' + id };
   }
   const [ligne, col, idx] = ref.split('|');
   return { sb: false, ligne: parseInt(ligne), col: parseInt(col), idx: idx !== undefined ? parseInt(idx) : undefined, cacheKey: ligne + '|' + col };
@@ -989,7 +1000,8 @@ function _resoudreSlot(s) {
   const r = _parseDieteRef(s.ref);
   const detail = _dDieteDetailCache[r.cacheKey];
   const repas = detail && detail.repas && detail.repas[r.idx];
-  return repas ? repas.aliments : [];
+  if (!repas) return [];
+  return r.vi ? ((repas.equivalences || [])[r.vi - 1]?.aliments || []) : repas.aliments;
 }
 
 // Diète cible du jour actuellement ouvert, résolue (repas + macros) — ou null si aucune.
@@ -1167,10 +1179,17 @@ function renderJournalChoixSource() {
   if (_dJournalAjoutEtape === 'coach-repas') {
     const dc = _dJournalDieteChoisie;
     const repasList = (dc && dc.repas) || [];
-    const rows = repasList.map((r, idx) => `
-      <div class="diete-item" onclick="_guardAction(() => ajouterSlotCoach(${idx}), this)">
+    const rows = repasList.map((r, idx) => {
+      const equivRows = (r.equivalences || []).map((eq, eIdx) => `
+        <div class="diete-item" style="margin-left:18px;margin-top:-2px;border-color:#6d3fd655;" onclick="_guardAction(() => ajouterSlotCoach(${idx},${eIdx + 1}), this)">
+          <div class="diete-bar" style="background:linear-gradient(180deg,#a78bfa,#6d3fd6);"></div>
+          <span style="padding-left:8px;font-size:13px;font-weight:600;color:#c9b8fa;">≡ ${esc(eq.nom)}</span>
+          <div class="diete-arrow" style="background:#a78bfa22;border-color:#a78bfa66;color:#a78bfa;">›</div>
+        </div>`).join('');
+      return `<div class="diete-item" onclick="_guardAction(() => ajouterSlotCoach(${idx},0), this)">
         <div class="diete-bar"></div><span style="padding-left:8px;font-size:14px;font-weight:600;">${esc(r.nom)}</span><div class="diete-arrow">›</div>
-      </div>`).join('');
+      </div>${equivRows}`;
+    }).join('');
     return `
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">${esc(dc ? dc.nom : '')} — quel repas ?</div>
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucun repas trouvé.</div>'}
@@ -1330,12 +1349,15 @@ async function choisirDieteJournal(d) {
   setPage('diete');
 }
 
-async function ajouterSlotCoach(idx) {
+async function ajouterSlotCoach(idx, vi) {
+  vi = vi || 0;
   const dc = _dJournalDieteChoisie;
   const r = dc && dc.repas[idx];
   if (!r) return;
-  const ref = 'sb|' + dc.refKey.id + '|' + idx;
-  const label = r.nom + ' · ' + dc.nom;
+  const variant = vi ? (r.equivalences || [])[vi - 1] : null;
+  if (vi && !variant) return;
+  const ref = 'sb|' + dc.refKey.id + '|' + idx + '|' + vi;
+  const label = (variant ? variant.nom : r.nom) + ' · ' + dc.nom;
   const slot = _dJournalSlotEnEdition;
   try {
     const res = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'coach', ref, label);

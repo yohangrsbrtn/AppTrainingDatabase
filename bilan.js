@@ -49,7 +49,22 @@ async function _supaGetOrCreateBilanCourant(clientId) {
   const arr = res.ok ? await res.json() : [];
   if (arr.length > 0) {
     const { fin } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
-    if (new Date() <= fin) return { row: arr[0], jourBilanNom };
+    if (new Date() <= fin) {
+      // semaine_label est figé au moment de la création du bilan — si le client modifie
+      // jour_bilan pendant que ce bilan (non-envoyé) est en cours, le libellé affiché reste
+      // celui calculé avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. On
+      // recalcule à chaque ouverture et on réécrit en base si le jour_bilan a changé entre
+      // temps (bug vécu : jour_bilan passé à Mercredi, bilan encore affiché "lundi→dimanche").
+      const labelAttendu = _supaGetSemaineLabel(jourBilanNom, new Date(arr[0].created_at));
+      if (arr[0].semaine_label !== labelAttendu) {
+        arr[0].semaine_label = labelAttendu;
+        fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${arr[0].id}`, {
+          method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
+          body: JSON.stringify({ semaine_label: labelAttendu })
+        }).catch(() => {});
+      }
+      return { row: arr[0], jourBilanNom };
+    }
   }
   // Référence de la semaine du nouveau bilan : "maintenant" par défaut, SAUF
   // si le tout dernier bilan de ce client (envoyé ou non) couvre déjà une
