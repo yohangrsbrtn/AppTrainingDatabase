@@ -175,6 +175,20 @@ async function _supaLoadBilanHistoriqueById(id) {
 
 const _JOURS_NOMS = ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIMANCHE'];
 
+// data.jours est toujours stocké/indexé Lundi(0)…Dimanche(6) (schéma DB fixe, cf. commentaire
+// plus haut) — mais la semaine d'un bilan se termine le jour_bilan du client, pas forcément
+// dimanche. Sans réordonnancement à l'affichage, les cartes journalières listaient toujours
+// "LUNDI…DIMANCHE" dans cet ordre calendaire même pour un jour_bilan='Mercredi' (semaine
+// jeudi→mercredi), ce qui donnait l'impression trompeuse que la semaine restait lundi-dimanche
+// alors que le sous-titre (semaine_label) affichait bien la bonne plage. Ne change QUE l'ordre
+// d'affichage des cartes — j.idx (utilisé par sauverJourBilanSupa) reste inchangé.
+function _joursOrdreAffichage(jours, jourBilanNom) {
+  if (!jours || !jours.length) return jours || [];
+  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const startIdx = (cibleIdx + 1) % 7; // lendemain du jour de bilan = premier jour de la semaine
+  return Array.from({ length: 7 }, (_, i) => jours[(startIdx + i) % 7]);
+}
+
 function _normaliserBilanSupa(row) {
   const jours = _JOURS_NOMS.map((nom, idx) => {
     const j = (row.jours || [])[idx] || {};
@@ -555,7 +569,7 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
 
   // ── Semaine
   html += `<div class="section-title" style="color:#1D9E75;">📅 Semaine</div>`;
-  (data.jours || []).forEach(j => {
+  (_joursOrdreAffichage(data.jours, _bilanJourBilanNom)).forEach(j => {
     html += `<div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:12px;">${j.nom}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
