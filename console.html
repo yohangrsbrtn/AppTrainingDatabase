@@ -1561,8 +1561,15 @@ function openBilanHistoClient(clientId) {
     });
 }
 
+// Ouvrir un bilan depuis le dashboard d'accueil doit se comporter comme si on
+// venait de la fiche client (bouton retour + fil de navigation rapide vers les
+// autres onglets), pas comme depuis la liste "Bilans" — le coach veut retomber
+// dans le contexte complet du client, pas dans un cul-de-sac isolé.
 function ouvrirBilanDashboard(bilanId) {
-  openBilanByIdFromRecents(bilanId);
+  const b = (data.bilansAll||[]).find(x=>x.id===bilanId);
+  if (!b) return;
+  _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1;
+  openBilanDetailSupabase(b);
 }
 
 // "Bilans en retard" ne porte que le client (pas de bilan précis) — on va
@@ -1572,9 +1579,16 @@ async function ouvrirBilanEnRetardDashboard(clientId) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.asc&limit=1`, { headers: supaHeaders() });
     const rows = res.ok ? await res.json() : [];
-    if (rows[0]) { openBilanDetailSupabase(rows[0]); return; }
+    if (rows[0]) { _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1; openBilanDetailSupabase(rows[0]); return; }
   } catch(e) {}
   openPanel(clientId);
+}
+
+// Fil de navigation rapide (bilan-detail, ouvert depuis la fiche/le dashboard) :
+// sauter directement vers un autre onglet de la fiche de ce même client, sans
+// repasser par "Retour" puis re-cliquer l'onglet.
+function allerFicheTab(clientId, tab){
+  openPanel(clientId).then(() => setFicheTab(tab));
 }
 
 function openBilanDetailSupabase(bilan) {
@@ -1775,8 +1789,12 @@ function renderBilanDetailPage(el) {
   const c = data.clients.find(x => x.id === bilanDetailState.client);
   const nom = c ? c.nom : bilanDetailState.client;
   const isFiche = _bilanNavSource === 'fiche';
+  // Toujours repasser par allerFicheTab (→ openPanel) plutôt que de juste
+  // basculer state.nav/ficheTab à la main : un bilan ouvert depuis le
+  // dashboard d'accueil n'a jamais chargé ficheData pour ce client, un simple
+  // changement d'onglet afficherait une fiche vide/périmée.
   const backAction = isFiche
-    ? `state.nav='fiche-client';ficheTab='bilans';renderSidebar();renderMain()`
+    ? `allerFicheTab('${bilanDetailState.client}','bilans')`
     : `state.nav='bilans';renderSidebar();renderMain()`;
   const backLabel = isFiche ? 'Retour à la fiche client' : 'Retour aux bilans';
   const svgBack = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>`;
@@ -1802,8 +1820,25 @@ function renderBilanDetailPage(el) {
 
   const backHtml = `<button class="fiche-back" onclick="${backAction}">${svgBack} ${backLabel}</button>`;
 
+  // Fil de navigation rapide : sauter directement vers un autre onglet de la
+  // fiche de ce client (Profil, Mensurations, Diète…) sans repasser par
+  // "Retour" puis recliquer l'onglet — seulement pertinent si on est bien
+  // dans le contexte d'un client (isFiche), pas depuis la liste globale.
+  const quickNavHtml = isFiche ? `
+    <div class="fiche-tabs" style="border-bottom:none;padding:0;gap:4px;margin:8px 0 4px;flex-wrap:wrap;">
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','profil')">Profil</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','programmes')">Programmes</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','diete')">Diète</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','progression')">Progression</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','notes')">Suivi</button>
+      <button class="fiche-tab active" onclick="allerFicheTab('${bilanDetailState.client}','bilans')">Bilans</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','mensurations')">Mensurations</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','roadmap')">Roadmap</button>
+      ${c && c.chimieActifSupa ? `<button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','protocole')">Protocole</button>` : ''}
+    </div>` : '';
+
   if (!bilanDetailState.loaded) {
-    el.innerHTML = `${backHtml}
+    el.innerHTML = `${backHtml}${quickNavHtml}
       <div class="fiche-hero"><div class="fiche-avatar">${initials(nom)}</div>
         <div><div class="fiche-hero-name">${esc(nom)}</div><div style="font-size:12px;color:var(--text-faint);">Chargement…</div></div>
       </div>
@@ -1811,7 +1846,7 @@ function renderBilanDetailPage(el) {
     return;
   }
   if (bilanDetailState.error) {
-    el.innerHTML = `${backHtml}<div style="color:var(--critical);padding:24px;">Erreur : ${esc(bilanDetailState.error)}</div>`;
+    el.innerHTML = `${backHtml}${quickNavHtml}<div style="color:var(--critical);padding:24px;">Erreur : ${esc(bilanDetailState.error)}</div>`;
     return;
   }
 
@@ -1844,6 +1879,7 @@ function renderBilanDetailPage(el) {
 
   el.innerHTML = `
     ${backHtml}
+    ${quickNavHtml}
     ${navHtml}
     <div class="fiche-hero">
       <div class="fiche-avatar">${initials(nom)}</div>
