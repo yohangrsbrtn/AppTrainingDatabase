@@ -1814,16 +1814,17 @@ function _renderBilansRecents() {
   const pending = envoyes.filter(b => !b.coach_traite).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
   const recentTraited = envoyes.filter(b => {
     if (!b.coach_traite) return false;
-    const iso = b.date_validation || b.created_at;
+    const iso = b.coach_traite_at || b.date_validation || b.created_at;
     const t = iso ? new Date(iso).getTime() : null;
     return t && (now - t) <= 15*24*60*60*1000;
-  }).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  }).sort((a,b) => ((b.coach_traite_at||b.date_validation||b.created_at||'')).localeCompare(a.coach_traite_at||a.date_validation||a.created_at||''));
 
   const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
   const dateFrOf = b => {
     const iso = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : '');
     return iso ? iso.split('-').reverse().join('/') : '—';
   };
+  const dateHeureFrOf = iso => iso ? new Date(iso).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
   const rowHtml = (b, showBtn) => `
     <tr style="cursor:pointer;" onclick="openBilanByIdFromRecents(${b.id})">
       <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
@@ -1831,6 +1832,16 @@ function _renderBilansRecents() {
       <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
       <td>${b.coach_traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
       <td class="row-actions" onclick="event.stopPropagation();">${showBtn ? `<button class="btn" onclick="marquerBilanSupaTraite(${b.id})">Marquer traité</button>` : ''}</td>
+    </tr>`;
+  // Pas de colonne "Statut" ici : tout ce qui apparaît dans cette table est par
+  // définition déjà traité — la colonne serait toujours identique et n'apporte
+  // rien. À la place, "Traité le" reflète l'ordre de tri (plus récent en haut).
+  const rowHtmlTraite = b => `
+    <tr style="cursor:pointer;" onclick="openBilanByIdFromRecents(${b.id})">
+      <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine_label||'')}</td>
+      <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
+      <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateHeureFrOf(b.coach_traite_at)}</td>
     </tr>`;
 
   return `
@@ -1846,8 +1857,8 @@ function _renderBilansRecents() {
     <div class="table-card">
       <div class="table-toolbar"><div class="title">Traités · 15 derniers jours</div></div>
       <div class="table-scroll"><table class="clients">
-        <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th>Statut</th><th></th></tr></thead>
-        <tbody>${recentTraited.map(b => rowHtml(b, false)).join('')}</tbody>
+        <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th>Traité le</th></tr></thead>
+        <tbody>${recentTraited.map(rowHtmlTraite).join('')}</tbody>
       </table></div>
     </div>` : ''}`;
 }
@@ -3745,18 +3756,19 @@ function renderDashboard(el){
 async function marquerTraite(){
   if (!bilanDetailState._supabaseBilanId) return;
   try {
+    const traiteAt = new Date().toISOString();
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
-      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true, coach_traite_at: traiteAt }) }
     );
     if (!res.ok) throw new Error('HTTP ' + res.status);
     bilanDetailState.coachTraite = true;
     if (_ficheBilans) {
       const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
-      if (b) b.coach_traite = true;
+      if (b) { b.coach_traite = true; b.coach_traite_at = traiteAt; }
     }
     const ba = (data.bilansAll || []).find(b => b.id === bilanDetailState._supabaseBilanId);
-    if (ba) ba.coach_traite = true;
+    if (ba) { ba.coach_traite = true; ba.coach_traite_at = traiteAt; }
     if (state.nav === 'bilan-detail') renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
 }
@@ -3768,29 +3780,30 @@ async function marquerNonTraite(){
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanDetailState._supabaseBilanId}`,
-      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: false }) }
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: false, coach_traite_at: null }) }
     );
     if (!res.ok) throw new Error('HTTP ' + res.status);
     bilanDetailState.coachTraite = false;
     if (_ficheBilans) {
       const b = _ficheBilans.find(x => x.id === bilanDetailState._supabaseBilanId);
-      if (b) b.coach_traite = false;
+      if (b) { b.coach_traite = false; b.coach_traite_at = null; }
     }
     const ba = (data.bilansAll || []).find(b => b.id === bilanDetailState._supabaseBilanId);
-    if (ba) ba.coach_traite = false;
+    if (ba) { ba.coach_traite = false; ba.coach_traite_at = null; }
     if (state.nav === 'bilan-detail') renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 async function marquerBilanSupaTraite(bilanId) {
   try {
+    const traiteAt = new Date().toISOString();
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
-      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true })
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true, coach_traite_at: traiteAt })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     data.bilansSupa = (data.bilansSupa || []).filter(b => b.id !== bilanId);
     const ba = (data.bilansAll || []).find(b => b.id === bilanId);
-    if (ba) ba.coach_traite = true;
+    if (ba) { ba.coach_traite = true; ba.coach_traite_at = traiteAt; }
     if (state.nav === 'dashboard' || state.nav === 'bilans') renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
 }
@@ -4455,7 +4468,7 @@ async function marquerFicheBilansSelTraite(clientId) {
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/bilans?id=in.(${ids.join(',')})`,
-      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true }) }
+      { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true, coach_traite_at: new Date().toISOString() }) }
     );
     if (!res.ok) { const t = await res.text(); alert(`Erreur : ${res.status} — ${t}`); }
   } catch(e) { alert(`Erreur : ${e.message}`); }
