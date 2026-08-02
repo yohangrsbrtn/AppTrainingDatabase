@@ -1,4 +1,4 @@
-const CACHE = 'apptrainingdatabase-v4';
+const CACHE = 'apptrainingdatabase-v5';
 const ASSETS = ['/AppTrainingDatabase/', '/AppTrainingDatabase/index.html', '/AppTrainingDatabase/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -15,6 +15,11 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Ne jamais intercepter les requêtes externes (Open Food Facts, Supabase...)
+  // — le SW n'a rien à mettre en cache là-dessus, et l'interception peut
+  // provoquer un "Failed to fetch" ponctuel au premier appel juste après
+  // (ré)activation du SW (vécu : 1ère recherche OFF échoue, la 2e passe).
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   // Les pages HTML (index.html, console.html) ne doivent JAMAIS être servies
   // depuis le cache HTTP local — une PWA installée sur écran d'accueil iOS
   // peut sinon rester bloquée sur une ancienne version pendant longtemps,
