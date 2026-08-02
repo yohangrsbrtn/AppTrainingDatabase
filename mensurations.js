@@ -290,11 +290,12 @@ async function sauverMensurationSupa(field, value) {
     bras:     nn(f.bras),
   };
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/mensurations`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
       body: JSON.stringify(body)
     });
+    if (!res.ok) return;
     const updated = { ...body, taille: f.taille, phase: f.phase || '' };
     const idx = _mReleves.findIndex(r => r.date === f.date);
     if (idx >= 0) _mReleves[idx] = updated;
@@ -356,7 +357,28 @@ function _renderMensChart2Section(releves) {
     ? _buildMensChart('m_c2_' + actives.join('_'), releves, actives, colors, labels, ' cm')
     : '';
   const chart = chartHtml || '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px;">Pas assez de données pour ' + (actives.length ? actives.map(k=>_M_LABELS[_M_COLS.indexOf(k)]).join('/') : 'cette sélection') + '.</div>';
-  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div><div id="mensChart2">${chart}</div>`;
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${pills}</div><div id="mensChart2">${chart}</div>
+    <div style="font-size:13px;font-weight:600;margin:16px 0 8px;">Historique</div>
+    <div id="mensChart2Histo">${_renderMensAutresHistorique(releves, actives)}</div>`;
+}
+
+function _renderMensAutresHistorique(releves, actives) {
+  if (!actives.length) return '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Sélectionne une mensuration.</div>';
+  const rows = (releves || []).slice().reverse()
+    .filter(r => actives.some(k => { const v = parseFloat(r[k]); return !isNaN(v) && v > 0; }));
+  if (!rows.length) return '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px;">Aucune donnée pour cette sélection.</div>';
+  return rows.map(r => {
+    const vals = actives.map(k => {
+      const v = parseFloat(r[k]);
+      if (isNaN(v) || v <= 0) return null;
+      const i = _M_COLS.indexOf(k);
+      return `<span style="color:${_M_COLORS[i]};font-weight:600;">${_M_LABELS[i]} ${v} cm</span>`;
+    }).filter(Boolean).join(' · ');
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;">
+      <div style="font-size:13px;color:var(--muted);flex-shrink:0;">${_mAfficherDate(r.date)}</div>
+      <div style="font-size:12px;text-align:right;">${vals}</div>
+    </div>`;
+  }).join('');
 }
 
 // Choisit comme pill par défaut la première mensuration qui a réellement au moins 2 valeurs
