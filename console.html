@@ -1234,8 +1234,9 @@ function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps){
 // (notif_envoi_destinataires, conservés même si l'inbox client est vidée),
 // écrit dans l'inbox vivante du client (client_notifications) puis pousse le
 // push. Réutilisé par le modal manuel ET par "Renvoyer" depuis l'historique.
-async function _envoyerNotifCore(clientId, titre, corps, pleinEcran, source){
-  const cibles = clientId === 'all' ? data.clients.map(c => c.id) : [clientId];
+async function _envoyerNotifCore(clientIdOuIds, titre, corps, pleinEcran, source){
+  const estTous = clientIdOuIds === 'all';
+  const cibles = estTous ? data.clients.map(c => c.id) : (Array.isArray(clientIdOuIds) ? clientIdOuIds : [clientIdOuIds]);
   const resEnvoi = await fetch(`${SUPABASE_URL}/rest/v1/notif_envois`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
     body: JSON.stringify({ title: titre, body: corps, plein_ecran: !!pleinEcran, source: source || 'manuel' })
@@ -1252,14 +1253,30 @@ async function _envoyerNotifCore(clientId, titre, corps, pleinEcran, source){
       body: JSON.stringify(cibles.map(id => ({ client_id: id, title: titre, body: corps, envoi_id: envoi.id, plein_ecran: !!pleinEcran })))
     })
   ]);
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-    body: JSON.stringify({ title: titre, body: corps, client_id: clientId })
-  });
-  const j = await res.json();
-  if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
-  return j;
+  // send-push (fonction Edge) ne prend qu'un client_id unique ou "all" — pour
+  // une sélection multiple on l'appelle une fois par client ciblé.
+  let sent = 0;
+  if (estTous) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ title: titre, body: corps, client_id: 'all' })
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
+    sent = j.sent;
+  } else {
+    const resultats = await Promise.all(cibles.map(id => fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ title: titre, body: corps, client_id: id })
+    }).then(async r => ({ ok: r.ok, j: await r.json().catch(() => ({})) }))));
+    for (const { ok, j } of resultats) {
+      if (!ok || !j.ok) throw new Error(j.error || 'Erreur serveur');
+      sent += j.sent || 0;
+    }
+  }
+  return { sent };
 }
 
 async function envoyerNotification(clientId){
@@ -1330,15 +1347,92 @@ async function chargerHistoriqueNotifs(){
   })) };
 }
 
+let _notifSelClients = new Set();
+let _notifSelTitre = '';
+let _notifSelCorps = '';
+let _notifSelPlein = false;
+
 function renderNotificationsPage(el){
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Notifications</h1></div>
       <button class="btn primary" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
     </div>
+    ${_renderNotifEnvoyerSection()}
+    <h2 style="font-size:15px;margin:28px 0 12px;">Historique</h2>
     <div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>'}</div>`;
   if (!notifHistoData.loaded) {
     chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications') renderMain(); });
+  }
+}
+
+// ── Section "Envoyer à une sélection de clients" ─────────────────────────
+function _renderNotifEnvoyerSection(){
+  const clientsTries = data.clients.slice().sort((a,b)=>a.nom.localeCompare(b.nom,'fr'));
+  const toutesCoches = clientsTries.length > 0 && clientsTries.every(c => _notifSelClients.has(c.id));
+  return `
+    <div class="card" style="margin-bottom:8px;">
+      <h2 style="font-size:15px;margin:0 0 12px;">Envoyer à une sélection de clients</h2>
+      <div class="fiche-field">
+        <label>Titre</label>
+        <input id="ntfsel-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;" value="${esc(_notifSelTitre)}" oninput="_notifSelTitre=this.value">
+      </div>
+      <div class="fiche-field">
+        <label>Message</label>
+        <textarea id="ntfsel-corps" placeholder="Écris ton message…" style="font-size:14px;" oninput="_notifSelCorps=this.value">${esc(_notifSelCorps)}</textarea>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-muted);margin:4px 0 12px;cursor:pointer;">
+        <input type="checkbox" id="ntfsel-plein" style="width:16px;height:16px;flex-shrink:0;" ${_notifSelPlein ? 'checked' : ''} onchange="_notifSelPlein=this.checked">
+        Afficher en plein écran à l'ouverture de l'app (en plus de la cloche)
+      </label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <label style="font-size:13px;font-weight:600;">Destinataires</label>
+        <button class="btn" style="font-size:11px;padding:4px 8px;" onclick="_notifSelToggleTous()">${toutesCoches ? 'Tout désélectionner' : 'Tout sélectionner'}</button>
+      </div>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 4px;margin-bottom:12px;">
+        ${clientsTries.map(c => `
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" style="width:16px;height:16px;flex-shrink:0;" ${_notifSelClients.has(c.id) ? 'checked' : ''} onchange="_notifSelToggleClient('${c.id}')">
+            ${esc(c.nom)}
+          </label>`).join('') || '<div style="font-size:12px;color:var(--text-muted);padding:6px 8px;">Aucun client.</div>'}
+      </div>
+      <div id="ntfsel-err" style="color:var(--critical);font-size:12px;display:none;margin-bottom:6px;"></div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button class="btn primary" id="ntfsel-btn" onclick="envoyerNotificationSelection()">Envoyer (${_notifSelClients.size})</button>
+      </div>
+    </div>`;
+}
+
+function _notifSelToggleClient(id){
+  if (_notifSelClients.has(id)) _notifSelClients.delete(id); else _notifSelClients.add(id);
+  if (state.nav === 'notifications') renderMain();
+}
+
+function _notifSelToggleTous(){
+  const clientsTries = data.clients;
+  const toutesCoches = clientsTries.length > 0 && clientsTries.every(c => _notifSelClients.has(c.id));
+  _notifSelClients = toutesCoches ? new Set() : new Set(clientsTries.map(c => c.id));
+  if (state.nav === 'notifications') renderMain();
+}
+
+async function envoyerNotificationSelection(){
+  const titre = _notifSelTitre.trim();
+  const corps = _notifSelCorps.trim();
+  const err = document.getElementById('ntfsel-err');
+  const btn = document.getElementById('ntfsel-btn');
+  if (!_notifSelClients.size) { err.textContent = 'Sélectionne au moins un client.'; err.style.display = 'block'; return; }
+  if (!titre || !corps) { err.textContent = 'Titre et message obligatoires.'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Envoi…';
+  try {
+    const j = await _envoyerNotifCore(Array.from(_notifSelClients), titre, corps, _notifSelPlein, 'manuel');
+    _notifSelClients = new Set(); _notifSelTitre = ''; _notifSelCorps = ''; _notifSelPlein = false;
+    alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
+    await chargerHistoriqueNotifs();
+    if (state.nav === 'notifications') renderMain();
+  } catch(ex){
+    err.textContent = 'Erreur : ' + ex.message; err.style.display = 'block';
+    btn.disabled = false; btn.textContent = `Envoyer (${_notifSelClients.size})`;
   }
 }
 
