@@ -205,17 +205,58 @@ async function pcCreerEquivalent(exerciceLibId, nomLib) {
   const nomSaisi = (document.getElementById('pcEquivSearch')?.value || '').trim();
   const nom = nomLib || nomSaisi;
   if (!nom) return;
+  const cibleId = _pcEquivCibleId;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents`, {
       method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
-      body: JSON.stringify({ programme_exercice_id: _pcEquivCibleId, nom, exercice_id: exerciceLibId || null })
+      body: JSON.stringify({ programme_exercice_id: cibleId, nom, exercice_id: exerciceLibId || null })
     });
     if (!res.ok) throw new Error('supabase_' + res.status);
     const row = (await res.json())[0];
-    _pcEquivalents[_pcEquivCibleId] = row;
+    _pcEquivalents[cibleId] = row;
     document.getElementById('pcEquivOverlay')?.remove();
     setPage('programme-client');
+    await _pcPropagerEquivalentAutresBlocs(cibleId, nom, exerciceLibId || null);
   } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+}
+
+// Les blocs (Métabolique/Mécanique/Force…) dupliquent les mêmes séances/
+// exercices pour chaque phase du programme — le même exercice "prévu" existe
+// donc en plusieurs exemplaires (un client_programme_exercice distinct par
+// bloc). Créer un équivalent dans un bloc doit se propager aux autres
+// exemplaires du même exercice (même nom, ou même exercice_id si la
+// bibliothèque coach est utilisée) pour que le client n'ait pas à recréer le
+// même équivalent une fois arrivé dans le bloc suivant.
+async function _pcPropagerEquivalentAutresBlocs(cibleId, nom, exerciceLibId) {
+  const toutesExos = _pcAllSeances().flatMap(s => s.client_programme_exercices || []);
+  const source = toutesExos.find(e => e.id === cibleId);
+  if (!source) return;
+  const nomNorm = (source.nom || '').trim().toLowerCase();
+  const autres = toutesExos.filter(e =>
+    e.id !== cibleId &&
+    !_pcEquivalents[e.id] &&
+    ((source.exercice_id && e.exercice_id === source.exercice_id) || (e.nom || '').trim().toLowerCase() === nomNorm)
+  );
+  if (!autres.length) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify(autres.map(e => ({ programme_exercice_id: e.id, nom, exercice_id: exerciceLibId || null })))
+    });
+    if (res.ok) (await res.json()).forEach(row => { _pcEquivalents[row.programme_exercice_id] = row; });
+  } catch(e) {}
+}
+
+// Bouton flèche (en plus du swipe natif, peu visible pour certains clients —
+// signalé comme "on ne voit rien, on voit juste un 1 sur 2") pour naviguer
+// entre l'exercice prévu et son équivalent.
+function pcEquivSliderAller(exId, direction) {
+  const slider = document.getElementById(`pcEquivSlider_${exId}`);
+  if (!slider) return;
+  const w = slider.clientWidth || 1;
+  const cur = Math.round(slider.scrollLeft / w);
+  const next = Math.max(0, Math.min(1, cur + direction));
+  slider.scrollTo({ left: next * w, behavior: 'smooth' });
 }
 
 async function pcSupprimerEquivalent(programmeExerciceId, equivalentId) {
@@ -510,8 +551,14 @@ function renderPcSeancePage() {
         (s, field) => `pcSauverLogEquivalent(${equiv.id},${s},'${field}',this.value)`);
       const equivCommentLog = _pcEquivLogs[equiv.id + '|' + _pcSemaine + '|1'] || {};
       bodyHtml = `
-        <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
-          <div id="pcEquivDots_${ex.id}" style="font-size:11px;font-weight:600;color:var(--muted);">1 / 2</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+          <button onclick="pcEquivSliderAller(${ex.id},-1)" style="width:30px;height:30px;border-radius:50%;background:#2d3142;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c8d0e0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div id="pcEquivDots_${ex.id}" style="flex:1;text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);">Exercice prévu</div>
+          <button onclick="pcEquivSliderAller(${ex.id},1)" style="width:30px;height:30px;border-radius:50%;background:#2d3142;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c8d0e0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
         </div>
         <div id="pcEquivSlider_${ex.id}" style="display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;">
           <div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">${panelPrevu}</div>
@@ -549,10 +596,13 @@ function renderPcSeancePage() {
       const slider = document.getElementById(`pcEquivSlider_${exId}`);
       const dots = document.getElementById(`pcEquivDots_${exId}`);
       if (!slider) return;
-      slider.addEventListener('scroll', () => {
+      const equiv = _pcEquivalents[exId];
+      const majLabel = () => {
         const optIdx = Math.min(1, Math.round(slider.scrollLeft / (slider.clientWidth || 1)));
-        if (dots) dots.textContent = (optIdx + 1) + ' / 2';
-      }, { passive: true });
+        if (dots) dots.textContent = optIdx === 0 ? 'Exercice prévu' : `≡ ${equiv ? equiv.nom : 'Équivalent'}`;
+      };
+      slider.addEventListener('scroll', majLabel, { passive: true });
+      majLabel();
     });
   }, 150);
 
