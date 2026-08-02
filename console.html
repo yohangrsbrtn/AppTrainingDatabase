@@ -3715,10 +3715,15 @@ function renderDashboard(el){
     const c = data.clients.find(x=>x.id===b.client_id);
     // semaine_label est figé à la création du bilan — s'il a changé de jour_bilan entre
     // temps, ce libellé stocké peut ne plus correspondre à sa propre date_validation (bug
-    // vécu : bilan validé le 2 août affichant "3 août → 9 août"). On le recalcule ici à
-    // partir de la date de validation réelle + jour_bilan actuel du client, cohérent avec
-    // ce qu'affiche la page de détail (_weekRange(dateValidation)).
-    const labelFrais = b.date_validation ? _semaineLabelFromSheetDate(b.date_validation.slice(0,10), c ? c.jour_bilan : null) : null;
+    // vécu : bilan validé le 2 août affichant "3 août → 9 août"). On le recalcule ici
+    // directement depuis date_validation (fin réelle - 6 jours = début), SANS repasser par
+    // _bilanWeekBounds/jour_bilan : cette fonction cherche la "prochaine occurrence" du jour de
+    // bilan à partir d'une date de référence, ce qui est correct pour PROJETER une échéance
+    // future mais faux ici où date_validation EST déjà la fin réelle et fixe de la semaine —
+    // si jour_bilan a changé depuis, ce recalcul décale à tort la période de bilans déjà
+    // validés d'autres semaines (bug vécu : changer jour_bilan modifiait aussi les dates
+    // affichées de bilans plus anciens, sans rapport avec celui qu'on venait de modifier).
+    const labelFrais = b.date_validation ? _weekRange(b.date_validation.split('-').reverse().join('/')) : null;
     return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id, semaine_label: labelFrais || b.semaine_label };
   });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
