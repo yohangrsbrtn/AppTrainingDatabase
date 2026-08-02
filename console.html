@@ -1352,7 +1352,7 @@ let notifRappelsData = { loaded:false, rows:[] };
 
 async function chargerNotifsRappels(){
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/client_notifications?source=in.(rappel_bilan,rappel_journee)&order=created_at.desc&limit=300&select=id,client_id,title,body,source,lu,lu_at,created_at`,
+    `${SUPABASE_URL}/rest/v1/client_notifications?source=in.(rappel_bilan,rappel_journee,rappel_paiement)&order=created_at.desc&limit=300&select=id,client_id,title,body,source,lu,lu_at,created_at`,
     { headers: supaHeaders() }
   );
   notifRappelsData = { loaded: true, rows: res.ok ? await res.json() : [] };
@@ -1365,7 +1365,7 @@ function _fmtNotifDate(iso){
 function _renderNotifRappelsList(){
   const rows = notifRappelsData.rows;
   if (!rows.length) return `<div class="fiche-prog-empty" style="text-align:center;padding:32px;"><div style="font-size:14px;color:var(--text-muted);">Aucun rappel automatique envoyé pour l'instant.</div></div>`;
-  const labelSource = s => s === 'rappel_bilan' ? 'RAPPEL BILAN' : 'RAPPEL JOURNÉE';
+  const labelSource = s => s === 'rappel_bilan' ? 'RAPPEL BILAN' : s === 'rappel_journee' ? 'RAPPEL JOURNÉE' : 'RAPPEL PAIEMENT';
   return rows.map(r => `
     <div class="prog-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:6px;">
       <div style="display:flex;justify-content:space-between;width:100%;gap:10px;">
@@ -1383,10 +1383,10 @@ let _notifSelTitre = '';
 let _notifSelCorps = '';
 let _notifSelPlein = false;
 
-let _notifTab = 'manuel'; // 'manuel' | 'rappels'
+let _notifHistoTab = 'manuel'; // 'manuel' | 'auto' — bascule côté colonne Historique uniquement
 
-function setNotifTab(tab){
-  _notifTab = tab;
+function setNotifHistoTab(tab){
+  _notifHistoTab = tab;
   renderMain();
 }
 
@@ -1397,24 +1397,23 @@ function renderNotificationsPage(el){
       <div><div class="eyebrow">Console coach</div><h1>Notifications</h1></div>
       <button class="btn primary" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
     </div>
-    <div class="fiche-tabs" style="margin-bottom:16px;">
-      <button class="fiche-tab ${_notifTab==='manuel'?'active':''}" onclick="setNotifTab('manuel')">Envoi manuel</button>
-      <button class="fiche-tab ${_notifTab==='rappels'?'active':''}" onclick="setNotifTab('rappels')">Rappels automatiques</button>
-    </div>
-    ${_notifTab === 'manuel' ? `
-      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
-        <div style="flex:1;min-width:340px;">${_renderNotifEnvoyerSection()}</div>
-        <div style="flex:1;min-width:340px;">
-          <h2 style="font-size:15px;margin:0 0 12px;">Historique</h2>
-          <div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : spinner}</div>
+    <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+      <div style="flex:1;min-width:340px;">${_renderNotifEnvoyerSection()}</div>
+      <div style="flex:1;min-width:340px;">
+        <div class="fiche-tabs" style="margin-bottom:12px;">
+          <button class="fiche-tab ${_notifHistoTab==='manuel'?'active':''}" onclick="setNotifHistoTab('manuel')">Historique manuel</button>
+          <button class="fiche-tab ${_notifHistoTab==='auto'?'active':''}" onclick="setNotifHistoTab('auto')">Historique automatique</button>
         </div>
-      </div>` : `
-      <div id="notifRappelsList">${notifRappelsData.loaded ? _renderNotifRappelsList() : spinner}</div>`}`;
-  if (_notifTab === 'manuel' && !notifHistoData.loaded) {
-    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications' && _notifTab === 'manuel') renderMain(); });
+        ${_notifHistoTab === 'manuel'
+          ? `<div id="notifHistoList">${notifHistoData.loaded ? _renderNotifHistoList() : spinner}</div>`
+          : `<div id="notifRappelsList">${notifRappelsData.loaded ? _renderNotifRappelsList() : spinner}</div>`}
+      </div>
+    </div>`;
+  if (_notifHistoTab === 'manuel' && !notifHistoData.loaded) {
+    chargerHistoriqueNotifs().then(() => { if (state.nav === 'notifications' && _notifHistoTab === 'manuel') renderMain(); });
   }
-  if (_notifTab === 'rappels' && !notifRappelsData.loaded) {
-    chargerNotifsRappels().then(() => { if (state.nav === 'notifications' && _notifTab === 'rappels') renderMain(); });
+  if (_notifHistoTab === 'auto' && !notifRappelsData.loaded) {
+    chargerNotifsRappels().then(() => { if (state.nav === 'notifications' && _notifHistoTab === 'auto') renderMain(); });
   }
 }
 
