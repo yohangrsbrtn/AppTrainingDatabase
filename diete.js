@@ -34,6 +34,7 @@ let _dCreationNomPrerempli  = '';
 let _dCreationPrefill       = null; // {kcal100,prot100,glu100,sucres100,fibres100,lip100,ags100} posé par un scan avec match Open Food Facts
 let _dCreationCodeBarre     = null; // code-barres scanné en attente de rattachement au prochain aliment créé
 let _dScanInstance          = null; // instance Html5Qrcode active (pour pouvoir l'arrêter proprement)
+let _dScanStopPromise       = null; // promesse du stop() en cours (voir _arreterScan) — pour que le démarrage suivant attende la libération réelle de la caméra
 let _dScanLibPromise        = null; // promesse de chargement du script CDN html5-qrcode (chargé une seule fois)
 let _dScanTraitementEnCours = false; // verrou anti double-décodage pendant le traitement d'un scan (match local ou fetch OFF)
 
@@ -1603,8 +1604,17 @@ function renderModalAjoutScan() {
     <button onclick="_dAjoutEtape='recherche';_afficherModalAjout(false);" style="width:100%;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Annuler</button>`;
 }
 
-function _demarrerScan() {
+async function _demarrerScan() {
   if (_dAjoutEtape !== 'scan') return; // l'utilisateur a déjà quitté l'écran pendant le chargement de la lib
+  // Attend la libération complète de la caméra d'un éventuel scan précédent avant d'en ouvrir
+  // un nouveau. _arreterScan() met _dScanInstance à null de façon SYNCHRONE mais stop() de la
+  // lib est asynchrone (libération réelle de la caméra) — sans cette attente, un 2e scan pouvait
+  // démarrer une nouvelle capture caméra avant que la précédente soit relâchée (flux vidéo
+  // dédoublé façon "miroir"), et l'ancienne boucle de décodage, jamais vraiment arrêtée,
+  // redéclenchait onScanSuccess seule au scan suivant avec le dernier code déjà lu (3e scan
+  // "reconnaissant" un produit instantanément sans rien scanner).
+  await _arreterScan();
+  if (_dAjoutEtape !== 'scan') return; // ré-vérifier après l'attente (écran changé entre temps)
   const el = document.getElementById('dScanViewport');
   if (!el || !window.Html5Qrcode) return;
   _dScanInstance = new Html5Qrcode('dScanViewport');
@@ -1744,12 +1754,17 @@ async function confirmerCreationAliment() {
 
 // Arrête proprement la caméra si un scan est en cours — sans ça le flux vidéo reste actif
 // en arrière-plan quand on quitte l'écran scan (bouton retour, sélection, fermeture modale).
+// Renvoie une promesse résolue une fois la caméra réellement relâchée : _dScanInstance est mis
+// à null tout de suite (synchrone), mais stop() (la vraie libération de la caméra) est
+// asynchrone — _dScanStopPromise garde une référence à cette attente en cours pour qu'un
+// _demarrerScan() qui suit puisse s'y accrocher même s'il est appelé après ce nulling.
 function _arreterScan() {
   if (_dScanInstance) {
     const inst = _dScanInstance;
     _dScanInstance = null;
-    try { inst.stop().then(() => { try { inst.clear(); } catch(e) {} }).catch(() => {}); } catch(e) {}
+    try { _dScanStopPromise = inst.stop().then(() => { try { inst.clear(); } catch(e) {} }).catch(() => {}); } catch(e) { _dScanStopPromise = null; }
   }
+  return _dScanStopPromise || Promise.resolve();
 }
 
 function _afficherModalAjout(loading) {
