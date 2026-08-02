@@ -667,7 +667,7 @@ async function _completerConnexionSupabase(session) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -1128,28 +1128,37 @@ function renderProfil() {
   const titreHtml = titreDef ? `<div style="margin-top:6px;display:flex;justify-content:center;">${renderTitrePill(titreDef, false)}</div>` : '';
   const isSupabaseAuth = localStorage.getItem('at_auth_mode') === 'supabase';
   const profilData = S.data.profil || {};
+  const infoRow = (label, val) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span style="color:var(--muted);font-size:13px;">${label}</span><span style="font-size:13px;font-weight:600;text-align:right;">${val}</span></div>`;
   const infosHtml = !isSupabaseAuth ? '' : `
       <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Mes informations</div>
-        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Date de naissance</label>
+        <div style="font-weight:700;margin-bottom:10px;">Informations personnelles</div>
+        ${infoRow('Nom', esc([profilData.prenom, profilData.nom].filter(Boolean).join(' ') || p.nom || S.client))}
+        <label style="display:block;font-size:12px;color:var(--muted);margin:12px 0 4px;">Date de naissance</label>
         <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
         <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Taille (cm)</label>
         <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
-        ${profilData.date_debut ? `<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">📅 Coaching débuté le ${new Date(profilData.date_debut).toLocaleDateString('fr-FR')}</div>` : ''}
         <button class="btn-primary" onclick="doSauverInfosProfil()">Enregistrer</button>
         <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-        ${profilData.jour_paiement ? `<div style="font-size:13px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">💳 Facturation le ${profilData.jour_paiement} de chaque mois</div>` : ''}
-      </div>`;
-  const compteHtml = !isSupabaseAuth ? '' : `
-      <div class="card">
-        <div style="font-weight:700;margin-bottom:10px;">Mon email</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+        <div style="font-size:12px;color:var(--muted);margin-top:16px;padding-top:12px;border-top:1px solid var(--border);margin-bottom:8px;">
           ${profilData.email_confirme ? '✅ Email confirmé — utilisé pour la récupération de mot de passe.' : 'Renseigne et confirme ton email pour pouvoir récupérer ton mot de passe en cas d\'oubli.'}
         </div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Email</label>
         <input id="pf-email" type="email" placeholder="ton@email.com" value="${(profilData.email || '').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
         <button class="btn-primary" onclick="doSauverEmailProfil()">Enregistrer</button>
         <div id="pf-email-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
       </div>
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:10px;">Informations coaching</div>
+        ${profilData.date_debut ? infoRow('Début du coaching', new Date(profilData.date_debut).toLocaleDateString('fr-FR')) : ''}
+        ${profilData.jour_bilan ? infoRow('Jour de bilan', esc(profilData.jour_bilan)) : ''}
+        ${!profilData.date_debut && !profilData.jour_bilan ? `<div style="font-size:13px;color:var(--muted);">Non renseigné.</div>` : ''}
+      </div>
+      ${profilData.jour_paiement ? `
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:10px;">Facturation</div>
+        ${infoRow('Jour de facturation', profilData.jour_paiement + ' de chaque mois')}
+      </div>` : ''}`;
+  const compteHtml = !isSupabaseAuth ? '' : `
       <div class="card">
         <div style="font-weight:700;margin-bottom:10px;">Mot de passe</div>
         <input id="pf-mdp1" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:16px;margin-bottom:10px;">
