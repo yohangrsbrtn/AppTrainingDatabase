@@ -114,7 +114,7 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
     }
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
-      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme,modifie)`,
+      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g,modifie)`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
@@ -129,12 +129,18 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
     const toAliments = r => (r.repas_aliments || []).map(a => {
       const al = a.aliments_coach || {};
       const q  = a.quantite_g || 0;
+      // Colonnes stockées "pour 100g" (2026-08-02) — converties ici en
+      // équivalent "par gramme" pour que tout le reste du fichier (kcalPG,
+      // calculs de totaux) continue de raisonner par gramme sans changement.
+      // Les aliments en "unité/portion" (unite≠'g', ex: recette exportée) ne
+      // sont eux jamais multipliés par 100 en base — pas de division ici.
+      const diviseur = (a.unite || 'g') === 'g' ? 100 : 1;
       // Fallback sur colonnes directes pour aliments migrés (sans FK aliments_coach)
       const nom  = al.nom  || a.nom  || '?';
-      const kcal = al.kcal_par_gramme ?? a.kcal_par_gramme ?? 0;
-      const prot = al.prot_par_gramme ?? a.prot_par_gramme ?? 0;
-      const glu  = al.glu_par_gramme  ?? a.glu_par_gramme  ?? 0;
-      const lip  = al.lip_par_gramme  ?? a.lip_par_gramme  ?? 0;
+      const kcal = (al.kcal_par_100g ?? a.kcal_par_100g ?? 0) / diviseur;
+      const prot = (al.prot_par_100g ?? a.prot_par_100g ?? 0) / diviseur;
+      const glu  = (al.glu_par_100g  ?? a.glu_par_100g  ?? 0) / diviseur;
+      const lip  = (al.lip_par_100g  ?? a.lip_par_100g  ?? 0) / diviseur;
       return { nom, qte: q, unite: a.unite || 'g',
         cals: Math.round(kcal*q),
         prot: Math.round(prot*q*10)/10,
@@ -329,17 +335,19 @@ async function sbResoudreDieteDetail(clientDieteId) {
   // colonnes directes de repas_aliments, comme le fait déjà ouvrirDieteSupabase() plus haut.
   const repasRes = await fetch(
     `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templateId}&variante_index=eq.0&order=ordre.asc` +
-    `&select=nom,ordre,repas_aliments(quantite_g,nom,unite,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
+    `&select=nom,ordre,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g)`,
     { headers: supaHeaders() }
   );
   if (!repasRes.ok) throw new Error('repas_' + repasRes.status);
   const repasRaw = await repasRes.json();
   const toAliments = r => (r.repas_aliments || []).map(a => {
     const q = a.quantite_g || 0;
-    const kcal = a.kcal_par_gramme || 0;
-    const prot = a.prot_par_gramme || 0;
-    const glu  = a.glu_par_gramme  || 0;
-    const lip  = a.lip_par_gramme  || 0;
+    // Colonnes "pour 100g" — cf. toAliments() plus haut, même diviseur conditionnel.
+    const diviseur = (a.unite || 'g') === 'g' ? 100 : 1;
+    const kcal = (a.kcal_par_100g || 0) / diviseur;
+    const prot = (a.prot_par_100g || 0) / diviseur;
+    const glu  = (a.glu_par_100g  || 0) / diviseur;
+    const lip  = (a.lip_par_100g  || 0) / diviseur;
     return { nom: a.nom || '?', unite: a.unite || 'g', cals: kcal*q, prot: prot*q, glu: glu*q, lip: lip*q };
   });
   return { nom: templateNom, repas: repasRaw.slice().sort((a,b)=>a.ordre-b.ordre).map(r => ({ nom: r.nom, aliments: toAliments(r) })) };
@@ -347,31 +355,42 @@ async function sbResoudreDieteDetail(clientDieteId) {
 
 async function sbChargerBaseAliments() {
   const [coachRes, commRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme&order=nom.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_gramme,prot_par_gramme,glu_par_gramme,sucres_par_gramme,fibres_par_gramme,lip_par_gramme,ags_par_gramme,code_barre,valide&order=nom.asc`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g&order=nom.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_100g,prot_par_100g,glu_par_100g,sucres_par_100g,fibres_par_100g,lip_par_100g,ags_par_100g,code_barre,valide&order=nom.asc`, { headers: supaHeaders() })
   ]);
   const coach = coachRes.ok ? await coachRes.json() : [];
   const comm  = commRes.ok  ? await commRes.json()  : [];
+  // Colonnes stockées "pour 100g" — reconverties ici en équivalent "par
+  // gramme" (÷100), le reste du fichier (kcal/prot/glu/lip = valeur par
+  // gramme à multiplier par la quantité) n'a pas besoin de changer. Aliments
+  // en "unité/portion" (aliments_coach, recette exportée) jamais multipliés
+  // par 100 en base — pas de division ici. aliments_communaute n'a pas de
+  // notion d'unité (toujours au poids) — division inconditionnelle.
   return {
     // Base coach : pas de détail sucres/fibres/AGS (colonnes inexistantes) — cohérent avec
     // le comportement GAS d'origine (aDetail = a.sucres !== null dans la modale d'ajout).
-    coach: coach.map(a => ({ nom: a.nom, kcal: a.kcal_par_gramme, prot: a.prot_par_gramme, glu: a.glu_par_gramme, lip: a.lip_par_gramme, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true })),
-    communaute: comm.map(a => ({ nom: a.nom, kcal: a.kcal_par_gramme, prot: a.prot_par_gramme, glu: a.glu_par_gramme, lip: a.lip_par_gramme, sucres: a.sucres_par_gramme, fibres: a.fibres_par_gramme, ags: a.ags_par_gramme, codeBarre: a.code_barre, source: 'communaute', valide: a.valide }))
+    coach: coach.map(a => { const d = (a.unite||'g')==='g' ? 100 : 1; return { nom: a.nom, kcal: (a.kcal_par_100g||0)/d, prot: (a.prot_par_100g||0)/d, glu: (a.glu_par_100g||0)/d, lip: (a.lip_par_100g||0)/d, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true }; }),
+    communaute: comm.map(a => ({ nom: a.nom, kcal: (a.kcal_par_100g||0)/100, prot: (a.prot_par_100g||0)/100, glu: (a.glu_par_100g||0)/100, lip: (a.lip_par_100g||0)/100, sucres: a.sucres_par_100g!=null?a.sucres_par_100g/100:null, fibres: a.fibres_par_100g!=null?a.fibres_par_100g/100:null, ags: a.ags_par_100g!=null?a.ags_par_100g/100:null, codeBarre: a.code_barre, source: 'communaute', valide: a.valide }))
   };
 }
 
 async function sbAjouterAlimentCommunaute(p) {
+  // p.kcal/prot/glu/... arrivent déjà "pour 100g" depuis confirmerCreationAliment
+  // (saisie utilisateur ou Open Food Facts, tous deux nativement pour 100g) —
+  // stockage direct, plus de conversion ici.
   const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
     body: JSON.stringify({
-      nom: p.nom, kcal_par_gramme: p.kcal, prot_par_gramme: p.prot, glu_par_gramme: p.glu,
-      sucres_par_gramme: p.sucres || null, fibres_par_gramme: p.fibres || null, lip_par_gramme: p.lip,
-      ags_par_gramme: p.ags || null, code_barre: p.codeBarre || null, valide: false, created_by: S.client
+      nom: p.nom, kcal_par_100g: p.kcal, prot_par_100g: p.prot, glu_par_100g: p.glu,
+      sucres_par_100g: p.sucres || null, fibres_par_100g: p.fibres || null, lip_par_100g: p.lip,
+      ags_par_100g: p.ags || null, code_barre: p.codeBarre || null, valide: false, created_by: S.client
     })
   });
   if (!res.ok) return { ok: false };
   const [row] = await res.json();
-  return { ok: true, aliment: { nom: row.nom, kcal: row.kcal_par_gramme, prot: row.prot_par_gramme, glu: row.glu_par_gramme, lip: row.lip_par_gramme, sucres: row.sucres_par_gramme, fibres: row.fibres_par_gramme, ags: row.ags_par_gramme, codeBarre: row.code_barre, source: 'communaute', valide: row.valide } };
+  // Reconverti en "par gramme" pour usage interne immédiat (push dans
+  // _dBaseAliments.communaute) — même logique que sbChargerBaseAliments.
+  return { ok: true, aliment: { nom: row.nom, kcal: (row.kcal_par_100g||0)/100, prot: (row.prot_par_100g||0)/100, glu: (row.glu_par_100g||0)/100, lip: (row.lip_par_100g||0)/100, sucres: row.sucres_par_100g!=null?row.sucres_par_100g/100:null, fibres: row.fibres_par_100g!=null?row.fibres_par_100g/100:null, ags: row.ags_par_100g!=null?row.ags_par_100g/100:null, codeBarre: row.code_barre, source: 'communaute', valide: row.valide } };
 }
 
 async function sbChargerAlimentsRecents() {
@@ -1673,9 +1692,11 @@ async function confirmerCreationAliment() {
   if (kcal100 <= 0) { errEl.textContent = 'Entre au moins les calories.'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
   try {
+    // Stockage désormais "pour 100g" tel quel — plus de division, la saisie
+    // (et Open Food Facts) est déjà nativement pour 100g.
     const res = await _apiAjouterAlimentCommunaute({
-      nom, kcal: kcal100/100, prot: prot100/100, glu: glu100/100,
-      sucres: sucres100/100, fibres: fibres100/100, lip: lip100/100, ags: ags100/100,
+      nom, kcal: kcal100, prot: prot100, glu: glu100,
+      sucres: sucres100, fibres: fibres100, lip: lip100, ags: ags100,
       codeBarre: _dCreationCodeBarre || ''
     });
     if (!res || !res.ok) { errEl.textContent = 'Erreur lors de la création.'; errEl.style.display = 'block'; return; }

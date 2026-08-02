@@ -811,7 +811,7 @@ async function chargerTousDietes(clientId){
   if (tplIds.length) {
     try {
       const repasRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/repas?template_id=in.(${tplIds.join(',')})&variante_index=eq.0&select=template_id,repas_aliments(quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme)`,
+        `${SUPABASE_URL}/rest/v1/repas?template_id=in.(${tplIds.join(',')})&variante_index=eq.0&select=template_id,repas_aliments(quantite_g,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g)`,
         { headers: supaHeaders() });
       const repasRows = repasRes.ok ? await repasRes.json() : [];
       const macrosParTpl = {};
@@ -819,10 +819,11 @@ async function chargerTousDietes(clientId){
         const m = macrosParTpl[r.template_id] || (macrosParTpl[r.template_id] = { kcal:0, prot:0, glu:0, lip:0 });
         (r.repas_aliments || []).forEach(a => {
           const q = a.quantite_g || 0;
-          m.kcal += q * (a.kcal_par_gramme || 0);
-          m.prot += q * (a.prot_par_gramme || 0);
-          m.glu  += q * (a.glu_par_gramme  || 0);
-          m.lip  += q * (a.lip_par_gramme  || 0);
+          const d = (a.unite||'g')==='g' ? 100 : 1; // colonnes stockées "pour 100g"
+          m.kcal += q * (a.kcal_par_100g || 0) / d;
+          m.prot += q * (a.prot_par_100g || 0) / d;
+          m.glu  += q * (a.glu_par_100g  || 0) / d;
+          m.lip  += q * (a.lip_par_100g  || 0) / d;
         });
       });
       rows.forEach(d => { if (d.diete_template_id) d._macros = macrosParTpl[d.diete_template_id] || null; });
@@ -2282,11 +2283,11 @@ function _rowsTableCoach(){
     <tr>
       <td><strong>${esc(a.nom)}</strong></td>
       <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
-      ${(() => { const u=a.unite&&a.unite!=='g'; const m=u?1:100; const ref=u?`<span style="font-size:9px;font-weight:400;color:var(--text-faint);margin-left:3px;">/ ${a.unite}</span>`:''; return `
-      <td class="mono">${Math.round((a.kcal_par_gramme||0)*m)} kcal${u?`<span style="font-size:9px;color:var(--text-faint);margin-left:2px;">/ ${a.unite}</span>`:''}</td>
-      <td class="mono">P ${Math.round((a.prot_par_gramme||0)*m*10)/10}g</td>
-      <td class="mono">G ${Math.round((a.glu_par_gramme||0)*m*10)/10}g</td>
-      <td class="mono">L ${Math.round((a.lip_par_gramme||0)*m*10)/10}g</td>
+      ${(() => { const u=a.unite&&a.unite!=='g'; return `
+      <td class="mono">${Math.round(a.kcal_par_100g||0)} kcal${u?`<span style="font-size:9px;color:var(--text-faint);margin-left:2px;">/ ${a.unite}</span>`:''}</td>
+      <td class="mono">P ${Math.round((a.prot_par_100g||0)*10)/10}g</td>
+      <td class="mono">G ${Math.round((a.glu_par_100g||0)*10)/10}g</td>
+      <td class="mono">L ${Math.round((a.lip_par_100g||0)*10)/10}g</td>
       `; })()}
       <td style="white-space:nowrap;text-align:right;">
         <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
@@ -2363,22 +2364,24 @@ async function executerImportSheets(coach, communaute){
   const errEl= document.getElementById('importSheetsErr');
   prog.style.display = 'block';
 
+  // a.kcal/prot/glu/lip proviennent du Sheet import, nativement "pour 100g" —
+  // stockage direct désormais (plus de division, colonnes _par_100g).
   const tous = [
     ...coach.map(a => ({
       nom: a.nom,
       categorie: null,
-      kcal_par_gramme: (a.kcal||0) / 100,
-      prot_par_gramme: (a.prot||0) / 100,
-      glu_par_gramme:  (a.glu||0)  / 100,
-      lip_par_gramme:  (a.lip||0)  / 100,
+      kcal_par_100g: a.kcal||0,
+      prot_par_100g: a.prot||0,
+      glu_par_100g:  a.glu ||0,
+      lip_par_100g:  a.lip ||0,
     })),
     ...communaute.map(a => ({
       nom: a.nom,
       categorie: null,
-      kcal_par_gramme: (a.kcal||0) / 100,
-      prot_par_gramme: (a.prot||0) / 100,
-      glu_par_gramme:  (a.glu||0)  / 100,
-      lip_par_gramme:  (a.lip||0)  / 100,
+      kcal_par_100g: a.kcal||0,
+      prot_par_100g: a.prot||0,
+      glu_par_100g:  a.glu ||0,
+      lip_par_100g:  a.lip ||0,
     })),
   ];
 
@@ -2492,9 +2495,11 @@ async function _confirmerImportOFF(idx){
   const errEl = document.getElementById('offErr');
   if (!nom){ errEl.textContent='Nom obligatoire.'; errEl.style.display='block'; return; }
   try {
+    // r.kcal/prot/glu/lip sont "par gramme" en interne (cf. affichage ×100
+    // juste au-dessus) — reconverti en "pour 100g" pour le stockage.
     const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach`, {
       method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
-      body:JSON.stringify({ nom, categorie, kcal_par_gramme:r.kcal, prot_par_gramme:r.prot, glu_par_gramme:r.glu, lip_par_gramme:r.lip })
+      body:JSON.stringify({ nom, categorie, kcal_par_100g:(r.kcal||0)*100, prot_par_100g:(r.prot||0)*100, glu_par_100g:(r.glu||0)*100, lip_par_100g:(r.lip||0)*100 })
     });
     if (!res.ok) throw new Error('supabase_' + res.status);
     const saved = (await res.json())[0];
@@ -2528,11 +2533,10 @@ function ouvrirFormulaireAliment(id){
       </div>
       <p id="afRefLabel" style="font-size:11.5px;color:var(--text-faint);margin:4px 0 10px;">${!a?.unite||a.unite==='g'?'Valeurs pour 100g':'Valeurs par unité (1 portion)'}</p>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
-        ${(() => { const isG = !a?.unite||a.unite==='g'; const mult = isG ? 100 : 1;
-        return `<div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="afGlu" type="number" min="0" step="0.1" value="${a ? Math.round((a.glu_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
-        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="afLip" type="number" min="0" step="0.1" value="${a ? Math.round((a.lip_par_gramme||0)*mult*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>`; })()}
+        <div class="field-row" style="margin:0;"><label>Kcal</label><input id="afKcal" type="number" min="0" step="0.1" value="${a ? Math.round((a.kcal_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Prot (g)</label><input id="afProt" type="number" min="0" step="0.1" value="${a ? Math.round((a.prot_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Gluc (g)</label><input id="afGlu" type="number" min="0" step="0.1" value="${a ? Math.round((a.glu_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
+        <div class="field-row" style="margin:0;"><label>Lip (g)</label><input id="afLip" type="number" min="0" step="0.1" value="${a ? Math.round((a.lip_par_100g||0)*10)/10 : ''}" placeholder="0" style="font-size:16px;"></div>
       </div>
       <div id="afErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
       <div class="modal-actions">
@@ -2550,12 +2554,13 @@ async function sauvegarderAlimentCoach(id){
   if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
   const categorie = document.getElementById('afCat').value || null;
   const unite = document.getElementById('afUnite').value || 'g';
-  const div = unite === 'g' ? 100 : 1;
-  const kcal = (parseFloat(document.getElementById('afKcal').value)||0) / div;
-  const prot = (parseFloat(document.getElementById('afProt').value)||0) / div;
-  const glu  = (parseFloat(document.getElementById('afGlu').value)||0) / div;
-  const lip  = (parseFloat(document.getElementById('afLip').value)||0) / div;
-  const payload = { nom, categorie, unite, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip };
+  // Colonnes "pour 100g" désormais — saisie déjà dans cette unité (grammes)
+  // ou par portion, stockage direct sans conversion.
+  const kcal = parseFloat(document.getElementById('afKcal').value)||0;
+  const prot = parseFloat(document.getElementById('afProt').value)||0;
+  const glu  = parseFloat(document.getElementById('afGlu').value)||0;
+  const lip  = parseFloat(document.getElementById('afLip').value)||0;
+  const payload = { nom, categorie, unite, kcal_par_100g:kcal, prot_par_100g:prot, glu_par_100g:glu, lip_par_100g:lip };
   try {
     const method = id ? 'PATCH' : 'POST';
     const url = id ? `${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${id}` : `${SUPABASE_URL}/rest/v1/aliments_coach`;
@@ -2603,7 +2608,9 @@ async function rechercherOpenFoodFacts(query){
       const prot = (p.nutriments?.proteins_100g ?? null);
       const glu  = (p.nutriments?.carbohydrates_100g ?? null);
       const lip  = (p.nutriments?.fat_100g ?? null);
-      return { nom, kcal: kcal!=null?kcal/100:null, prot: prot!=null?prot/100:null, glu: glu!=null?glu/100:null, lip: lip!=null?lip/100:null };
+      // Valeurs gardées telles quelles (nativement "pour 100g" chez Open Food
+      // Facts) — plus de division, cohérent avec le stockage _par_100g.
+      return { nom, kcal, prot, glu, lip };
     })
     .filter(p => {
       if (!p.nom || p.nom.length < 2) return false;       // pas de nom
@@ -3615,10 +3622,10 @@ async function reparerDietesPartagees(){
           const q = a.qte || 1;
           return {
             repas_id: repasId, nom: a.nom, quantite_g: q, ordre: ai,
-            kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
-            prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
-            glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
-            lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
+            kcal_par_100g: q > 0 ? (a.cals||0)/q*100 : 0,
+            prot_par_100g: q > 0 ? (a.prot||0)/q*100 : 0,
+            glu_par_100g:  q > 0 ? (a.glu||0)/q*100  : 0,
+            lip_par_100g:  q > 0 ? (a.lip||0)/q*100  : 0,
           };
         });
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
@@ -6359,19 +6366,23 @@ async function ouvrirAssignesTemplate(templateId, templateNom){
 
 // ── Page Diètes (coach) ───────────────────────────────────────────────
 async function chargerDieteTemplates(){
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?client_only=eq.false&order=nom.asc&select=*,repas(id,nom,ordre,repas_aliments(id,nom,quantite_g,kcal_par_gramme,prot_par_gramme,glu_par_gramme,lip_par_gramme))`, { headers: supaHeaders() });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?client_only=eq.false&order=nom.asc&select=*,repas(id,nom,ordre,repas_aliments(id,nom,unite,quantite_g,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g))`, { headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
 
+// Colonnes stockées "pour 100g" (2026-08-02) — diviseur 100 pour les
+// aliments au poids (unite='g', défaut), 1 pour les aliments par
+// unité/portion (jamais multipliés par 100 en base).
 function macrosDiete(repasArr){
   let kcal=0, prot=0, glu=0, lip=0;
   (repasArr||[]).forEach(r => (r.repas_aliments||[]).forEach(a => {
     const q = parseFloat(a.quantite_g)||0;
-    kcal += q * (parseFloat(a.kcal_par_gramme)||0);
-    prot += q * (parseFloat(a.prot_par_gramme)||0);
-    glu  += q * (parseFloat(a.glu_par_gramme)||0);
-    lip  += q * (parseFloat(a.lip_par_gramme)||0);
+    const d = (a.unite||'g')==='g' ? 100 : 1;
+    kcal += q * (parseFloat(a.kcal_par_100g)||0) / d;
+    prot += q * (parseFloat(a.prot_par_100g)||0) / d;
+    glu  += q * (parseFloat(a.glu_par_100g)||0) / d;
+    lip  += q * (parseFloat(a.lip_par_100g)||0) / d;
   }));
   return { kcal:Math.round(kcal), prot:Math.round(prot), glu:Math.round(glu), lip:Math.round(lip) };
 }
@@ -6457,7 +6468,7 @@ async function ouvrirEditeurDiete(id){
     const repasRaw = res.ok ? await res.json() : tpl.repas||[];
     dieteTplEnEdition = {
       id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme,modifie:!!a.modifie})) }))
+      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
     };
     if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   } else {
@@ -6480,7 +6491,7 @@ function _renderAlimListHtml(ri) {
           onchange="alimChangerQuantite(${ri},${ai},this.value)"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
         <span class="a-unite">${a.unite&&a.unite!=='g'?esc(a.unite):'g'}</span>
-        <span class="macro-pills">${Math.round((a.quantite_g||0)*(a.kcal_par_gramme||0))} kcal · P ${Math.round((a.quantite_g||0)*(a.prot_par_gramme||0))}g</span>
+        <span class="macro-pills">${(() => { const d=(a.unite||'g')==='g'?100:1; return Math.round((a.quantite_g||0)*(a.kcal_par_100g||0)/d) + ' kcal · P ' + Math.round((a.quantite_g||0)*(a.prot_par_100g||0)/d) + 'g'; })()}</span>
         <label title="Afficher une pastille « modifié » côté app client" style="display:flex;align-items:center;gap:3px;flex-shrink:0;font-size:9px;color:${a.modifie?'#f59e0b':'var(--text-faint)'};font-weight:700;cursor:pointer;">
           <input type="checkbox" ${a.modifie?'checked':''} onchange="alimToggleModifie(${ri},${ai},this.checked)" style="width:13px;height:13px;flex-shrink:0;">
           modifié
@@ -6712,7 +6723,7 @@ function _renderModalAjoutAliment(){
                 <div class="alim-pick-nom">${esc(a.nom)}</div>
                 ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
               </div>
-              <div class="alim-pick-macros">${a.unite&&a.unite!=='g'?Math.round(a.kcal_par_gramme||0):Math.round((a.kcal_par_gramme||0)*100)} kcal · P${a.unite&&a.unite!=='g'?Math.round((a.prot_par_gramme||0)*10)/10:Math.round((a.prot_par_gramme||0)*100)} G${a.unite&&a.unite!=='g'?Math.round((a.glu_par_gramme||0)*10)/10:Math.round((a.glu_par_gramme||0)*100)} L${a.unite&&a.unite!=='g'?Math.round((a.lip_par_gramme||0)*10)/10:Math.round((a.lip_par_gramme||0)*100)}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></div>
+              <div class="alim-pick-macros">${Math.round(a.kcal_par_100g||0)} kcal · P${Math.round((a.prot_par_100g||0)*10)/10} G${Math.round((a.glu_par_100g||0)*10)/10} L${Math.round((a.lip_par_100g||0)*10)/10}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></div>
             </div>`).join('')}
           ${baseList.length===0&&alimentsCoachData!==null?`<div style="text-align:center;padding:20px;color:var(--text-faint);">Base vide — ajoute des aliments depuis la page "Base alimentaire".</div>`:''}
         </div>
@@ -6766,14 +6777,14 @@ function _filtrerBaseAlim(q){
         <div class="alim-pick-nom">${esc(a.nom)}</div>
         ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
       </div>
-      <div class="alim-pick-macros">${Math.round((a.kcal_par_gramme||0)*100)} kcal · P${Math.round((a.prot_par_gramme||0)*100)} G${Math.round((a.glu_par_gramme||0)*100)} L${Math.round((a.lip_par_gramme||0)*100)}</div>
+      <div class="alim-pick-macros">${Math.round(a.kcal_par_100g||0)} kcal · P${Math.round((a.prot_par_100g||0)*10)/10} G${Math.round((a.glu_par_100g||0)*10)/10} L${Math.round((a.lip_par_100g||0)*10)/10}</div>
     </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text-faint);">Aucun résultat.</div>`;
 }
 
 function _selectionnerAlimBase(id){
   const a = alimentsCoachData.find(x=>x.id===id);
   if (!a) return;
-  _ouvrirSaisieQuantite(a.nom, a.kcal_par_gramme, a.prot_par_gramme, a.glu_par_gramme, a.lip_par_gramme, a.unite||'g');
+  _ouvrirSaisieQuantite(a.nom, a.kcal_par_100g, a.prot_par_100g, a.glu_par_100g, a.lip_par_100g, a.unite||'g');
 }
 
 async function _rechercherOFF(){
@@ -6804,27 +6815,33 @@ function _selectionnerOFF(idx){
 // figée) — recalculée à chaque frappe dans le champ quantité (voir
 // _majMacroBandSelection) : demande explicite du coach, "je change le
 // chiffre, les calories ne bougent pas".
-function _macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qte, uniteLabel){
+// kcal100/prot100/glu100/lip100 : valeurs "pour 100g" (aliment au poids) ou
+// "par portion" (aliment unité) selon `unite` — jamais "par gramme" — c'est
+// exactement le format stocké en base (colonnes _par_100g), donc aucune
+// conversion à l'écriture (voir _confirmerAlimSelectionne).
+function _macroBandSelectionHtml(kcal100, prot100, glu100, lip100, qte, diviseur, uniteLabel){
+  const f = v => (v||0)*qte/diviseur;
   return `
-    <div><div class="mk">Kcal</div><div class="mn">${Math.round(kcal_pg*qte)}</div><div class="mu">${uniteLabel}</div></div>
-    <div><div class="mk">Prot</div><div class="mn">${Math.round(prot_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
-    <div><div class="mk">Gluc</div><div class="mn">${Math.round(glu_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
-    <div><div class="mk">Lip</div><div class="mn">${Math.round(lip_pg*qte*10)/10}g</div><div class="mu">${uniteLabel}</div></div>`;
+    <div><div class="mk">Kcal</div><div class="mn">${Math.round(f(kcal100))}</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Prot</div><div class="mn">${Math.round(f(prot100)*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Gluc</div><div class="mn">${Math.round(f(glu100)*10)/10}g</div><div class="mu">${uniteLabel}</div></div>
+    <div><div class="mk">Lip</div><div class="mn">${Math.round(f(lip100)*10)/10}g</div><div class="mu">${uniteLabel}</div></div>`;
 }
 
-function _majMacroBandSelection(kcal_pg, prot_pg, glu_pg, lip_pg, uniteLabel){
+function _majMacroBandSelection(kcal100, prot100, glu100, lip100, diviseur, uniteLabel){
   const band = document.getElementById('aSelMacroBand');
   if (!band) return;
   const qte = parseFloat(document.getElementById('aQteSelected')?.value) || 0;
-  band.innerHTML = _macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qte, uniteLabel);
+  band.innerHTML = _macroBandSelectionHtml(kcal100, prot100, glu100, lip100, qte, diviseur, uniteLabel);
 }
 
-function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
+function _ouvrirSaisieQuantite(nom, kcal100, prot100, glu100, lip100, unite){
   unite = unite || 'g';
   const isG = unite === 'g';
+  const diviseur = isG ? 100 : 1;
   const qteLabel = isG ? 'Quantité (g)' : 'Nombre de ' + unite + 's';
   const qteDefault = isG ? 100 : 1;
-  const uniteLabel = isG ? 'pour cette quantité' : 'pour cette quantité';
+  const uniteLabel = 'pour cette quantité';
   // Nom JS-échappé (apostrophes) une seule fois — un aliment comme "Huile
   // d'olive" cassait silencieusement les boutons Ajouter/Entrée sans cet
   // échappement (l'apostrophe fermait prématurément la chaîne JS de l'attribut
@@ -6836,22 +6853,22 @@ function _ouvrirSaisieQuantite(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
     <h3 style="margin-bottom:4px;">${esc(nom)}</h3>
     ${_ajoutAlimCount > 0 ? `<div style="font-size:11px;color:var(--success);margin-bottom:10px;">✓ ${_ajoutAlimCount} aliment${_ajoutAlimCount>1?'s':''} ajouté${_ajoutAlimCount>1?'s':''} à ce repas</div>` : ''}
     <div class="macro-band" id="aSelMacroBand" style="border-radius:var(--radius-sm);margin-bottom:16px;">
-      ${_macroBandSelectionHtml(kcal_pg, prot_pg, glu_pg, lip_pg, qteDefault, uniteLabel)}
+      ${_macroBandSelectionHtml(kcal100, prot100, glu100, lip100, qteDefault, diviseur, uniteLabel)}
     </div>
     <div class="field-row"><label>${qteLabel}</label><input id="aQteSelected" type="number" min="1" value="${qteDefault}" style="font-size:16px;"
-      oninput="_majMacroBandSelection(${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${uniteLabel}')"
-      onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${nomJs}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')"></div>
+      oninput="_majMacroBandSelection(${kcal100},${prot100},${glu100},${lip100},${diviseur},'${uniteLabel}')"
+      onkeydown="if(event.key==='Enter')_confirmerAlimSelectionne('${nomJs}',${kcal100},${prot100},${glu100},${lip100},'${unite}')"></div>
     <div class="modal-actions">
       <button class="btn" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">← Retour</button>
-      <button class="btn primary" onclick="_confirmerAlimSelectionne('${nomJs}',${kcal_pg},${prot_pg},${glu_pg},${lip_pg},'${unite}')">Ajouter</button>
+      <button class="btn primary" onclick="_confirmerAlimSelectionne('${nomJs}',${kcal100},${prot100},${glu100},${lip100},'${unite}')">Ajouter</button>
     </div>`;
   setTimeout(()=>document.getElementById('aQteSelected')?.select(), 50);
 }
 
-function _confirmerAlimSelectionne(nom, kcal_pg, prot_pg, glu_pg, lip_pg, unite){
+function _confirmerAlimSelectionne(nom, kcal100, prot100, glu100, lip100, unite){
   unite = unite || 'g';
   const qte = parseFloat(document.getElementById('aQteSelected').value)||0;
-  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite, quantite_g:qte, kcal_par_gramme:kcal_pg, prot_par_gramme:prot_pg, glu_par_gramme:glu_pg, lip_par_gramme:lip_pg });
+  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite, quantite_g:qte, kcal_par_100g:kcal100, prot_par_100g:prot100, glu_par_100g:glu100, lip_par_100g:lip100 });
   _ajoutAlimCount++;
   _updateAlimentsDom(ajoutAlimRI);
   // Retour à la recherche avec flash de confirmation
@@ -6868,11 +6885,12 @@ function confirmerAjoutAliment(){
   const errEl = document.getElementById('aErr');
   if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
   const qte = parseFloat(document.getElementById('aQte').value)||0;
-  const kcal = (parseFloat(document.getElementById('aKcal').value)||0) / 100;
-  const prot = (parseFloat(document.getElementById('aProt').value)||0) / 100;
-  const glu  = (parseFloat(document.getElementById('aGlu').value)||0) / 100;
-  const lip  = (parseFloat(document.getElementById('aLip').value)||0) / 100;
-  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, quantite_g:qte, kcal_par_gramme:kcal, prot_par_gramme:prot, glu_par_gramme:glu, lip_par_gramme:lip });
+  // Saisie déjà "pour 100g" (label au-dessus des champs) — stockage direct.
+  const kcal = parseFloat(document.getElementById('aKcal').value)||0;
+  const prot = parseFloat(document.getElementById('aProt').value)||0;
+  const glu  = parseFloat(document.getElementById('aGlu').value)||0;
+  const lip  = parseFloat(document.getElementById('aLip').value)||0;
+  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite:'g', quantite_g:qte, kcal_par_100g:kcal, prot_par_100g:prot, glu_par_100g:glu, lip_par_100g:lip });
   _ajoutAlimCount++;
   _updateAlimentsDom(ajoutAlimRI);
   // Reset le formulaire pour un autre ajout manuel
@@ -6907,7 +6925,7 @@ async function sauvegarderDieteTemplate(){
       if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai, modifie:!!a.modifie }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_100g:a.kcal_par_100g, prot_par_100g:a.prot_par_100g, glu_par_100g:a.glu_par_100g, lip_par_100g:a.lip_par_100g, ordre:ai, modifie:!!a.modifie }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
@@ -7047,9 +7065,9 @@ async function _dupliquerTemplateDiete(sourceTemplateId, nom){
     const aliments = r.repas_aliments || [];
     if (aliments.length) {
       const payload = aliments.map((a, ai) => ({
-        repas_id: newRepas.id, nom: a.nom, quantite_g: a.quantite_g, ordre: a.ordre != null ? a.ordre : ai,
-        kcal_par_gramme: a.kcal_par_gramme, prot_par_gramme: a.prot_par_gramme,
-        glu_par_gramme: a.glu_par_gramme, lip_par_gramme: a.lip_par_gramme,
+        repas_id: newRepas.id, nom: a.nom, unite: a.unite || 'g', quantite_g: a.quantite_g, ordre: a.ordre != null ? a.ordre : ai,
+        kcal_par_100g: a.kcal_par_100g, prot_par_100g: a.prot_par_100g,
+        glu_par_100g: a.glu_par_100g, lip_par_100g: a.lip_par_100g,
       }));
       await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, {
         method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(payload)
@@ -7157,10 +7175,10 @@ async function exporterRecetteVersBase(id) {
   const nom = `${r.emoji||'🍽️'} ${r.nom}`;
   const body = {
     nom, categorie: 'Recettes', unite: 'portion',
-    kcal_par_gramme: r.kcal_par_portion,
-    prot_par_gramme: r.prot_par_portion || 0,
-    glu_par_gramme:  r.glu_par_portion  || 0,
-    lip_par_gramme:  r.lip_par_portion  || 0
+    kcal_par_100g: r.kcal_par_portion,
+    prot_par_100g: r.prot_par_portion || 0,
+    glu_par_100g:  r.glu_par_portion  || 0,
+    lip_par_100g:  r.lip_par_portion  || 0
   };
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach`, {
@@ -8322,10 +8340,10 @@ async function migrerDieteGAS() {
         const q = a.qte || 1;
         return {
           repas_id: repasId, nom: a.nom, quantite_g: q, ordre: ai,
-          kcal_par_gramme: q > 0 ? (a.cals||0)/q : 0,
-          prot_par_gramme: q > 0 ? (a.prot||0)/q : 0,
-          glu_par_gramme:  q > 0 ? (a.glu||0)/q  : 0,
-          lip_par_gramme:  q > 0 ? (a.lip||0)/q  : 0,
+          kcal_par_100g: q > 0 ? (a.cals||0)/q*100 : 0,
+          prot_par_100g: q > 0 ? (a.prot||0)/q*100 : 0,
+          glu_par_100g:  q > 0 ? (a.glu||0)/q*100  : 0,
+          lip_par_100g:  q > 0 ? (a.lip||0)/q*100  : 0,
         };
       });
       await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`,
@@ -9028,7 +9046,7 @@ async function sauvegarderDietePourClient() {
       if (!rRes.ok) throw new Error('repas ' + rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
-        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_gramme:a.kcal_par_gramme, prot_par_gramme:a.prot_par_gramme, glu_par_gramme:a.glu_par_gramme, lip_par_gramme:a.lip_par_gramme, ordre:ai, modifie:!!a.modifie }));
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_100g:a.kcal_par_100g, prot_par_100g:a.prot_par_100g, glu_par_100g:a.glu_par_100g, lip_par_100g:a.lip_par_100g, ordre:ai, modifie:!!a.modifie }));
         await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
       }
     }
@@ -9073,7 +9091,7 @@ async function editerDieteClient(nomDiete, clientId, clientDieteId) {
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   dieteTplEnEdition = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,quantite_g:a.quantite_g,kcal_par_gramme:a.kcal_par_gramme,prot_par_gramme:a.prot_par_gramme,glu_par_gramme:a.glu_par_gramme,lip_par_gramme:a.lip_par_gramme,modifie:!!a.modifie})) }))
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
   };
   if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   setNav('editeur-diete');
