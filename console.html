@@ -1692,7 +1692,7 @@ function openBilanHistoClient(clientId) {
   bilansHistoClientId = clientId;
   bilansHistoData = { loaded: false, error: null, bilans: [] };
   renderMain();
-  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=date_validation.desc`, { headers: supaHeaders() })
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('supabase_' + r.status)))
     .then(rows => {
       if (bilansHistoClientId !== clientId) return;
@@ -4360,7 +4360,7 @@ function renderFicheBilansTab(c){
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
       _ficheBilansLoading = true;
-      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=date_validation.desc`, { headers: supaHeaders() })
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
         .then(r => r.json())
         .then(rows => {
           _ficheBilans = Array.isArray(rows) ? rows : [];
@@ -4462,18 +4462,23 @@ function _bilanPeriodeLabel(b, jourBilanNom) {
     const { debut, fin } = _bilanWeekBoundsNearest(jourBilanNom, new Date(b.date_validation + 'T12:00:00'));
     return `${fmt(debut)} → ${fmt(fin)}`;
   }
-  if (b.created_at) {
-    // Bilan encore en cours (pas de date_validation) : on projette l'échéance à venir depuis
-    // la création, toujours en avant (cohérent avec _supaGetOrCreateBilanCourant côté client).
+  if (b.created_at && !b.envoye_coach) {
+    // Bilan encore en cours (pas envoyé, pas de date_validation) : on projette l'échéance à
+    // venir depuis la création, toujours en avant (cohérent avec _supaGetOrCreateBilanCourant
+    // côté client).
     const { debut, fin } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
     return `${fmt(debut)} → ${fmt(fin)}`;
   }
+  // Bilan envoyé sans date_validation = résidu de migration (import groupé, created_at = date
+  // de migration et non la vraie semaine) — utiliser created_at donnerait la même semaine à
+  // tous les bilans migrés le même jour (bug vécu : 14 bilans de Mathis Le Ray tous affichés
+  // "27 Juil → 2 Août" en doublon). semaine_label brut, même imprécis, évite l'illusion de doublon.
   return b.semaine_label || '—';
 }
 
 function _renderFicheBilansCorbeille(c){
   if (_ficheBilansCorbeille === null) {
-    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.true&order=date_validation.desc`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.true&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
       .then(r => r.ok ? r.json() : [])
       .then(rows => {
         _ficheBilansCorbeille = Array.isArray(rows) ? rows : [];
