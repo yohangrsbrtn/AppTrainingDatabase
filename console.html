@@ -4905,6 +4905,16 @@ function renderFicheProfilTab(c){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;">
       <div class="fiche-card" style="margin-bottom:0;">
         <h3>Informations personnelles</h3>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          ${p.photo_url
+            ? `<img src="${esc(p.photo_url)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
+            : `<div style="width:48px;height:48px;border-radius:50%;flex-shrink:0;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text-faint);">${esc(((p.prenom||'')[0]||'')+((p.nom||'')[0]||'') || '?')}</div>`}
+          <div style="flex:1;min-width:0;">
+            <label style="display:block;font-size:11px;color:var(--text-faint);margin-bottom:2px;">Photo de profil</label>
+            ${p.photo_url ? `<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--critical);" onclick="_ficheSupprimerPhotoClient('${c.id}')">Supprimer la photo</button>` : `<span style="font-size:12px;color:var(--text-faint);">Aucune photo</span>`}
+          </div>
+        </div>
+        <div class="fiche-field"><label>Pseudo (affiché à la place du nom dans le classement)</label><input id="fPseudo" type="text" maxlength="24" placeholder="laisser vide = affiche le nom" value="${esc(p.pseudo||'')}"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div class="fiche-field"><label>Prénom</label><input id="fPrenom" type="text" value="${esc(p.prenom||'')}"></div>
           <div class="fiche-field"><label>Nom</label><input id="fNom" type="text" value="${esc(p.nom||'')}"></div>
@@ -6185,6 +6195,7 @@ async function sauvegarderFicheSandbox(clientId){
     client_id: clientId,
     prenom: document.getElementById('fPrenom').value.trim(),
     nom: document.getElementById('fNom').value.trim(),
+    pseudo: document.getElementById('fPseudo').value.trim() || null,
     date_naissance: document.getElementById('fNaissance').value || null,
     email: document.getElementById('fEmail').value.trim(),
     date_creation_compte: document.getElementById('fDateCreationCompte').value || null,
@@ -6211,6 +6222,19 @@ async function sauvegarderFicheSandbox(clientId){
     ficheData.profil = (await res.json())[0];
     if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
   } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
+}
+
+// Retire la photo d'un client (pseudo/photo inappropriés) — action immédiate, pas besoin
+// de repasser par "Enregistrer les informations".
+async function _ficheSupprimerPhotoClient(clientId){
+  if (!confirm('Supprimer la photo de profil de ce client ?')) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ photo_url: null })
+    });
+    if (ficheData.profil) ficheData.profil.photo_url = null;
+    if (state.nav==='fiche-client') renderMain();
+  } catch(e){ alert('Erreur : '+e.message); }
 }
 
 async function setPanelTab(t){
