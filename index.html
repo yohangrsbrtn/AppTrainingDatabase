@@ -787,13 +787,15 @@ function _chargerTop5Home() {
     try {
       const [progRes, profilRes] = await Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
-        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie,est_coach`, { headers: supaHeaders() }),
       ]);
       const progRows = progRes.ok ? await progRes.json() : [];
       const profils = profilRes.ok ? await profilRes.json() : [];
       const profilMap = {};
-      // Mode simplifié = ne pas apparaître dans le classement des autres.
-      profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+      // Mode simplifié = ne pas apparaître dans le classement des autres. Le coach
+      // (est_coach=true, ex: yohanp) n'apparaît pas non plus — le classement est
+      // réservé aux vrais clients, pas au coach lui-même même s'il s'entraîne aussi.
+      profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
       const cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
         id: p.client_id, nom: profilMap[p.client_id],
         xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
@@ -1083,13 +1085,14 @@ async function loadClassement() {
     // Classement : uniquement les clients supabase_only ayant une progression
     const [progRes, profilRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie,est_coach`, { headers: supaHeaders() }),
     ]);
     const progRows = progRes.ok ? await progRes.json() : [];
     const profils = profilRes.ok ? await profilRes.json() : [];
     const profilMap = {};
-    // Mode simplifié = ne pas apparaître dans le classement des autres.
-    profils.filter(p => !p.mode_simplifie).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+    // Mode simplifié = ne pas apparaître dans le classement des autres. Le coach
+    // (est_coach=true) n'apparaît pas non plus.
+    profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
     S.data.classement = progRows
       .filter(p => profilMap[p.client_id])
       .map(p => ({
