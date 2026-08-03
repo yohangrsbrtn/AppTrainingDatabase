@@ -5477,7 +5477,10 @@ async function migrerSuiviClient(clientId) {
   try {
     const rows = await apiGasProd('listerSuivi', clientId);
     if (!Array.isArray(rows) || !rows.length) { alert('Aucune entrée Suivi trouvée dans GAS pour ce client.'); return; }
-    const body = rows.map(r => ({
+    // La toute première ligne ("Début coaching") n'a souvent pas de date dans GAS —
+    // client_suivi.date est NOT NULL, on ne peut pas l'importer sans date fiable.
+    const sansDate = rows.filter(r => !r.date);
+    const body = rows.filter(r => r.date).map(r => ({
       client_id: clientId,
       gas_row: r.row,
       date: r.date,
@@ -5486,6 +5489,7 @@ async function migrerSuiviClient(clientId) {
       entrainement: r.entrainement || null,
       commentaire_general: r.commentaire || null,
     }));
+    if (!body.length) { alert('Aucune ligne avec une date exploitable.'); return; }
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?on_conflict=client_id,gas_row`, {
       method: 'POST',
       headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
@@ -5494,7 +5498,7 @@ async function migrerSuiviClient(clientId) {
     if (!res.ok) throw new Error(await res.text());
     ficheData.suivi = await chargerSuivi(clientId);
     if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
-    alert(`${body.length} entrée(s) de suivi importée(s)/mise(s) à jour.`);
+    alert(`${body.length} entrée(s) de suivi importée(s)/mise(s) à jour.` + (sansDate.length ? `\n${sansDate.length} ligne(s) ignorée(s) faute de date.` : ''));
   } catch(e) { alert('Erreur migration Suivi : ' + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '⬇ Migrer depuis GAS'; } }
 }
