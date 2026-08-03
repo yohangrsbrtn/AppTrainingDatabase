@@ -582,6 +582,9 @@ let _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
 let _ficheXpHistoClientId = null;
 let _ficheXpHistorique = null; // null = pas encore chargé
 let _ficheXpHistoLoading = false;
+let _ficheMenusJournalClientId = null;
+let _ficheMenus = null; let _ficheMenusLoading = false;
+let _ficheJournal = null; let _ficheJournalLoading = false;
 let _ficheProtocoleClientId = null;
 let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
 let _ficheProtocoleLoading = false;
@@ -5342,7 +5345,76 @@ function renderFicheDieteTab(c){
             <div class="p-meta">${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
           </div>
           <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Supprimer</button>
-        </div>`).join('')}` : ''}`;
+        </div>`).join('')}` : ''}
+    ${_renderFicheMenusEtJournal(c)}`;
+}
+
+// Menus perso + journal alimentaire du client (lecture seule côté coach) — lazy-load, même
+// pattern que l'historique XP (state réinitialisé quand le client change, chargé une seule fois
+// par ouverture d'onglet). "Mes menus"/"Mon journal" sont des fonctionnalités 100% côté client
+// (diete.js) sans aucune vue coach avant ça.
+function _renderFicheMenusEtJournal(c){
+  const clientId = c.id;
+  if (_ficheMenusJournalClientId !== clientId) {
+    _ficheMenusJournalClientId = clientId;
+    _ficheMenus = null; _ficheMenusLoading = false;
+    _ficheJournal = null; _ficheJournalLoading = false;
+  }
+  const refresh = () => { const el = document.getElementById('ficheTabContent'); if (el && ficheTab === 'diete') el.innerHTML = renderFicheDieteTab(c); };
+  if (_ficheMenus === null && !_ficheMenusLoading) {
+    _ficheMenusLoading = true;
+    fetch(`${SUPABASE_URL}/rest/v1/client_menus?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&select=id,nom,client_menu_aliments(nom,quantite_g,kcal,prot,glu,lip,ordre)`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => { _ficheMenus = rows; _ficheMenusLoading = false; refresh(); })
+      .catch(() => { _ficheMenus = []; _ficheMenusLoading = false; });
+  }
+  if (_ficheJournal === null && !_ficheJournalLoading) {
+    _ficheJournalLoading = true;
+    fetch(`${SUPABASE_URL}/rest/v1/client_journal?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc&select=id,date,slot,type,label`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => { _ficheJournal = rows; _ficheJournalLoading = false; refresh(); })
+      .catch(() => { _ficheJournal = []; _ficheJournalLoading = false; });
+  }
+
+  const menusHtml = _ficheMenus === null
+    ? `<div class="fiche-prog-empty">Chargement…</div>`
+    : !_ficheMenus.length ? `<div class="fiche-prog-empty">Aucun menu créé.</div>`
+    : _ficheMenus.map(m => {
+        const aliments = (m.client_menu_aliments||[]).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
+        const kcal = aliments.reduce((s,a)=>s+(a.kcal||0),0), prot = aliments.reduce((s,a)=>s+(a.prot||0),0), glu = aliments.reduce((s,a)=>s+(a.glu||0),0), lip = aliments.reduce((s,a)=>s+(a.lip||0),0);
+        return `<div class="prog-row" style="cursor:default;flex-direction:column;align-items:stretch;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="p-nom">${esc(m.nom||'Menu sans nom')}</div>
+            <div class="p-meta">${Math.round(kcal)} kcal · P${Math.round(prot)} G${Math.round(glu)} L${Math.round(lip)}</div>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:4px;">${aliments.map(a=>esc(a.nom)+' ('+(a.quantite_g||'?')+'g)').join(', ') || 'Aucun aliment.'}</div>
+        </div>`;
+      }).join('');
+
+  const journalHtml = _ficheJournal === null
+    ? `<div class="fiche-prog-empty">Chargement…</div>`
+    : !_ficheJournal.length ? `<div class="fiche-prog-empty">Aucune entrée de journal.</div>`
+    : (() => {
+        const parDate = {};
+        _ficheJournal.forEach(r => { (parDate[r.date] = parDate[r.date] || []).push(r); });
+        return Object.keys(parDate).sort().reverse().slice(0, 30).map(date => {
+          const entries = parDate[date].slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
+          const lignes = entries.map(r => {
+            const badge = r.type === 'cible' ? '🎯 Diète cible' : r.type === 'menu' ? '📋 Menu perso' : `🍽 Repas ${r.slot!=null?r.slot+1:''}`;
+            return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:2px 0;"><span style="color:var(--text-faint);">${badge}</span><span>${esc(r.label||'—')}</span></div>`;
+          }).join('');
+          return `<div class="prog-row" style="cursor:default;flex-direction:column;align-items:stretch;margin-bottom:6px;">
+            <div style="font-size:11px;font-weight:700;color:var(--text-faint);margin-bottom:4px;">${new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'})}</div>
+            ${lignes}
+          </div>`;
+        }).join('');
+      })();
+
+  return `
+    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:8px;margin-top:20px;">Menus personnels du client</div>
+    ${menusHtml}
+    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:8px;margin-top:20px;">Journal alimentaire (30 derniers jours renseignés)</div>
+    ${journalHtml}`;
 }
 
 // Résumé kcal/macros affiché directement dans le bandeau de la diète (fiche
