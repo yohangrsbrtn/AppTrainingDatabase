@@ -1813,6 +1813,7 @@ function openBilanDetailSupabase(bilan) {
     data: {
       dateValidation: dateFr,
       createdAt: bilan.created_at || null,
+      envoyeCoach: !!bilan.envoye_coach,
       semaineLabel: bilan.semaine_label || '',
       jours: bilan.jours || [],
       repas: bilan.repas_eval || [],
@@ -1872,9 +1873,15 @@ function _fmtJourMois(d) { return d.toLocaleDateString('fr-FR', { day:'numeric',
 // (weekRange retombait sur semaine_label, jours restait dans l'ordre stocké Lundi…Dimanche),
 // ce qui donnait l'impression trompeuse d'une semaine lundi→dimanche même quand jour_bilan
 // décale la semaine sur un autre jour (ex: Perrine, jour_bilan=Dimanche, semaine dimanche→samedi).
-function _bilanDetailBornes(dateValidationIso, createdAtIso, jourBilanNom) {
+function _bilanDetailBornes(dateValidationIso, createdAtIso, jourBilanNom, envoyeCoach) {
   if (dateValidationIso) return _bilanWeekBoundsNearest(jourBilanNom, new Date(dateValidationIso + 'T12:00:00'));
-  if (createdAtIso) return _bilanWeekBounds(jourBilanNom, new Date(createdAtIso));
+  // Le fallback sur created_at ne vaut que pour un bilan encore EN COURS (projection en avant
+  // de sa semaine depuis sa création) — un bilan déjà envoyé sans date_validation est un résidu
+  // de migration (voir project_architecture_bilans.md) : created_at = date de MIGRATION, pas de
+  // validation. Sans ce garde-fou, un vieux bilan migré affiche une plage de dates fabriquée à
+  // partir du jour de migration au lieu de "sans date" — incohérent avec le libellé de la liste
+  // (_bilanPeriodeLabel a le même garde-fou depuis l'origine).
+  if (createdAtIso && !envoyeCoach) return _bilanWeekBounds(jourBilanNom, new Date(createdAtIso));
   return null;
 }
 
@@ -2139,7 +2146,7 @@ function renderBilanDetailPage(el) {
   const semaineLabel = d.semaineLabel || '';
   // Bornes réelles de la semaine (debut/fin), valables aussi bien pour un bilan déjà validé
   // que pour un bilan encore en cours (pas de date_validation) — voir _bilanDetailBornes.
-  const bornes = _bilanDetailBornes(bilanDetailState.dateIso, d.createdAt, c ? c.jour_bilan : null);
+  const bornes = _bilanDetailBornes(bilanDetailState.dateIso, d.createdAt, c ? c.jour_bilan : null, d.envoyeCoach);
   const weekRange = (bornes ? _weekRange(bornes.debut, bornes.fin) : '') || semaineLabel;
   // d.jours est toujours stocké Lundi(0)…Dimanche(6) — mais la semaine du bilan se termine
   // le jour_bilan du client, pas forcément dimanche. Sans ça, le tableau affichait toujours
