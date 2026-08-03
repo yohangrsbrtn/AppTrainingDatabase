@@ -5414,24 +5414,44 @@ function renderFicheProgressionTab(){
     _ficheXpHistorique = null;
     _ficheXpHistoLoading = false;
   }
+  // XP par ligne (2026-08-03) : activite_events ne stocke aucun montant — bilan_envoye est
+  // remplacé par une lecture directe de bilans.xp_credite (montant exact, déjà calculé et
+  // dédoublonné par bilan.js). seance_validee est un montant FIXE (XP_SEANCE_VALIDEE, bilan.js/
+  // programme-client.js) — toujours exact. journee_validee affiche le montant de BASE garanti
+  // (XP_JOURNEE_VALIDEE) — le bonus pas éventuel (+BONUS_PAS_JOUR si objectif atteint ce jour-là)
+  // n'est PAS reconstruit ici : il faudrait retrouver, pour la date exacte de l'événement, quel
+  // bilan et quelle position du tableau jours[] elle correspondait — fragile à travers le
+  // changement de convention de semaine (voir plus haut dans ce fichier, "décalée à la veille de
+  // jour_bilan"), risque de ressortir un chiffre faux plutôt qu'utile. Constantes dupliquées ici
+  // (console.html ne charge pas bilan.js) — à resynchroniser si elles changent côté client.
+  const XP_SEANCE_VALIDEE_CONST = 10;
+  const XP_JOURNEE_VALIDEE_CONST = 5;
   if (clientId && _ficheXpHistorique === null && !_ficheXpHistoLoading) {
     _ficheXpHistoLoading = true;
     const fmtTs = iso => { const d = new Date(iso); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); };
-    fetch(`${SUPABASE_URL}/rest/v1/activite_events?client_id=eq.${encodeURIComponent(clientId)}&type=in.(bilan_envoye,seance_validee,journee_validee)&order=created_at.desc&limit=300&select=type,meta,created_at`, { headers: supaHeaders() })
-      .then(r => r.ok ? r.json() : [])
-      .then(rows => {
-        _ficheXpHistorique = rows.map(r => ({ type: r.type, semaine: r.meta && r.meta.semaine_label, ts: fmtTs(r.created_at) }));
-        _ficheXpHistoLoading = false;
-        const el = document.getElementById('ficheTabContent');
-        if (el && ficheTab === 'progression') el.innerHTML = renderFicheProgressionTab();
-      })
-      .catch(() => { _ficheXpHistorique = []; _ficheXpHistoLoading = false; });
+    Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/activite_events?client_id=eq.${encodeURIComponent(clientId)}&type=in.(seance_validee,journee_validee)&order=created_at.desc&limit=300&select=type,meta,created_at`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&xp_credite=gt.0&order=created_at.desc&limit=300&select=semaine_label,xp_credite,envoye_at,created_at`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    ]).then(([events, bilans]) => {
+      const evRows = events.map(r => ({ type: r.type, semaine: r.meta && r.meta.semaine_label, tms: r.created_at, xp: r.type === 'seance_validee' ? XP_SEANCE_VALIDEE_CONST : XP_JOURNEE_VALIDEE_CONST, approx: r.type === 'journee_validee' }));
+      const bilanRows = bilans.map(b => ({ type: 'bilan_envoye', semaine: b.semaine_label, tms: b.envoye_at || b.created_at, xp: b.xp_credite, approx: false }));
+      _ficheXpHistorique = [...evRows, ...bilanRows]
+        .sort((a, b) => (b.tms || '').localeCompare(a.tms || ''))
+        .slice(0, 300)
+        .map(r => ({ ...r, ts: fmtTs(r.tms) }));
+      _ficheXpHistoLoading = false;
+      const el = document.getElementById('ficheTabContent');
+      if (el && ficheTab === 'progression') el.innerHTML = renderFicheProgressionTab();
+    }).catch(() => { _ficheXpHistorique = []; _ficheXpHistoLoading = false; });
   }
   const xpHistoRows = (_ficheXpHistorique || []).map(l => {
     const info = libelleLog(l);
     return `<div class="fiche-hist-row">
       <span style="color:var(--text-muted);">${info.icon} ${esc(info.txt)}${info.sub ? ' · ' + esc(info.sub) : ''}</span>
-      <span style="color:var(--text-faint);font-size:11px;">${esc(l.ts)}</span>
+      <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <span style="font-size:12px;font-weight:700;color:#4f8ef7;">+${l.xp}${l.approx?'+':''} XP</span>
+        <span style="color:var(--text-faint);font-size:11px;">${esc(l.ts)}</span>
+      </span>
     </div>`;
   }).join('');
   const xpHistoContent = _ficheXpHistorique === null
