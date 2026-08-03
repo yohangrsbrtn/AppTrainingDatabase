@@ -4281,7 +4281,7 @@ function renderFicheClientPage(el){
         </div>
       </div>
       <button class="btn" style="flex-shrink:0;font-size:12px;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}')">🔔 Notifier</button>
-      ${!c._supabaseOnly ? `<a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Vue client</a>` : ''}
+      <a class="btn" href="index.html?viewAs=${encodeURIComponent(c.id)}" style="flex-shrink:0;font-size:12px;">Vue client</a>
     </div>
 
     <div class="fiche-tabs">
