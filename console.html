@@ -8008,6 +8008,30 @@ async function _getGasCoachToken(force) {
   return json.token;
 }
 
+// Le endpoint GAS répond via une redirection interne (script.googleusercontent.com)
+// qui échoue parfois côté livraison (page HTML générique Google) même quand
+// l'exécution elle-même a fini vite et sans erreur (vérifié dans le journal
+// Apps Script "Exécutions" : 3.1s, "Terminée" — mais réponse HTML côté client).
+// Ce n'est pas un vrai timeout ni un bug du script — juste une flakiness de
+// livraison. Un simple retry après une courte pause suffit dans la pratique.
+async function _fetchGasJson(body, ctrl, _jsonRetryLeft) {
+  const res = await fetch(GAS_PROD_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body),
+    signal: ctrl.signal,
+  });
+  const raw = await res.text();
+  try { return JSON.parse(raw); }
+  catch (e) {
+    if (_jsonRetryLeft > 0) {
+      await new Promise(r => setTimeout(r, 1500));
+      return _fetchGasJson(body, ctrl, _jsonRetryLeft - 1);
+    }
+    throw new Error('reponse_gas_invalide (Google a renvoyé une page au lieu du résultat — réessaie)');
+  }
+}
+
 async function apiGasProd(action, clientId, params = {}, _retry) {
   const token = await _getGasCoachToken(!!_retry);
   const body = { action, token, client: _gasId(clientId), params };
@@ -8017,16 +8041,7 @@ async function apiGasProd(action, clientId, params = {}, _retry) {
   // côté serveur — 30s coupait la requête en plein milieu d'un run par ailleurs sain.
   const tid  = setTimeout(() => ctrl.abort(), 60000);
   try {
-    const res = await fetch(GAS_PROD_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    const raw = await res.text();
-    let json;
-    try { json = JSON.parse(raw); }
-    catch (e) { throw new Error('reponse_gas_invalide (exécution trop lente ou coupée — réessaie)'); }
+    const json = await _fetchGasJson(body, ctrl, 2);
     if (!json.ok) {
       if (json.error === 'token_invalide' && !_retry) {
         localStorage.removeItem('at_gas_token');
