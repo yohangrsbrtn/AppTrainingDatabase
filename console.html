@@ -437,6 +437,18 @@
 <div class="overlay" id="overlay" onclick="closePanel()"></div>
 <div class="panel" id="panel"></div>
 
+<button id="todoFab" onclick="toggleTodoPanel()" title="Pense-bête" style="position:fixed;bottom:22px;right:22px;width:46px;height:46px;border-radius:50%;background:var(--accent);color:#1a0e00;border:none;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:pointer;z-index:150;display:flex;align-items:center;justify-content:center;">📌</button>
+<div id="todoPanel" style="display:none;position:fixed;bottom:78px;right:22px;width:300px;max-height:60vh;background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius);box-shadow:0 8px 28px rgba(0,0,0,.4);z-index:150;display:flex;flex-direction:column;overflow:hidden;">
+  <div style="padding:10px 14px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <span style="font-size:13px;font-weight:700;">📌 Pense-bête</span>
+    <button class="icon-btn" style="width:22px;height:22px;" onclick="toggleTodoPanel()">✕</button>
+  </div>
+  <div id="todoListEl" style="flex:1;overflow-y:auto;padding:8px 10px;"></div>
+  <div style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;">
+    <input id="todoNewInput" type="text" placeholder="Ajouter une note…" style="font-size:14px;width:100%;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);" onkeydown="if(event.key==='Enter')ajouterTodo()">
+  </div>
+</div>
+
 <script src="api.js?v=5"></script>
 <script src="collection.js?v=2"></script>
 <script>
@@ -10205,6 +10217,85 @@ function _showShell() {
   const saved = localStorage.getItem('console_sidebar_collapsed');
   _sidebarCollapsed = saved !== null ? saved === '1' : window.innerWidth < 700;
   document.getElementById('shell').classList.toggle('sidebar-collapsed', _sidebarCollapsed);
+  if (_todos === null) chargerTodos();
+}
+
+// ── Pense-bête (📌, accès rapide depuis toute la console) ────────────────
+// Widget flottant hors du routeur setNav/renderMain — vit dans le shell HTML
+// statique (jamais réécrit par un changement de page), donc reste ouvert/
+// disponible peu importe l'onglet consulté. Chaque ajout/coche/suppression
+// s'enregistre immédiatement dans Supabase (table coach_todos, pas de bouton
+// "sauvegarder" séparé).
+let _todos = null;
+let _todoPanelOuvert = false;
+
+async function chargerTodos(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?order=fait.asc,created_at.desc`, { headers: supaHeaders() });
+    _todos = res.ok ? await res.json() : [];
+  } catch(e) { _todos = []; }
+  if (_todoPanelOuvert) renderTodoList();
+}
+
+function toggleTodoPanel(){
+  _todoPanelOuvert = !_todoPanelOuvert;
+  document.getElementById('todoPanel').style.display = _todoPanelOuvert ? 'flex' : 'none';
+  if (_todoPanelOuvert) {
+    renderTodoList();
+    document.getElementById('todoNewInput').focus();
+  }
+}
+
+function renderTodoList(){
+  const el = document.getElementById('todoListEl');
+  if (!el) return;
+  const todos = _todos || [];
+  el.innerHTML = todos.length ? todos.map(t => `
+    <div style="display:flex;align-items:flex-start;gap:7px;padding:6px 2px;border-bottom:1px solid var(--hairline);">
+      <input type="checkbox" ${t.fait?'checked':''} onchange="toggleTodo(${t.id},this.checked)" style="margin-top:2px;flex-shrink:0;">
+      <div style="flex:1;font-size:13px;line-height:1.4;word-break:break-word;${t.fait?'text-decoration:line-through;color:var(--text-faint);':''}">${esc(t.texte)}</div>
+      <button class="icon-btn del" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerTodo(${t.id})" title="Supprimer">${iTrash()}</button>
+    </div>`).join('')
+    : `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Rien pour l'instant.</div>`;
+}
+
+async function ajouterTodo(){
+  const input = document.getElementById('todoNewInput');
+  const texte = input.value.trim();
+  if (!texte) return;
+  input.value = '';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_todos`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ texte, fait: false })
+    });
+    if (!res.ok) throw new Error();
+    const saved = (await res.json())[0];
+    _todos = [saved, ...(_todos || [])];
+    renderTodoList();
+  } catch(e) { input.value = texte; alert("Erreur : la note n'a pas pu être enregistrée."); }
+}
+
+async function toggleTodo(id, fait){
+  const t = (_todos || []).find(x => x.id === id);
+  if (t) t.fait = fait;
+  renderTodoList();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ fait })
+    });
+    // Réordonne (fait passe en bas) sans tout recharger.
+    _todos.sort((a,b) => (a.fait===b.fait ? 0 : a.fait ? 1 : -1));
+    renderTodoList();
+  } catch(e) {}
+}
+
+async function supprimerTodo(id){
+  _todos = (_todos || []).filter(x => x.id !== id);
+  renderTodoList();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+  } catch(e) {}
 }
 let _sidebarCollapsed = false;
 function toggleSidebar(){
