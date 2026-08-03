@@ -1091,7 +1091,7 @@ async function _supaCalculerRetard(clientId) {
     const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
     const profilArr = profilRes.ok ? await profilRes.json() : [];
     const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
-    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.desc&select=created_at`, { headers: supaHeaders() });
+    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.desc&select=created_at`, { headers: supaHeaders() });
     const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
     if (!bilanArr.length) return false;
     return bilanArr.some(b => !_bilanEstPonctuel(b.created_at, new Date().toISOString(), jourBilan));
@@ -1765,7 +1765,7 @@ function ouvrirBilanDashboard(bilanId) {
 // d'ouvrir le détail. Fallback sur la fiche client si rien n'est trouvé.
 async function ouvrirBilanEnRetardDashboard(clientId) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&order=created_at.asc&limit=1`, { headers: supaHeaders() });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.asc&limit=1`, { headers: supaHeaders() });
     const rows = res.ok ? await res.json() : [];
     if (rows[0]) { _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1; openBilanDetailSupabase(rows[0]); return; }
   } catch(e) {}
@@ -1807,6 +1807,7 @@ function openBilanDetailSupabase(bilan) {
     enAttente: !!bilan.en_attente,
     data: {
       dateValidation: dateFr,
+      createdAt: bilan.created_at || null,
       semaineLabel: bilan.semaine_label || '',
       jours: bilan.jours || [],
       repas: bilan.repas_eval || [],
@@ -1855,31 +1856,37 @@ function bilanNavGo(delta) {
   openBilanDetailSupabase(_bilanNavList[newIdx]);
 }
 
-function _weekRange(dateFr) {
-  if (!dateFr) return '';
-  const p = dateFr.split('/');
-  if (p.length !== 3) return dateFr;
-  const sun = new Date(+p[2], +p[1]-1, +p[0]);
-  const mon = new Date(sun); mon.setDate(sun.getDate() - 6);
-  const fmt = d => d.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
-  return `${fmt(mon)} → ${fmt(sun)}`;
+function _fmtJourMois(d) { return d.toLocaleDateString('fr-FR', { day:'numeric', month:'short' }); }
+
+// Bornes réelles (debut/fin, objets Date) de la semaine d'un bilan, quel que soit son état :
+// - validé/envoyé (date_validation connue) → occurrence de jour_bilan la plus PROCHE de cette
+//   date (_bilanWeekBoundsNearest, gère un envoi en retard sans décaler d'une semaine entière)
+// - encore en cours (pas de date_validation) → projection en avant depuis created_at
+//   (_bilanWeekBounds, api.js — même logique que _bilanPeriodeLabel utilisée dans les listes).
+// Avant ce fix, un bilan en cours n'avait NI plage de dates NI réordonnancement des jours
+// (weekRange retombait sur semaine_label, jours restait dans l'ordre stocké Lundi…Dimanche),
+// ce qui donnait l'impression trompeuse d'une semaine lundi→dimanche même quand jour_bilan
+// décale la semaine sur un autre jour (ex: Perrine, jour_bilan=Dimanche, semaine dimanche→samedi).
+function _bilanDetailBornes(dateValidationIso, createdAtIso, jourBilanNom) {
+  if (dateValidationIso) return _bilanWeekBoundsNearest(jourBilanNom, new Date(dateValidationIso + 'T12:00:00'));
+  if (createdAtIso) return _bilanWeekBounds(jourBilanNom, new Date(createdAtIso));
+  return null;
+}
+
+function _weekRange(debut, fin) {
+  if (!debut || !fin) return '';
+  return `${_fmtJourMois(debut)} → ${_fmtJourMois(fin)}`;
 }
 
 // Réordonne jours[] (toujours stocké Lundi(0)…Dimanche(6) en base) selon les vraies dates
-// calendaires de la semaine du bilan, et attache la date à chaque entrée pour affichage.
-// dateValidationFr = date de fin de semaine (dd/mm/yyyy) ; début = fin - 6 jours — même base
-// de calcul que _weekRange, pour rester cohérent avec l'entête "X → Y" affichée au-dessus.
-function _bilanJoursAvecDates(joursArr, dateValidationFr) {
-  if (!joursArr.length) return joursArr;
-  const p = (dateValidationFr || '').split('/');
-  if (p.length !== 3) return joursArr; // pas de date connue — ordre stocké tel quel
-  const fin = new Date(+p[2], +p[1]-1, +p[0]);
-  const debut = new Date(fin); debut.setDate(fin.getDate() - 6);
-  const fmt = d => d.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+// calendaires de la semaine du bilan (debut = objet Date, cf. _bilanDetailBornes), et attache
+// la date de chaque jour pour affichage.
+function _bilanJoursAvecDates(joursArr, debut) {
+  if (!joursArr.length || !debut) return joursArr;
   return Array.from({ length: 7 }, (_, i) => {
     const dt = new Date(debut); dt.setDate(debut.getDate() + i);
     const wIdx = (dt.getDay() + 6) % 7; // Lundi=0…Dimanche=6
-    return { ...(joursArr[wIdx] || {}), _dateLabel: fmt(dt) };
+    return { ...(joursArr[wIdx] || {}), _dateLabel: _fmtJourMois(dt) };
   });
 }
 
@@ -2124,14 +2131,16 @@ function renderBilanDetailPage(el) {
   const repas = d.repas || [];
   const dateValidation = d.dateValidation || '';
   const semaineLabel = d.semaineLabel || '';
-  const weekRange = _weekRange(dateValidation) || semaineLabel;
+  // Bornes réelles de la semaine (debut/fin), valables aussi bien pour un bilan déjà validé
+  // que pour un bilan encore en cours (pas de date_validation) — voir _bilanDetailBornes.
+  const bornes = _bilanDetailBornes(bilanDetailState.dateIso, d.createdAt, c ? c.jour_bilan : null);
+  const weekRange = (bornes ? _weekRange(bornes.debut, bornes.fin) : '') || semaineLabel;
   // d.jours est toujours stocké Lundi(0)…Dimanche(6) — mais la semaine du bilan se termine
-  // le jour_bilan du client (dateValidation), pas forcément dimanche. Sans ça, le tableau
-  // affichait toujours "Lundi…Dimanche" alors que l'entête montrait la vraie plage de dates
-  // (ex: jeudi→mercredi), ce qui semblait incohérent. On réordonne selon les vraies dates
-  // calendaires de la semaine (fin = dateValidation, début = fin - 6 jours) et on attache la
-  // date de chaque jour pour affichage — indépendant de jour_bilan, dérivé de dateValidation.
-  const jours = _bilanJoursAvecDates(d.jours || [], dateValidation);
+  // le jour_bilan du client, pas forcément dimanche. Sans ça, le tableau affichait toujours
+  // "Lundi…Dimanche" alors que l'entête montrait la vraie plage de dates (ex: jeudi→mercredi),
+  // ce qui semblait incohérent. On réordonne selon les vraies dates calendaires de la semaine
+  // et on attache la date de chaque jour pour affichage.
+  const jours = _bilanJoursAvecDates(d.jours || [], bornes ? bornes.debut : null);
 
   const poidsVals = jours.map(j=>parseFloat(j.poids)).filter(v=>!isNaN(v)&&v>0);
   const avgPoids = poidsVals.length ? (poidsVals.reduce((a,b)=>a+b,0)/poidsVals.length).toFixed(1) : null;
