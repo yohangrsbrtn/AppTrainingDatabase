@@ -3310,15 +3310,25 @@ function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ tit
 // Applique reps/repos (depuis la bibliothèque d'exercices, selon le type) + RIR (défaut par type)
 // à tous les exercices déjà présents dans un bloc — appelé quand on change le type du bloc,
 // pour que le contenu déjà rempli reste cohérent avec Métabolique/Mécanique/Force.
+// Ne JAMAIS écraser une valeur déjà renseignée quand l'exercice n'a pas de correspondance dans
+// la bibliothèque (exercice_id null — cas de tous les exercices migrés depuis GAS, juste un nom) :
+// avant ce fix, ces exercices retombaient systématiquement sur la valeur générique par type
+// (ex: "10-15"/"1'30" pour Mécanique) IDENTIQUE pour tous, écrasant leurs vraies valeurs
+// individuelles migrées depuis la base Excel d'origine (bug vécu : 200 exercices écrasés chez
+// 5 clients à chaque changement de type de bloc). Le générique par type ne sert plus qu'à
+// remplir un champ vraiment VIDE (nouvel exercice jamais renseigné), jamais à remplacer une
+// valeur existante sans correspondance en bibliothèque.
 function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
   const type = bloc.type;
   if (!type) return;
   bloc.seances.forEach(seance => {
     seance.exercices.forEach(ex => {
       const lib = ex.exercice_id != null ? (exercicesLib||[]).find(e => e.id === ex.exercice_id) : null;
-      ex.reps  = (lib && lib['reps_'+type])  ? lib['reps_'+type]  : (REPS_PAR_TYPE[type]  || ex.reps);
-      ex.repos = (lib && lib['repos_'+type]) ? lib['repos_'+type] : (REPOS_PAR_TYPE[type] || ex.repos);
-      ex.rir   = RIR_PAR_TYPE[type] || ex.rir;
+      if (lib && lib['reps_'+type])       ex.reps  = lib['reps_'+type];
+      else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
+      if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
+      else if (!ex.repos)                 ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
+      if (!ex.rir)                        ex.rir   = RIR_PAR_TYPE[type]   || ex.rir;
     });
   });
 }
