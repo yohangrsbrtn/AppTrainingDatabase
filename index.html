@@ -151,6 +151,24 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
 input[type="number"] { -moz-appearance:textfield; }
+
+/* ── Panneau Paramètres (☰) — cartes groupées + puces d'icônes ── */
+.stg-card { background:#151824; border:1px solid #232840; border-radius:16px; overflow:hidden; margin-bottom:14px; }
+.stg-row { display:flex; align-items:center; gap:12px; padding:13px 14px; }
+.stg-row + .stg-row { border-top:1px solid #20243a; }
+.stg-row.clickable { cursor:pointer; }
+.stg-ic { width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.stg-ic svg { width:17px; height:17px; }
+.stg-title { font-size:14.5px; font-weight:600; color:#e8eaf0; }
+.stg-sub { font-size:11.5px; color:#8892a4; margin-top:1px; }
+.stg-val { font-size:13px; color:#8892a4; font-variant-numeric:tabular-nums; }
+.stg-sec-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:#5b6479; margin:18px 2px 8px; }
+.stg-sec-label:first-child { margin-top:0; }
+.stg-switch { width:44px; height:26px; border-radius:13px; position:relative; flex-shrink:0; cursor:pointer; transition:background .15s; }
+.stg-switch i { position:absolute; top:2px; width:20px; height:20px; border-radius:50%; background:#fff; transition:transform .15s, background .15s; }
+.stg-profile { margin:0 0 16px; padding:16px; border-radius:18px; background:linear-gradient(155deg,#1c2033,#151824); border:1px solid #232840; display:flex; align-items:center; gap:13px; }
+.stg-avatar { width:52px; height:52px; border-radius:16px; flex-shrink:0; background:conic-gradient(from 200deg,#4f6ef7,#a78bfa,#4f6ef7); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:17px; color:#fff; }
+.stg-tabbtn { flex:1; padding:9px 2px; font-size:12px; font-weight:650; border-radius:10px; margin:0; cursor:pointer; font-family:inherit; }
 </style>
 </head>
 <body>
@@ -1124,44 +1142,52 @@ function renderClassement() {
 // documenté, page supprimée et contenu déplacé ici où le client accède réellement (icône ☰).
 function renderSettingsProfil() {
   const profilData = S.data.profil || {};
-  const p = S.data.prog || {};
-  const infoRow = (label, val) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e2235;"><span style="color:#8892a4;font-size:13px;">${label}</span><span style="font-size:13px;font-weight:600;color:#e8eaf0;text-align:right;">${val}</span></div>`;
+  const inputStyle = 'width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#0f1117;color:#e8eaf0;font-size:16px;';
+  const fieldLabel = (icon, color, text) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">${_stgIconChip(icon, color)}<span style="font-size:13px;font-weight:600;color:#e8eaf0;">${text}</span></div>`;
+
+  const naissanceTailleCard = `<div class="stg-card"><div style="padding:14px;">
+      ${fieldLabel('calendar', 'blue', 'Date de naissance')}
+      <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="${inputStyle}margin-bottom:16px;">
+      ${fieldLabel('ruler', 'purple', 'Taille (cm)')}
+      <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="${inputStyle}margin-bottom:12px;">
+      <button class="btn-primary" onclick="doSauverInfosProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
+      <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
+    </div></div>`;
+
+  const emailCard = `<div class="stg-card"><div style="padding:14px;">
+      ${fieldLabel('mail', 'green', 'Email')}
+      <div style="font-size:11px;color:#8892a4;margin:-4px 0 10px;">
+        ${profilData.email_confirme ? '✅ Confirmé — utilisé pour la récupération de mot de passe.' : "Renseigne et confirme ton email pour pouvoir récupérer ton mot de passe en cas d'oubli."}
+      </div>
+      <input id="pf-email" type="email" placeholder="ton@email.com" value="${(profilData.email || '').replace(/"/g,'&quot;')}" style="${inputStyle}margin-bottom:12px;">
+      <button class="btn-primary" onclick="doSauverEmailProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
+      <div id="pf-email-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
+    </div></div>`;
+
+  const coachingRows = [];
+  if (profilData.date_debut) coachingRows.push(_stgRow({ icon:'clock', color:'orange', title:'Début du coaching', right:`<span class="stg-val">${new Date(profilData.date_debut).toLocaleDateString('fr-FR')}</span>` }));
+  if (profilData.jour_bilan) coachingRows.push(_stgRow({ icon:'calendar', color:'blue', title:'Jour de bilan', right:`<span class="stg-val">${esc(profilData.jour_bilan)}</span>` }));
+  const coachingCard = coachingRows.length
+    ? `${_stgSecLabel('Informations coaching')}${_stgCard(coachingRows)}`
+    : '';
+
+  const facturationCard = profilData.jour_paiement
+    ? `${_stgSecLabel('Facturation')}${_stgCard([_stgRow({ icon:'billing', color:'grey', title:'Jour de facturation', right:`<span class="stg-val">Le ${profilData.jour_paiement} du mois</span>` })])}`
+    : '';
+
   return `
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Informations personnelles</div>
-        ${infoRow('Nom', esc([profilData.prenom, profilData.nom].filter(Boolean).join(' ') || p.nom || S.client))}
-        <label style="display:block;font-size:12px;color:#8892a4;margin:12px 0 4px;">Date de naissance</label>
-        <input id="pf-naissance" type="date" value="${profilData.date_naissance || ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
-        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px;">Taille (cm)</label>
-        <input id="pf-taille" type="number" inputmode="numeric" placeholder="ex: 178" value="${profilData.taille_cm != null ? profilData.taille_cm : ''}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
-        <button class="btn-primary" onclick="doSauverInfosProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
-        <div id="pf-infos-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-        <div style="font-size:11px;color:#8892a4;margin-top:16px;padding-top:12px;border-top:1px solid #1e2235;margin-bottom:8px;">
-          ${profilData.email_confirme ? '✅ Email confirmé — utilisé pour la récupération de mot de passe.' : 'Renseigne et confirme ton email pour pouvoir récupérer ton mot de passe en cas d\'oubli.'}
-        </div>
-        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px;">Email</label>
-        <input id="pf-email" type="email" placeholder="ton@email.com" value="${(profilData.email || '').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
-        <button class="btn-primary" onclick="doSauverEmailProfil()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
-        <div id="pf-email-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-      </div>
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Informations coaching</div>
-        ${profilData.date_debut ? infoRow('Début du coaching', new Date(profilData.date_debut).toLocaleDateString('fr-FR')) : ''}
-        ${profilData.jour_bilan ? infoRow('Jour de bilan', esc(profilData.jour_bilan)) : ''}
-        ${!profilData.date_debut && !profilData.jour_bilan ? `<div style="font-size:13px;color:#8892a4;">Non renseigné.</div>` : ''}
-      </div>
-      ${profilData.jour_paiement ? `
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-bottom:10px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:6px;">Facturation</div>
-        ${infoRow('Jour de facturation', profilData.jour_paiement + ' de chaque mois')}
-      </div>` : ''}
-      <div style="background:#0f1117;border-radius:12px;padding:12px 16px;">
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:10px;">Mot de passe</div>
-        <input id="pf-mdp1" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
-        <input id="pf-mdp2" type="password" placeholder="Répète le nouveau mot de passe" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#1a1f35;color:#e8eaf0;font-size:16px;margin-bottom:10px;">
+      ${_stgSecLabel('Informations personnelles')}
+      ${naissanceTailleCard}
+      ${emailCard}
+      ${coachingCard}
+      ${facturationCard}
+      ${_stgSecLabel('Mot de passe')}
+      <div class="stg-card"><div style="padding:14px;">
+        <input id="pf-mdp1" type="password" placeholder="Nouveau mot de passe" autocomplete="new-password" style="${inputStyle}margin-bottom:10px;">
+        <input id="pf-mdp2" type="password" placeholder="Répète le nouveau mot de passe" autocomplete="new-password" style="${inputStyle}margin-bottom:12px;">
         <button class="btn-primary" onclick="doChangerMotDePasse()" style="width:100%;padding:10px;font-size:13px;">Changer mon mot de passe</button>
         <div id="pf-mdp-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
-      </div>`;
+      </div></div>`;
 }
 
 async function doSauverInfosProfil() {
@@ -1399,6 +1425,50 @@ let _settingsTab = 'general'; // 'general' | 'guide' | 'bug'
 let _settingsGuideSub = 'application'; // 'application' | 'xp'
 let _settingsAccordion = null; // 'journee' | 'bilan' | 'mensurations' | 'titres' | null
 
+// ── Système visuel du panneau Paramètres — cartes groupées + puces d'icônes ──
+// (icônes ligne fine plutôt qu'emoji, cohérent avec une vraie app plutôt qu'un
+// tableau de bord technique). Un seul jeu de tokens de couleur, réutilisé par
+// renderSettingsGeneral/renderSettingsProfil/le panneau lui-même.
+const STG_ICONS = {
+  calendar: '<rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/>',
+  ruler:    '<path d="M4 20c0-4 3.5-6 8-6s8 2 8 6M12 12a4 4 0 100-8 4 4 0 000 8z"/>',
+  mail:     '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  billing:  '<rect x="2" y="7" width="20" height="13" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>',
+  bell:     '<path d="M9 18a3 3 0 006 0M6 8a6 6 0 1112 0c0 3.4 1 5 2 6H4c1-1 2-2.6 2-6z"/>',
+  lock:     '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 118 0v4"/>',
+  refresh:  '<path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3M4 4v5h5M20 20v-5h-5"/>',
+  gauge:    '<path d="M2 12h4l3-9 6 18 3-9h4"/>',
+};
+const STG_COLORS = {
+  blue:   { bg:'#4f6ef71f', c:'#7d95ff' },
+  purple: { bg:'#a78bfa1f', c:'#c3b0fc' },
+  green:  { bg:'#22c58b1f', c:'#3fdba3' },
+  orange: { bg:'#f0a63d1f', c:'#f4b862' },
+  grey:   { bg:'#232840',   c:'#8892a4' },
+};
+function _stgIconChip(icon, color) {
+  const col = STG_COLORS[color] || STG_COLORS.grey;
+  return `<div class="stg-ic" style="background:${col.bg};color:${col.c};"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${STG_ICONS[icon] || ''}</svg></div>`;
+}
+function _stgRow({ icon, color, title, sub, right, onclick, danger }) {
+  return `<div class="stg-row${onclick ? ' clickable' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+    ${icon ? _stgIconChip(icon, color) : ''}
+    <div style="flex:1;min-width:0;">
+      <div class="stg-title" ${danger ? 'style="color:#ef5b5b;"' : ''}>${title}</div>
+      ${sub ? `<div class="stg-sub">${sub}</div>` : ''}
+    </div>
+    ${right || '<span style="color:#5b6479;">›</span>'}
+  </div>`;
+}
+function _stgCard(rows) { return `<div class="stg-card">${rows.join('')}</div>`; }
+function _stgSecLabel(text) { return `<div class="stg-sec-label">${text}</div>`; }
+function _stgSwitchHtml(id, on, onclick) {
+  return `<div id="${id}" onclick="${onclick}" class="stg-switch" style="background:${on ? '#22c58b' : '#2d3142'};border:1px solid ${on ? 'transparent' : '#3a4060'};">
+    <i style="transform:${on ? 'translateX(18px)' : 'none'};background:${on ? '#fff' : '#555e7a'};"></i>
+  </div>`;
+}
+
 function ouvrirSettings(tab) {
   if (tab === 'guide' || tab === 'bug' || tab === 'profil') _settingsTab = tab;
   const existing = document.getElementById('settingsPanel');
@@ -1407,22 +1477,34 @@ function ouvrirSettings(tab) {
   el.id = 'settingsPanel';
   el.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.82);display:flex;align-items:flex-end;';
 
-  const tabBtn = (id, label, active) => `<button onclick="switchSettingsTab('${id}')" style="flex:1;padding:9px 2px;font-size:12px;font-weight:600;border-radius:10px;margin:0;border:${active?'none':'1px solid #2d3142'};background:${active?'linear-gradient(135deg,#4f8ef7,#3570d4)':'#1e2235'};color:${active?'#fff':'#8892a4'};cursor:pointer;">${label}</button>`;
+  const tabBtn = (id, label, active) => `<button class="stg-tabbtn" onclick="switchSettingsTab('${id}')" style="border:${active?'none':'1px solid #232840'};background:${active?'#4f6ef7':'#151824'};color:${active?'#fff':'#8892a4'};">${label}</button>`;
   const content = _settingsTab === 'bug' ? renderSettingsBug() : _settingsTab === 'guide' ? renderSettingsGuide() : _settingsTab === 'profil' ? renderSettingsProfil() : renderSettingsGeneral();
 
-  el.innerHTML = `<div class="sheet-body" style="background:#161b2e;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
+  const p = S.data.prog || {};
+  const profilData = S.data.profil || {};
+  const nomAffiche = [profilData.prenom, profilData.nom].filter(Boolean).join(' ') || p.nom || S.client;
+  const initiales = (nomAffiche || '?').split(' ').map(w => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
+
+  el.innerHTML = `<div class="sheet-body" style="background:#0b0d13;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
     <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 20px 0;flex-shrink:0;">
-      <div style="font-size:17px;font-weight:700;color:#e8eaf0;">Paramètres</div>
+      <div style="font-size:17px;font-weight:800;color:#e8eaf0;letter-spacing:-.01em;">Paramètres</div>
       <button onclick="document.getElementById('settingsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
     </div>
-    <div style="display:flex;gap:6px;padding:14px 20px 0;flex-shrink:0;">
-      ${tabBtn('general', 'Général', _settingsTab === 'general')}
-      ${tabBtn('profil', 'Profil', _settingsTab === 'profil')}
-      ${tabBtn('guide', 'Fonctionnement', _settingsTab === 'guide')}
-      ${tabBtn('bug', 'Bug', _settingsTab === 'bug')}
-    </div>
     <div style="flex:1;overflow-y:auto;padding:16px 20px 12px;-webkit-overflow-scrolling:touch;">
+      <div class="stg-profile">
+        <div class="stg-avatar">${esc(initiales)}</div>
+        <div>
+          <div style="font-size:16px;font-weight:750;color:#e8eaf0;">${esc(nomAffiche)}</div>
+          <div style="font-size:12px;color:#8892a4;margin-top:2px;">Niveau ${p.niveau || 1} · ${(p.xpTotal || 0).toLocaleString('fr')} XP</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:16px;">
+        ${tabBtn('general', 'Général', _settingsTab === 'general')}
+        ${tabBtn('profil', 'Profil', _settingsTab === 'profil')}
+        ${tabBtn('guide', 'Fonctionnement', _settingsTab === 'guide')}
+        ${tabBtn('bug', 'Bug', _settingsTab === 'bug')}
+      </div>
       ${content}
     </div>
     <div style="padding:8px 20px calc(16px + env(safe-area-inset-bottom));flex-shrink:0;text-align:center;">
@@ -1441,38 +1523,51 @@ function ouvrirSettings(tab) {
 // laissaient presque plus de place au contenu du guide — vécu, remonté par le
 // coach). Chaque onglet a maintenant sa propre zone scrollable complète.
 function renderSettingsGeneral() {
+  const modeSimpleRow = `<div class="stg-row">
+      ${_stgIconChip('gauge', 'grey')}
+      <div style="flex:1;min-width:0;">
+        <div class="stg-title">Mode simplifié</div>
+        <div class="stg-sub">Cache XP, progression et classement</div>
+      </div>
+      ${_stgSwitchHtml('stgModeSimple', modeSimplifieActif(), 'toggleModeSimplifie()')}
+    </div>`;
+
+  if (localStorage.getItem('at_auth_mode') !== 'supabase') {
+    return _stgCard([modeSimpleRow]);
+  }
+
   return `
-    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
-      <div>
-        <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Mode simplifié</div>
-        <div style="font-size:11px;color:#555e7a;margin-top:2px;">Cache XP, progression et classement</div>
-      </div>
-      <div onclick="toggleModeSimplifie()" style="width:48px;height:28px;border-radius:14px;background:${modeSimplifieActif() ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-        <div style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${modeSimplifieActif() ? '#fff' : '#555e7a'};transform:${modeSimplifieActif() ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
-      </div>
-    </div>
-    ${localStorage.getItem('at_auth_mode') === 'supabase' ? `
-    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div>
-          <div style="font-size:14px;font-weight:600;color:#e8eaf0;">Notifications</div>
-          <div style="font-size:11px;color:#555e7a;margin-top:2px;">Rappels automatiques (journée, etc.)</div>
+    ${_stgCard([modeSimpleRow])}
+    <div class="stg-card">
+      <div class="stg-row">
+        ${_stgIconChip('bell', 'purple')}
+        <div style="flex:1;min-width:0;">
+          <div class="stg-title">Notifications</div>
+          <div class="stg-sub">Rappels automatiques (journée, etc.)</div>
         </div>
-        <div id="notifGeneralesToggle" onclick="toggleNotificationsGenerales()" style="width:48px;height:28px;border-radius:14px;background:${_pushReellementActif ? '#3ecf8e' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
-          <div id="notifGeneralesKnob" style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:${_pushReellementActif ? '#fff' : '#555e7a'};transform:${_pushReellementActif ? 'translateX(20px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
+        <div id="notifGeneralesToggle" onclick="toggleNotificationsGenerales()" style="width:44px;height:26px;border-radius:13px;background:${_pushReellementActif ? '#22c58b' : '#2d3142'};border:1px solid #3a4060;cursor:pointer;position:relative;flex-shrink:0;">
+          <div id="notifGeneralesKnob" style="position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:${_pushReellementActif ? '#fff' : '#555e7a'};transform:${_pushReellementActif ? 'translateX(18px)' : 'none'};transition:transform 0.2s,background 0.2s;"></div>
         </div>
       </div>
-      <div id="pushStatusClient" style="font-size:12px;margin-top:6px;min-height:14px;color:#555e7a;"></div>
-      <div onclick="ouvrirGererRappels()" style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2235;display:flex;justify-content:space-between;align-items:center;cursor:pointer;">
-        <span style="font-size:13px;color:#c8d0e0;">Gérer les rappels</span>
-        <span style="color:#555e7a;">→</span>
+      <div id="pushStatusClient" style="font-size:11.5px;padding:0 14px 12px 58px;margin-top:-8px;color:#8892a4;"></div>
+      <div class="stg-row clickable" onclick="ouvrirGererRappels()">
+        ${_stgIconChip('clock', 'grey')}
+        <div style="flex:1;min-width:0;"><div class="stg-title">Gérer les rappels</div></div>
+        <span style="color:#5b6479;">›</span>
       </div>
     </div>
-    <div style="background:#0f1117;border-radius:12px;padding:12px 16px;margin-top:10px;">
-      <div style="font-size:14px;font-weight:600;color:#e8eaf0;margin-bottom:2px;">🔄 Mise à jour</div>
-      <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Si l'app semble ne pas avoir la dernière version, appuie ici.</div>
-      <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
-    </div>` : ''}`;
+    <div class="stg-card">
+      <div class="stg-row">
+        ${_stgIconChip('refresh', 'blue')}
+        <div style="flex:1;min-width:0;">
+          <div class="stg-title">Mise à jour</div>
+          <div class="stg-sub">Si l'app semble ne pas avoir la dernière version</div>
+        </div>
+      </div>
+      <div style="padding:0 14px 14px;">
+        <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
+      </div>
+    </div>`;
 }
 
 // ── Préférences de notifications automatiques ───────────────────────────
