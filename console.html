@@ -6316,6 +6316,7 @@ function renderBlocsClientProg(){
           <button class="icon-btn" onclick="cpDescendreBloc(${bi})" style="padding:2px 6px;font-size:13px;${bi===cp.blocs.length-1?'opacity:.3;pointer-events:none;':''}">↓</button>
         </div>`:''}
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
+        ${bi>0?`<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="cpCalculerCharges(${bi})" title="Estime la charge de départ (S1) depuis la dernière semaine loggée du bloc précédent, formule de Brzycki">🧮 Calculer les charges</button>`:''}
         ${cp.blocs.length>1?(bloc.id && bloc.id===cp.bloc_actif_id
           ? `<span style="font-size:11px;font-weight:700;color:${color};padding:4px 8px;background:${color}18;border-radius:var(--radius-sm);flex-shrink:0;">⭐ Actif</span>`
           : `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="cpSetBlocActif(${bi})">Définir actif</button>`):''}
@@ -6377,6 +6378,75 @@ function cpDupliquerBloc(bi){
   clientProgEnEdition.blocs.splice(bi + 1, 0, copie);
   _repartitionCpBlocIdx = bi + 1;
   renderBlocsClientProg();
+}
+
+// Calcul de charge (formule de Brzycki) — estime le 1RM à partir de la dernière semaine
+// loggée du bloc PRÉCÉDENT pour chaque exercice (série la plus lourde de cette semaine-là),
+// puis en déduit la charge de départ pour la plage de reps + RIR cible du NOUVEAU bloc.
+// Brzycki : 1RM = charge × 36 / (37 − reps_échec) ; reps_échec = reps réellement faites + RIR
+// (le RIR = répétitions "en réserve" avant l'échec, donc reps+RIR ≈ le nombre de reps qui
+// auraient été possibles à l'échec ce jour-là). Décision du coach : cible = borne HAUTE de la
+// plage de reps du nouveau bloc, RIR cible = moyenne de sa plage RIR (approximatif, assumé).
+function _parseRepsHaut(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d+)\s*-\s*(\d+)/);
+  if (m) return parseInt(m[2]);
+  const m2 = String(s).match(/^(\d+)$/);
+  return m2 ? parseInt(m2[1]) : null; // plages en secondes (ex: "45s-60s") non applicables
+}
+function _parseRirMoyen(s) {
+  if (!s) return 0;
+  const m = String(s).match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
+  if (m) return (parseFloat(m[1]) + parseFloat(m[2])) / 2;
+  const m2 = String(s).match(/^(\d+(?:\.\d+)?)$/);
+  return m2 ? parseFloat(m2[1]) : 0;
+}
+async function cpCalculerCharges(bi){
+  const blocPrec = clientProgEnEdition.blocs[bi-1];
+  const blocNouveau = clientProgEnEdition.blocs[bi];
+  if (!blocPrec) { alert('Aucun bloc précédent.'); return; }
+  const prevExosByName = {};
+  blocPrec.seances.forEach(s => s.exercices.forEach(ex => { if (ex.id) prevExosByName[(ex.nom||'').toLowerCase()] = ex; }));
+  const exoIdsPrec = Object.values(prevExosByName).map(ex => ex.id);
+  const manquants = [];
+  blocNouveau.seances.forEach(s => s.exercices.forEach(ex => { if (!ex.id) manquants.push(ex.nom); }));
+  if (manquants.length) { alert('Enregistre d\'abord le programme (bouton Enregistrer) avant de calculer les charges de ce bloc — certains exercices n\'ont pas encore d\'id.'); return; }
+  if (!exoIdsPrec.length) { alert('Bloc précédent vide ou pas encore enregistré.'); return; }
+  if (!confirm('Calculer les charges suggérées (semaine 1) de ce bloc à partir de la dernière semaine loggée du bloc précédent ?')) return;
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIdsPrec.join(',')})&charge=not.is.null&reps=not.is.null`, { headers: supaHeaders() });
+  const logs = res.ok ? await res.json() : [];
+  const bestLogByExoId = {};
+  logs.forEach(l => {
+    const cur = bestLogByExoId[l.client_programme_exercice_id];
+    if (!cur || l.semaine > cur.semaine || (l.semaine === cur.semaine && (l.charge||0) > (cur.charge||0))) {
+      bestLogByExoId[l.client_programme_exercice_id] = l;
+    }
+  });
+
+  const payload = [];
+  let ignores = 0;
+  blocNouveau.seances.forEach(s => s.exercices.forEach(ex => {
+    const prevEx = prevExosByName[(ex.nom||'').toLowerCase()];
+    const log = prevEx ? bestLogByExoId[prevEx.id] : null;
+    if (!log) { ignores++; return; }
+    const targetReps = _parseRepsHaut(ex.reps);
+    if (!targetReps) { ignores++; return; }
+    const targetRir = _parseRirMoyen(ex.rir);
+    const oldRir = parseFloat(log.rir) || 0;
+    const failureOld = log.reps + oldRir;
+    const failureNew = targetReps + targetRir;
+    if (failureOld >= 37 || failureNew >= 37) { ignores++; return; } // formule invalide au-delà
+    const oneRM = log.charge * 36 / (37 - failureOld);
+    const chargeSuggeree = Math.round(oneRM * (37 - failureNew) / 36 * 2) / 2; // arrondi 0.5
+    payload.push({ client_programme_exercice_id: ex.id, semaine: 1, numero_serie: 1, charge: chargeSuggeree });
+  }));
+
+  if (!payload.length) { alert('Aucune correspondance exploitable avec le bloc précédent (nom identique + log avec charge et reps requis).'); return; }
+  await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }), body: JSON.stringify(payload)
+  });
+  alert(`${payload.length} charge(s) suggérée(s) écrite(s) en semaine 1 (série 1). ${ignores} exercice(s) ignoré(s) (pas de correspondance ou de log exploitable dans le bloc précédent).`);
 }
 
 function cpMonterBloc(bi){ if(bi===0) return; const b=clientProgEnEdition.blocs; [b[bi-1],b[bi]]=[b[bi],b[bi-1]]; renderBlocsClientProg(); }
