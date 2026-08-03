@@ -642,8 +642,18 @@ async function chargerSuivi(clientId){
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
+// Select phase réutilisant les mêmes types Roadmap que les mensurations (_mensPhaseRoadmapType,
+// ROADMAP_TYPES) — une valeur historique non reconnue (import GAS) reste sélectionnable sans être perdue.
+function _suiviPhaseSelectHtml(currentPhase) {
+  const matched = _mensPhaseRoadmapType(currentPhase);
+  const opts = `<option value="" ${!currentPhase?'selected':''}>—</option>`
+    + (currentPhase && !matched ? `<option value="${esc(currentPhase)}" selected>${esc(currentPhase)}</option>` : '')
+    + ROADMAP_TYPES.map(t => `<option value="${esc(t.label)}" ${matched && matched.key===t.key?'selected':''}>${esc(t.label)}</option>`).join('');
+  return `<select id="su-phase" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 8px;">${opts}</select>`;
+}
+
 async function sauverSuiviApi(clientId, id, entry){
-  const body = { client_id: clientId, date: entry.date, nutrition: entry.nutrition || null, entrainement: entry.entrainement || null, commentaire_general: entry.commentaire_general || null, calories: entry.calories || null };
+  const body = { client_id: clientId, date: entry.date, phase: entry.phase || null, nutrition: entry.nutrition || null, entrainement: entry.entrainement || null, commentaire_general: entry.commentaire_general || null, calories: entry.calories || null };
   const res = id
     ? await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) })
     : await fetch(`${SUPABASE_URL}/rest/v1/client_suivi`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
@@ -5384,7 +5394,10 @@ function renderFicheSuiviTab(c){
     ${entries.length ? entries.map(e => `
       <div class="fiche-card" style="margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <div style="font-weight:700;font-size:13px;">${e.date ? e.date.split('-').reverse().join('/') : '—'}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="font-weight:700;font-size:13px;">${e.date ? e.date.split('-').reverse().join('/') : '—'}</div>
+            ${e.phase ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:${_mensPhaseColor(e.phase)}22;color:${_mensPhaseColor(e.phase)};">${esc(e.phase)}</span>` : ''}
+          </div>
           <div style="display:flex;gap:6px;">
             <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirModalSuivi('${c.id}',${e.id})">Éditer</button>
             <button class="icon-btn del" onclick="supprimerSuiviEntry(${e.id},'${c.id}')" title="Supprimer">${iTrash()}</button>
@@ -5406,6 +5419,10 @@ function ouvrirModalSuivi(clientId, id) {
       <div class="fiche-field">
         <label>Date</label>
         <input id="su-date" type="date" value="${row.date || new Date().toISOString().slice(0,10)}" style="font-size:16px;">
+      </div>
+      <div class="fiche-field">
+        <label>Phase</label>
+        ${_suiviPhaseSelectHtml(row.phase)}
       </div>
       <div class="fiche-field">
         <label>Calories <button type="button" class="btn" style="font-size:10px;padding:2px 7px;margin-left:6px;" onclick="_recalculerSuiviCalories('${clientId}')">🔄 Recalculer depuis les diètes</button></label>
@@ -5449,7 +5466,7 @@ async function sauvegarderSuivi(clientId, id) {
   const v = k => document.getElementById('su-'+k)?.value || '';
   const date = v('date');
   if (!date) { alert('La date est obligatoire.'); return; }
-  const entry = { date, calories: v('calories').trim(), nutrition: v('nutrition').trim(), entrainement: v('entrainement').trim(), commentaire_general: v('commentaire').trim() };
+  const entry = { date, phase: v('phase').trim(), calories: v('calories').trim(), nutrition: v('nutrition').trim(), entrainement: v('entrainement').trim(), commentaire_general: v('commentaire').trim() };
   try {
     await sauverSuiviApi(clientId, id, entry);
     document.querySelector('.modal-overlay')?.remove();
@@ -5480,15 +5497,21 @@ async function migrerSuiviClient(clientId) {
     // La toute première ligne ("Début coaching") n'a souvent pas de date dans GAS —
     // client_suivi.date est NOT NULL, on ne peut pas l'importer sans date fiable.
     const sansDate = rows.filter(r => !r.date);
-    const body = rows.filter(r => r.date).map(r => ({
-      client_id: clientId,
-      gas_row: r.row,
-      date: r.date,
-      calories: r.calories || null,
-      nutrition: r.nutrition || null,
-      entrainement: r.entrainement || null,
-      commentaire_general: r.commentaire || null,
-    }));
+    const body = rows.filter(r => r.date).map(r => {
+      // Normalise la phase brute GAS (CUT/REFEED/REVERSE…) vers le libellé Roadmap
+      // canonique — même logique que la normalisation déjà faite sur les mensurations.
+      const matched = r.phase ? _mensPhaseRoadmapType(r.phase) : null;
+      return {
+        client_id: clientId,
+        gas_row: r.row,
+        date: r.date,
+        phase: matched ? matched.label : (r.phase || null),
+        calories: r.calories || null,
+        nutrition: r.nutrition || null,
+        entrainement: r.entrainement || null,
+        commentaire_general: r.commentaire || null,
+      };
+    });
     if (!body.length) { alert('Aucune ligne avec une date exploitable.'); return; }
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?on_conflict=client_id,gas_row`, {
       method: 'POST',
