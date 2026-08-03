@@ -8012,7 +8012,10 @@ async function apiGasProd(action, clientId, params = {}, _retry) {
   const token = await _getGasCoachToken(!!_retry);
   const body = { action, token, client: _gasId(clientId), params };
   const ctrl = new AbortController();
-  const tid  = setTimeout(() => ctrl.abort(), 30000);
+  // 60s : certaines exécutions GAS (ouverture d'un spreadsheet client lourd) ont été
+  // mesurées jusqu'à ~36s dans le journal Apps Script (Exécutions) sans jamais échouer
+  // côté serveur — 30s coupait la requête en plein milieu d'un run par ailleurs sain.
+  const tid  = setTimeout(() => ctrl.abort(), 60000);
   try {
     const res = await fetch(GAS_PROD_URL, {
       method: 'POST',
@@ -8020,7 +8023,10 @@ async function apiGasProd(action, clientId, params = {}, _retry) {
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
-    const json = await res.json();
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw); }
+    catch (e) { throw new Error('reponse_gas_invalide (exécution trop lente ou coupée — réessaie)'); }
     if (!json.ok) {
       if (json.error === 'token_invalide' && !_retry) {
         localStorage.removeItem('at_gas_token');
