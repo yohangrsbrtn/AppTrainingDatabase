@@ -1,0 +1,12 @@
+-- Recalage manuel des compteurs séances/bilans/assiduité pour les clients
+-- migrés depuis GAS : leur client_profils.date_debut (vrai début de coaching,
+-- parfois il y a plusieurs années) sert de dénominateur au calcul du nombre
+-- de semaines écoulées (_semainesDepuisDebut), ce qui pénalise injustement
+-- leurs pourcentages séances/bilans/assiduité si l'historique numérique
+-- (bilans/logs Supabase) ne couvre pas toute cette période.
+--
+-- date_debut_suivi, si renseignée, prend le pas sur date_debut UNIQUEMENT
+-- pour ce calcul (aucun autre usage de date_debut n'est affecté : Roadmap,
+-- affichage "Début du coaching", etc.). Réglable client par client depuis
+-- la fiche client → onglet Progression → bouton "Recalibrer l'assiduité".
+ALTER TABLE client_profils ADD COLUMN IF NOT EXISTS date_debut_suivi DATE;

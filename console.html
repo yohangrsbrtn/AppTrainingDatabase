@@ -5333,6 +5333,7 @@ function renderFicheProgressionTab(){
         <input id="xpAjoutInput" type="number" step="1" placeholder="ex: 20 ou -10" style="flex:1;padding:8px 10px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;color:var(--text);font-size:13px;">
         <button class="btn" id="xpAjoutBtn" onclick="ajouterXpClient('${esc(ficheData.profil.client_id || '')}')">+ Ajouter XP</button>
       </div>
+      ${_ficheRecalageAssiduiteHtml(xp)}
     </div>`;
   })() : (ficheData.loaded ? `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Pas encore de données XP (aucun bilan validé).</p></div>` : `<div class="fiche-card" style="margin-bottom:12px;"><p style="color:var(--text-faint);font-size:12px;">Chargement XP…</p></div>`);
 
@@ -6560,6 +6561,64 @@ async function chargerProgression(clientId){
 // Ajout/retrait manuel d'XP par le coach — action délibérée à chaque clic,
 // pas besoin de dédoublonnage (contrairement au crédit automatique à
 // l'envoi d'un bilan, voir bilan.js _crediterXpBilanEnvoye).
+// Recalage manuel du dénominateur séances/bilans/assiduité (client_profils
+// .date_debut_suivi) — utile pour les clients migrés dont le vrai début de
+// coaching (date_debut) précède largement l'historique numérique (bilans/
+// logs Supabase), ce qui gonfle artificiellement le nombre de semaines
+// attendues et écrase leurs pourcentages. Suggestion pré-remplie = nombre de
+// bilans déjà validés (remet le compteur "Bilans" à 100% aujourd'hui), le
+// coach peut ajuster le nombre de semaines avant d'appliquer.
+function _ficheRecalageAssiduiteHtml(xp) {
+  if (!xp) return '';
+  const actif = !!xp.dateDebutSuivi;
+  const suggestion = Math.max(1, xp.bilansValidies || 1);
+  return `<div style="border-top:1px solid var(--hairline);padding-top:14px;margin-top:14px;">
+    <div style="font-size:11px;color:var(--text-faint);margin-bottom:8px;">
+      ${actif
+        ? `Recalage actif depuis le ${new Date(xp.dateDebutSuivi).toLocaleDateString('fr-FR')} (au lieu du ${xp.dateDebut ? new Date(xp.dateDebut).toLocaleDateString('fr-FR') : '—'})`
+        : `Dénominateur séances/bilans/assiduité basé sur le début réel du coaching (${xp.dateDebut ? new Date(xp.dateDebut).toLocaleDateString('fr-FR') : '—'}). Pour un client migré dont l'historique numérique est incomplet, recalibrer sur son niveau réel :`}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="recalSemainesInput" type="number" step="1" min="1" value="${suggestion}" style="width:70px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;color:var(--text);font-size:13px;">
+      <span style="font-size:12px;color:var(--text-faint);">semaines</span>
+      <button class="btn" id="recalAppliquerBtn" onclick="recalibrerAssiduiteClient('${esc(ficheData.profil.client_id || '')}')">Recalibrer</button>
+      ${actif ? `<button class="btn" onclick="recalibrerAssiduiteClient('${esc(ficheData.profil.client_id || '')}', true)">Réinitialiser</button>` : ''}
+    </div>
+  </div>`;
+}
+
+async function recalibrerAssiduiteClient(clientId, reset) {
+  if (!clientId) return;
+  const btn = document.getElementById('recalAppliquerBtn');
+  if (!reset) {
+    const input = document.getElementById('recalSemainesInput');
+    const semaines = parseInt(input && input.value);
+    if (isNaN(semaines) || semaines < 1) return;
+    if (!confirm(`Recalibrer les compteurs séances/bilans/assiduité de ce client sur ${semaines} semaine(s) ?`)) return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    let dateDebutSuivi = null;
+    if (!reset) {
+      const input = document.getElementById('recalSemainesInput');
+      const semaines = parseInt(input.value);
+      const d = new Date();
+      d.setDate(d.getDate() - (semaines - 1) * 7);
+      dateDebutSuivi = d.toISOString().slice(0, 10);
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method: 'PATCH',
+      headers: supaHeaders(),
+      body: JSON.stringify({ date_debut_suivi: dateDebutSuivi })
+    });
+    ficheData.xpData = await chargerClientProgressionXP(clientId);
+    if (state.nav === 'fiche-client' && state.selected === clientId) renderMain();
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Recalibrer'; }
+  }
+}
+
 async function ajouterXpClient(clientId) {
   const input = document.getElementById('xpAjoutInput');
   const delta = parseInt(input && input.value);
@@ -6588,7 +6647,7 @@ async function chargerClientProgressionXP(clientId){
   const [progRes, bilansRes, profilRes, seancesRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=date_debut,seances_cible`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=date_debut,date_debut_suivi,seances_cible`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?select=client_programme_exercice_id,semaine&client_programme_exercice_id=in.(select+id+from+client_programme_exercices+where+client_programme_id+in+(select+id+from+client_programmes+where+client_id%3Deq.${encodeURIComponent(clientId)}))`, { headers: supaHeaders() }).catch(()=>({ ok:false }))
   ]);
   const [progRows, bilans, profils] = await Promise.all([
@@ -6617,7 +6676,7 @@ async function chargerClientProgressionXP(clientId){
   const pct = Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
   // 4 = ancien comportement par défaut tant que le coach n'a pas encore
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
-  const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut) : 0) || bilans.length || 1;
+  const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut_suivi || profil.date_debut) : 0) || bilans.length || 1;
   const seancesCible = profil.seances_cible || 4;
   const seancesAttendues = nbSemaines * seancesCible;
   const bilansAttendus = nbSemaines;
@@ -6630,7 +6689,8 @@ async function chargerClientProgressionXP(clientId){
   const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858',bar:''};
   return { xpTotal, niveau, pct, xpManquant, niveauMaxAtteint, tier, tc, titreDef,
            seancesValidees, seancesAttendues, pctSeances,
-           bilansValidies, bilansAttendus, pctBilans, assiduiteGlobale };
+           bilansValidies, bilansAttendus, pctBilans, assiduiteGlobale,
+           dateDebut: profil.date_debut || null, dateDebutSuivi: profil.date_debut_suivi || null };
 }
 function progressionChart(vals, color){
   const w=560,h=100,min=Math.min(...vals),max=Math.max(...vals);

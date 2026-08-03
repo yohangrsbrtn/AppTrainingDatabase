@@ -179,7 +179,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="diete.js?v=20"></script>
 <script src="mensurations.js?v=7"></script>
 <script src="recettes.js?v=4"></script>
-<script src="progression.js?v=5"></script>
+<script src="progression.js?v=6"></script>
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=4"></script>
@@ -683,7 +683,7 @@ async function _completerConnexionSupabase(session) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -1208,8 +1208,12 @@ function renderSettingsProfil() {
     ? `${_stgSecLabel('Informations coaching')}${_stgCard(coachingRows)}`
     : '';
 
-  const facturationCard = profilData.jour_paiement
-    ? `${_stgSecLabel('Facturation')}${_stgCard([_stgRow({ icon:'billing', color:'grey', title:'Jour de facturation', right:`<span class="stg-val">Le ${profilData.jour_paiement} du mois</span>` })])}`
+  const MODE_PAIEMENT_LABELS = { virement: 'Virement', espece: 'Espèces', gocardless: 'Prélèvement automatique' };
+  const facturationRows = [];
+  if (profilData.jour_paiement) facturationRows.push(_stgRow({ icon:'billing', color:'grey', title:'Jour de facturation', right:`<span class="stg-val">Le ${profilData.jour_paiement} du mois</span>` }));
+  if (profilData.mode_paiement) facturationRows.push(_stgRow({ icon:'billing', color:'grey', title:'Mode de paiement', right:`<span class="stg-val">${MODE_PAIEMENT_LABELS[profilData.mode_paiement] || esc(profilData.mode_paiement)}</span>` }));
+  const facturationCard = facturationRows.length
+    ? `${_stgSecLabel('Facturation')}${_stgCard(facturationRows)}`
     : '';
 
   return `

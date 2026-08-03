@@ -77,7 +77,7 @@ async function chargerProgressionSupabase() {
 
   // 4 = ancien comportement par défaut tant que le coach n'a pas encore
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
-  const nbSemaines = _semainesDepuisDebut(profil.date_debut) || bilans.length || 1;
+  const nbSemaines = _semainesDepuisDebut(profil.date_debut_suivi || profil.date_debut) || bilans.length || 1;
   const seancesCible = profil.seances_cible || 4;
   const seancesAttendues = nbSemaines * seancesCible;
   const bilansAttendus = nbSemaines;
