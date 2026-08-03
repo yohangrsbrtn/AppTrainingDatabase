@@ -1009,6 +1009,7 @@ async function chargerDonnees(){
       date_fin_coaching: p.date_fin_coaching || null,
       jour_bilan: p.jour_bilan || null,
       pushActif: clientsAvecPush.has(p.client_id),
+      estCoach: !!p.est_coach,
     };
   });
 
@@ -4053,6 +4054,7 @@ function renderClientsPage(el){
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="meta" id="clientCount"></div>
         <button class="btn" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
+        <button class="btn" onclick="recalibrerAssiduiteTousLesClients()">🔄 Recalibrer assiduité (tous)</button>
         <button class="btn primary" onclick="ouvrirNouveauClient()">+ Nouveau client</button>
       </div>
     </div>
@@ -6617,6 +6619,44 @@ async function recalibrerAssiduiteClient(clientId, reset) {
     alert('Erreur : ' + e.message);
     if (btn) { btn.disabled = false; btn.textContent = 'Recalibrer'; }
   }
+}
+
+// Version en masse du recalage ci-dessus — boucle sur tous les clients
+// (hors coach) qui ont un date_debut, recalcule date_debut_suivi à partir du
+// nombre de bilans déjà validés (formule identique, pas de contrôle manuel
+// par client). Écrase un recalage manuel déjà posé individuellement — c'est
+// un recompute global, pas une fusion. Requêtes légères (select=id / count
+// exact) pour ne pas télécharger le JSONB `jours` de tous les bilans.
+async function recalibrerAssiduiteTousLesClients() {
+  const clients = (data.clients || []).filter(c => !c.estCoach);
+  if (!clients.length) { alert('Aucun client.'); return; }
+  if (!confirm(`Recalibrer les compteurs séances/bilans/assiduité de ${clients.length} client(s) sur leur nombre réel de bilans validés ? Un recalage déjà posé manuellement pour un client sera écrasé.`)) return;
+
+  let fait = 0, ignores = 0, erreurs = 0;
+  for (const c of clients) {
+    try {
+      const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(c.id)}&select=date_debut`, { headers: supaHeaders() });
+      const profilArr = profilRes.ok ? await profilRes.json() : [];
+      if (!profilArr[0] || !profilArr[0].date_debut) { ignores++; continue; }
+
+      const bilansRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&envoye_coach=eq.true&date_validation=not.is.null&select=id`, { headers: supaHeaders() });
+      const bilansArr = bilansRes.ok ? await bilansRes.json() : [];
+      const semaines = Math.max(1, bilansArr.length);
+      const d = new Date();
+      d.setDate(d.getDate() - (semaines - 1) * 7);
+      const dateDebutSuivi = d.toISOString().slice(0, 10);
+
+      const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(c.id)}`, {
+        method: 'PATCH',
+        headers: supaHeaders(),
+        body: JSON.stringify({ date_debut_suivi: dateDebutSuivi })
+      });
+      if (!patchRes.ok) throw new Error('HTTP ' + patchRes.status);
+      fait++;
+    } catch(e) { erreurs++; }
+  }
+  if (ficheData.xpData && state.nav === 'fiche-client') { ficheData.xpData = await chargerClientProgressionXP(state.selected); renderMain(); }
+  alert(`Recalage terminé : ${fait} client(s) recalibré(s), ${ignores} ignoré(s) (pas de date_debut), ${erreurs} erreur(s).`);
 }
 
 async function ajouterXpClient(clientId) {
