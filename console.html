@@ -6439,7 +6439,7 @@ async function cpCalculerCharges(bi){
     if (failureOld >= 37 || failureNew >= 37) { ignores++; return; } // formule invalide au-delà
     const oneRM = log.charge * 36 / (37 - failureOld);
     const chargeSuggeree = Math.round(oneRM * (37 - failureNew) / 36 * 2) / 2; // arrondi 0.5
-    payload.push({ client_programme_exercice_id: ex.id, semaine: 1, numero_serie: 1, charge: chargeSuggeree });
+    payload.push({ client_programme_exercice_id: ex.id, semaine: 1, numero_serie: 1, charge: chargeSuggeree, reps: targetReps, rir: Math.round(targetRir) });
   }));
 
   if (!payload.length) { alert('Aucune correspondance exploitable avec le bloc précédent (nom identique + log avec charge et reps requis).'); return; }
