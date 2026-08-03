@@ -5313,11 +5313,27 @@ function _ficheProgRow(p, c, archived){
       </div>`;
 }
 
+function _ficheProgActivitePhysiqueHtml(){
+  const p = ficheData.profil || {};
+  const items = [
+    p.steps_cible ? `${esc(p.steps_cible)} pas/jour` : null,
+    p.seances_cible ? `${esc(p.seances_cible)} séance${p.seances_cible>1?'s':''}/semaine` : null,
+    p.cardio_consigne ? esc(p.cardio_consigne) : null,
+  ].filter(Boolean);
+  if (!items.length) return '';
+  return `
+    <div class="fiche-card" style="margin-bottom:14px;padding:10px 14px;">
+      <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:6px;">Activité physique demandée</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">${items.map(i=>`<span>${i}</span>`).join('')}</div>
+    </div>`;
+}
+
 function renderFicheProgTab(c){
   const all = ficheData.tous_programmes || [];
   const progs = all.filter(p => !p.archive);
   const archives = all.filter(p => p.archive);
   return `
+    ${_ficheProgActivitePhysiqueHtml()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
       <div style="display:flex;gap:8px;">
