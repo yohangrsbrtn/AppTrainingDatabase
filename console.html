@@ -4433,12 +4433,42 @@ function renderFicheBilansTab(c){
 // _supaGetSemaineLabel côté client), les deux cas (envoyé pile le jour, envoyé en avance)
 // tombent juste. Référence : date_validation (fin réelle) si connue, sinon created_at (bilan
 // encore en cours).
+// Variante de _bilanWeekBounds qui cherche l'occurrence de jour_bilan la plus PROCHE de
+// la référence (en avant OU en arrière), au lieu de toujours chercher en avant. Utilisée
+// UNIQUEMENT ici, jamais dans _bilanWeekBounds elle-même (bilan.js/api.js) qui doit rester
+// strictement "prochaine occurrence" pour ses propres usages (calcul de fenêtre d'un bilan
+// encore en cours depuis sa date de création — toujours en avant, jamais en arrière).
+// Nécessaire pour un envoi tardif : un client dont jour_bilan=Dimanche mais qui valide le
+// lundi (un jour de retard) doit voir "27 Juil→2 Août" (le dimanche qui vient de passer),
+// pas "3 Août→9 Août" (le prochain dimanche, que donnerait une recherche uniquement en avant).
+function _bilanWeekBoundsNearest(jourBilanNom, refDate) {
+  jourBilanNom = typeof _normJourBilan === 'function' ? _normJourBilan(jourBilanNom) : jourBilanNom;
+  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const curIdx = (refDate.getDay() + 6) % 7;
+  const avant = (cibleIdx - curIdx + 7) % 7;
+  const arriere = (curIdx - cibleIdx + 7) % 7;
+  const fin = new Date(refDate);
+  fin.setDate(refDate.getDate() + (avant <= arriere ? avant : -arriere));
+  fin.setHours(23, 59, 59, 999);
+  const debut = new Date(fin); debut.setDate(fin.getDate() - 6); debut.setHours(0, 0, 0, 0);
+  return { debut, fin };
+}
+
 function _bilanPeriodeLabel(b, jourBilanNom) {
-  const ref = b.date_validation ? new Date(b.date_validation + 'T12:00:00') : (b.created_at ? new Date(b.created_at) : null);
-  if (!ref) return b.semaine_label || '—';
-  const { debut, fin } = _bilanWeekBounds(jourBilanNom, ref);
   const fmt = d => d.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
-  return `${fmt(debut)} → ${fmt(fin)}`;
+  if (b.date_validation) {
+    // date_validation est un fait déjà connu (fin réelle, à un jour de retard/avance près) —
+    // recherche la plus proche, pas uniquement en avant.
+    const { debut, fin } = _bilanWeekBoundsNearest(jourBilanNom, new Date(b.date_validation + 'T12:00:00'));
+    return `${fmt(debut)} → ${fmt(fin)}`;
+  }
+  if (b.created_at) {
+    // Bilan encore en cours (pas de date_validation) : on projette l'échéance à venir depuis
+    // la création, toujours en avant (cohérent avec _supaGetOrCreateBilanCourant côté client).
+    const { debut, fin } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
+    return `${fmt(debut)} → ${fmt(fin)}`;
+  }
+  return b.semaine_label || '—';
 }
 
 function _renderFicheBilansCorbeille(c){
