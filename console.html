@@ -3336,7 +3336,11 @@ function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
       else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
       if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
       else if (!ex.repos)                 ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
-      if (!ex.rir)                        ex.rir   = RIR_PAR_TYPE[type]   || ex.rir;
+      // RIR n'existe QUE par type de bloc (aucune colonne rir_metabolique/mecanique/force dans
+      // la bibliothèque exercices ni dans le fichier Excel source) — contrairement à reps/repos,
+      // il n'y a pas de valeur individuelle par exercice à préserver, donc toujours suivre le
+      // type du bloc.
+      ex.rir = RIR_PAR_TYPE[type] || ex.rir;
     });
   });
 }
