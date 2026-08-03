@@ -2112,12 +2112,12 @@ function renderBilanDetailPage(el) {
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','profil')">Profil</button>
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','programmes')">Programmes</button>
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','diete')">Diète</button>
-      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','progression')">Progression</button>
-      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','notes')">Suivi</button>
       <button class="fiche-tab active" onclick="allerFicheTab('${bilanDetailState.client}','bilans')">Bilans</button>
-      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','mensurations')">Mensurations</button>
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','roadmap')">Roadmap</button>
       ${c && c.chimieActifSupa ? `<button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','protocole')">Protocole</button>` : ''}
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','mensurations')">Mensurations</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','notes')">Suivi</button>
+      <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','progression')">Progression</button>
     </div>`;
 
   if (!bilanDetailState.loaded) {
@@ -4361,12 +4361,12 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='profil'?'active':''}" onclick="setFicheTab('profil')">Profil</button>
       <button class="fiche-tab ${ficheTab==='programmes'?'active':''}" onclick="setFicheTab('programmes')">Programmes ${nbProgs?`<span style="background:var(--surface-3);color:var(--text-faint);padding:1px 6px;border-radius:999px;font-size:10px;margin-left:3px;">${nbProgs}</span>`:''}</button>
       <button class="fiche-tab ${ficheTab==='diete'?'active':''}" onclick="setFicheTab('diete')">Diète</button>
-      <button class="fiche-tab ${ficheTab==='progression'?'active':''}" onclick="setFicheTab('progression')">Progression</button>
-      <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Suivi</button>
       <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
-      <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
       <button class="fiche-tab ${ficheTab==='roadmap'?'active':''}" onclick="setFicheTab('roadmap')">Roadmap</button>
       ${c.chimieActifSupa ? `<button class="fiche-tab ${ficheTab==='protocole'?'active':''}" onclick="setFicheTab('protocole')">Protocole</button>` : ''}
+      <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
+      <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Suivi</button>
+      <button class="fiche-tab ${ficheTab==='progression'?'active':''}" onclick="setFicheTab('progression')">Progression</button>
     </div>
 
     <div id="ficheTabContent">${renderFicheTabContent(c)}</div>`;
