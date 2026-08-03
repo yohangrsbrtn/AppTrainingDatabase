@@ -2087,9 +2087,13 @@ function renderBilanDetailPage(el) {
 
   // Fil de navigation rapide : sauter directement vers un autre onglet de la
   // fiche de ce client (Profil, Mensurations, Diète…) sans repasser par
-  // "Retour" puis recliquer l'onglet — seulement pertinent si on est bien
-  // dans le contexte d'un client (isFiche), pas depuis la liste globale.
-  const quickNavHtml = isFiche ? `
+  // "Retour" puis recliquer l'onglet. Affiché quelle que soit l'origine
+  // (dashboard ET page Bilans) — bilanDetailState.client est toujours connu,
+  // allerFicheTab (→ openPanel) charge la fiche même si elle n'était pas déjà
+  // en mémoire. Avant 2026-08-03 : masqué si ouvert depuis la page Bilans
+  // (_bilanNavSource==='bilans'), incohérent avec l'ouverture depuis le
+  // dashboard qui l'affichait déjà — corrigé sur demande du coach.
+  const quickNavHtml = `
     <div class="fiche-tabs" style="border-bottom:none;padding:0;gap:4px;margin:8px 0 4px;flex-wrap:wrap;">
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','profil')">Profil</button>
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','programmes')">Programmes</button>
@@ -2100,7 +2104,7 @@ function renderBilanDetailPage(el) {
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','mensurations')">Mensurations</button>
       <button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','roadmap')">Roadmap</button>
       ${c && c.chimieActifSupa ? `<button class="fiche-tab" onclick="allerFicheTab('${bilanDetailState.client}','protocole')">Protocole</button>` : ''}
-    </div>` : '';
+    </div>`;
 
   if (!bilanDetailState.loaded) {
     el.innerHTML = `${backHtml}${quickNavHtml}
