@@ -4486,7 +4486,8 @@ function renderFicheBilansTab(c){
 // pas "3 Août→9 Août" (le prochain dimanche, que donnerait une recherche uniquement en avant).
 function _bilanWeekBoundsNearest(jourBilanNom, refDate) {
   jourBilanNom = typeof _normJourBilan === 'function' ? _normJourBilan(jourBilanNom) : jourBilanNom;
-  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const rawIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const cibleIdx = (rawIdx - 1 + 7) % 7; // veille du jour_bilan — cohérent avec _bilanWeekBounds (api.js)
   const curIdx = (refDate.getDay() + 6) % 7;
   const avant = (cibleIdx - curIdx + 7) % 7;
   const arriere = (curIdx - cibleIdx + 7) % 7;
@@ -8074,12 +8075,16 @@ function _parseDateFr(s) {
 
 // La date lue sur une feuille GAS historique correspond au jour où le client a
 // rempli son bilan (souvent le dimanche, mais dépend de jour_bilan) — c'est donc
-// exactement la date de fin de semaine. On en déduit un semaine_label "Du … au …"
-// cohérent avec _supaGetSemaineLabel (bilan.js), au lieu du texte "SEMAINE" brut
-// remonté par GAS pour les vieilles feuilles.
+// exactement la date de fin de semaine SOUS L'ANCIENNE convention GAS (semaine se
+// terminant PILE le jour_bilan, jamais la veille — cette vieille donnée reflète un
+// comportement déjà arrivé, pas la nouvelle règle "veille de jour_bilan" appliquée
+// aux bilans Supabase live depuis le 2026-08-03). Calcul volontairement local, sans
+// passer par _bilanWeekBounds (qui applique désormais le décalage -1 jour) : `iso`
+// est déjà, par définition, le dernier jour de la semaine migrée.
 function _semaineLabelFromSheetDate(iso, jourBilanNom) {
   if (!iso) return null;
-  const { debut, fin } = _bilanWeekBounds(jourBilanNom, new Date(iso + 'T12:00:00'));
+  const fin = new Date(iso + 'T12:00:00');
+  const debut = new Date(fin); debut.setDate(fin.getDate() - 6);
   const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
   const fmt = d => d.getDate() + ' ' + MOIS[d.getMonth()];
   return 'Du ' + fmt(debut) + ' au ' + fmt(fin);

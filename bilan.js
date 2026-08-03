@@ -192,8 +192,10 @@ const _JOURS_NOMS = ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIM
 function _joursOrdreAffichage(jours, jourBilanNom) {
   if (!jours || !jours.length) return jours || [];
   jourBilanNom = _normJourBilan(jourBilanNom);
-  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
-  const startIdx = (cibleIdx + 1) % 7; // lendemain du jour de bilan = premier jour de la semaine
+  const rawIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  // La semaine commence désormais le jour_bilan lui-même et se termine la veille
+  // (cf. _bilanWeekBounds/api.js, 2026-08-03) — startIdx = jour_bilan directement.
+  const startIdx = rawIdx % 7;
   return Array.from({ length: 7 }, (_, i) => jours[(startIdx + i) % 7]);
 }
 
@@ -280,8 +282,8 @@ async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
   return Array.isArray(arr) ? arr[0] : arr; // ligne brute — l'appelant normalise si besoin
 }
 
-// La semaine du bilan se termine le jour_bilan assigné au client (ou
-// dimanche par défaut) — voir _bilanWeekBounds (api.js).
+// La semaine du bilan se termine la veille du jour_bilan assigné au client (ou
+// samedi par défaut, jour_bilan non réglé = Dimanche) — voir _bilanWeekBounds (api.js).
 function _supaGetSemaineLabel(jourBilanNom, refDate) {
   const { debut: lun, fin: dim } = _bilanWeekBounds(jourBilanNom, refDate || new Date());
   const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];

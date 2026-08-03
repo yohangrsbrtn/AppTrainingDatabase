@@ -11,10 +11,13 @@ function supaHeaders(extra) {
 }
 
 // ── Semaine de bilan — source unique partagée client (bilan.js) + coach
-// (console.html). Une semaine de bilan se termine le jour assigné au client
-// (client_profils.jour_bilan) et non un calendaire lundi-dimanche : un
-// jour_bilan='Mercredi' donne des semaines jeudi→mercredi. Sans jour_bilan
-// renseigné, on retombe sur dimanche (comportement calendaire précédent).
+// (console.html). Une semaine de bilan se termine la VEILLE du jour assigné au
+// client (client_profils.jour_bilan), pas le jour même (2026-08-03, demande coach) :
+// un client qui remplit son bilan le matin de son jour_bilan n'a pas encore vécu
+// cette journée (pas/diète/etc. pas encore remplis) — ex: jour_bilan='Dimanche'
+// donne des semaines dimanche→samedi (pas dimanche→dimanche). Généralisé à TOUS
+// les jour_bilan, pas seulement Dimanche : jour_bilan='Mercredi' donne mercredi→mardi.
+// Sans jour_bilan renseigné, on retombe sur Dimanche (donc semaine dimanche→samedi).
 const _JOURS_IDX_FR = { Lundi:0, Mardi:1, Mercredi:2, Jeudi:3, Vendredi:4, Samedi:5, Dimanche:6 };
 
 // Normalise la casse avant recherche dans _JOURS_IDX_FR (clés capitalisées) — certains
@@ -31,7 +34,8 @@ function _normJourBilan(s) {
 function _bilanWeekBounds(jourBilanNom, refDate) {
   refDate = refDate || new Date();
   jourBilanNom = _normJourBilan(jourBilanNom);
-  const cibleIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const rawIdx   = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
+  const cibleIdx = (rawIdx - 1 + 7) % 7; // la veille du jour_bilan = dernier jour de la semaine
   const curIdx   = (refDate.getDay() + 6) % 7; // Lundi=0...Dimanche=6
   const delta    = (cibleIdx - curIdx + 7) % 7; // jours jusqu'à la prochaine occurrence (0 = aujourd'hui)
   const fin = new Date(refDate);
@@ -52,7 +56,10 @@ function _bilanWeekBounds(jourBilanNom, refDate) {
 function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
   if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !envoyeAtStr) return true;
   const { fin } = _bilanWeekBounds(jourBilanNom, new Date(bilanCreatedAt));
+  // `fin` = veille du jour_bilan (depuis le décalage 2026-08-03) — la deadline de
+  // ponctualité reste le jour_bilan lui-même, donc +1 jour par rapport à `fin`.
   const limite = new Date(fin);
+  limite.setDate(limite.getDate() + 1);
   limite.setHours(12, 0, 0, 0);
   return new Date(envoyeAtStr) <= limite;
 }
