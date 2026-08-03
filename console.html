@@ -3182,7 +3182,8 @@ function renderExercicesSub(){
 
 function ouvrirFormExercice(id){
   const ex = id ? exercicesData.find(e => e.id === id) : { nom:'', groupe_musculaire:'', groupe_secondaire:'', equipement:'', video_url:'', notes:'',
-    reps_metabolique:'', repos_metabolique:'', reps_mecanique:'', repos_mecanique:'', reps_force:'', repos_force:'' };
+    reps_metabolique:'', repos_metabolique:'', reps_mecanique:'', repos_mecanique:'', reps_force:'', repos_force:'',
+    rir_metabolique:'', rir_mecanique:'', rir_force:'', tempo_metabolique:'', tempo_mecanique:'', tempo_force:'' };
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'modal-exercice';
@@ -3207,7 +3208,7 @@ function ouvrirFormExercice(id){
       </div>
       <div class="field-row"><label>Équipement</label><input id="fExoEquip" type="text" value="${esc(ex.equipement||'')}" placeholder="ex: Barre, haltères, machine…"></div>
       <div class="field-row"><label>Lien vidéo (YouTube, Instagram…)</label><input id="fExoVideo" type="text" value="${esc(ex.video_url||'')}" placeholder="https://…"></div>
-      <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos par bloc</label>
+      <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos / RIR / tempo par bloc</label>
       <div class="field-grid" style="grid-template-columns:repeat(3,1fr);">
         <div class="field-row"><label>Métabolique — reps</label><input id="fExoRepsMeta" type="text" value="${esc(ex.reps_metabolique||'')}" placeholder="15-20"></div>
         <div class="field-row"><label>Mécanique — reps</label><input id="fExoRepsMeca" type="text" value="${esc(ex.reps_mecanique||'')}" placeholder="12-15"></div>
@@ -3215,6 +3216,12 @@ function ouvrirFormExercice(id){
         <div class="field-row"><label>Métabolique — repos</label><input id="fExoReposMeta" type="text" value="${esc(ex.repos_metabolique||'')}" placeholder="1'"></div>
         <div class="field-row"><label>Mécanique — repos</label><input id="fExoReposMeca" type="text" value="${esc(ex.repos_mecanique||'')}" placeholder="1'30"></div>
         <div class="field-row"><label>Force — repos</label><input id="fExoReposForce" type="text" value="${esc(ex.repos_force||'')}" placeholder="2'"></div>
+        <div class="field-row"><label>Métabolique — RIR</label><input id="fExoRirMeta" type="text" value="${esc(ex.rir_metabolique||'')}" placeholder="0-1"></div>
+        <div class="field-row"><label>Mécanique — RIR</label><input id="fExoRirMeca" type="text" value="${esc(ex.rir_mecanique||'')}" placeholder="1-2"></div>
+        <div class="field-row"><label>Force — RIR</label><input id="fExoRirForce" type="text" value="${esc(ex.rir_force||'')}" placeholder="2-3"></div>
+        <div class="field-row"><label>Métabolique — tempo</label><input id="fExoTempoMeta" type="text" value="${esc(ex.tempo_metabolique||'')}" placeholder="2010"></div>
+        <div class="field-row"><label>Mécanique — tempo</label><input id="fExoTempoMeca" type="text" value="${esc(ex.tempo_mecanique||'')}" placeholder="2010"></div>
+        <div class="field-row"><label>Force — tempo</label><input id="fExoTempoForce" type="text" value="${esc(ex.tempo_force||'')}" placeholder="2010"></div>
       </div>
       <div class="field-row"><label>Notes / consignes</label><textarea id="fExoNotes" rows="3">${esc(ex.notes||'')}</textarea></div>
       <div id="fExoErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
@@ -3244,6 +3251,12 @@ async function confirmerFormExercice(id){
     repos_mecanique: document.getElementById('fExoReposMeca').value.trim(),
     reps_force: document.getElementById('fExoRepsForce').value.trim(),
     repos_force: document.getElementById('fExoReposForce').value.trim(),
+    rir_metabolique: document.getElementById('fExoRirMeta').value.trim(),
+    rir_mecanique: document.getElementById('fExoRirMeca').value.trim(),
+    rir_force: document.getElementById('fExoRirForce').value.trim(),
+    tempo_metabolique: document.getElementById('fExoTempoMeta').value.trim(),
+    tempo_mecanique: document.getElementById('fExoTempoMeca').value.trim(),
+    tempo_force: document.getElementById('fExoTempoForce').value.trim(),
   };
   try {
     const saved = await sauvegarderExercice(payload);
@@ -3336,11 +3349,12 @@ function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
       else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
       if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
       else if (!ex.repos)                 ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
-      // RIR n'existe QUE par type de bloc (aucune colonne rir_metabolique/mecanique/force dans
-      // la bibliothèque exercices ni dans le fichier Excel source) — contrairement à reps/repos,
-      // il n'y a pas de valeur individuelle par exercice à préserver, donc toujours suivre le
-      // type du bloc.
-      ex.rir = RIR_PAR_TYPE[type] || ex.rir;
+      // RIR et tempo suivent maintenant le même principe que reps/repos (2026-08-03) : une
+      // correspondance bibliothèque (rir_<type>/tempo_<type>) est prioritaire, sinon le
+      // générique par type ne comble qu'un champ vide, jamais une valeur déjà présente.
+      if (lib && lib['rir_'+type])         ex.rir   = lib['rir_'+type];
+      else if (!ex.rir)                    ex.rir   = RIR_PAR_TYPE[type]   || ex.rir;
+      if (lib && lib['tempo_'+type])       ex.tempo = lib['tempo_'+type];
     });
   });
 }
@@ -3625,11 +3639,13 @@ function ajouterExerciceASeance(exerciceId){
   // Standard/générique (pas de bloc typé) : rien ne se préremplit, l'ajustement se fait à la main
   // directement dans les colonnes de la séance. Bloc typé : reps/repos de l'exercice pour ce bloc.
   const blocType = tplEnEdition.blocs[bi].type;
-  const reps = blocType && ex['reps_'+blocType] ? ex['reps_'+blocType] : '';
+  const reps  = blocType && ex['reps_'+blocType]  ? ex['reps_'+blocType]  : '';
   const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
+  const rir   = blocType && ex['rir_'+blocType]   ? ex['rir_'+blocType]   : '';
+  const tempo = blocType && ex['tempo_'+blocType] ? ex['tempo_'+blocType] : '';
   tplEnEdition.blocs[bi].seances[si].exercices.push({
     exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
-    series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo: '', rir: RIR_PAR_TYPE[blocType] || '', notes: '',
+    series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo, rir: rir || RIR_PAR_TYPE[blocType] || '', notes: '',
   });
   document.getElementById('modal-picker').remove();
   renderBlocsTemplate();
@@ -6404,7 +6420,9 @@ function cpAjouterExo(exerciceId){
   clientProgEnEdition.blocs[bi].seances[si].exercices.push({
     id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
     series:null, reps:(blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'')||(REPS_PAR_TYPE[blocType]||''),
-    repos:(blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'')||(REPOS_PAR_TYPE[blocType]||''), tempo:'', rir:RIR_PAR_TYPE[blocType]||'', notes:''
+    repos:(blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'')||(REPOS_PAR_TYPE[blocType]||''),
+    tempo:(blocType&&ex['tempo_'+blocType]?ex['tempo_'+blocType]:''),
+    rir:(blocType&&ex['rir_'+blocType]?ex['rir_'+blocType]:'')||(RIR_PAR_TYPE[blocType]||''), notes:''
   });
   document.getElementById('modal-picker-cp').remove();
   renderBlocsClientProg();
