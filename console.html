@@ -585,6 +585,8 @@ let _ficheXpHistoLoading = false;
 let _ficheMenusJournalClientId = null;
 let _ficheMenus = null; let _ficheMenusLoading = false;
 let _ficheJournal = null; let _ficheJournalLoading = false;
+let _ficheMenusOuverts = new Set();   // ids de menus dépliés (fiche client → Diète)
+let _ficheJournalOuverts = new Set(); // dates (YYYY-MM-DD) dépliées (fiche client → Diète)
 let _ficheProtocoleClientId = null;
 let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
 let _ficheProtocoleLoading = false;
@@ -5359,6 +5361,7 @@ function _renderFicheMenusEtJournal(c){
     _ficheMenusJournalClientId = clientId;
     _ficheMenus = null; _ficheMenusLoading = false;
     _ficheJournal = null; _ficheJournalLoading = false;
+    _ficheMenusOuverts = new Set(); _ficheJournalOuverts = new Set();
   }
   const refresh = () => { const el = document.getElementById('ficheTabContent'); if (el && ficheTab === 'diete') el.innerHTML = renderFicheDieteTab(c); };
   if (_ficheMenus === null && !_ficheMenusLoading) {
@@ -5376,21 +5379,30 @@ function _renderFicheMenusEtJournal(c){
       .catch(() => { _ficheJournal = []; _ficheJournalLoading = false; });
   }
 
+  const chevron = ouvert => `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${ouvert?'0':'-90'}deg)"><polyline points="6 9 12 15 18 9"/></svg>`;
+
   const menusHtml = _ficheMenus === null
     ? `<div class="fiche-prog-empty">Chargement…</div>`
     : !_ficheMenus.length ? `<div class="fiche-prog-empty">Aucun menu créé.</div>`
     : _ficheMenus.map(m => {
         const aliments = (m.client_menu_aliments||[]).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
         const kcal = aliments.reduce((s,a)=>s+(a.kcal||0),0), prot = aliments.reduce((s,a)=>s+(a.prot||0),0), glu = aliments.reduce((s,a)=>s+(a.glu||0),0), lip = aliments.reduce((s,a)=>s+(a.lip||0),0);
-        return `<div class="prog-row" style="cursor:default;flex-direction:column;align-items:stretch;margin-bottom:8px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div class="p-nom">${esc(m.nom||'Menu sans nom')}</div>
-            <div class="p-meta">${Math.round(kcal)} kcal · P${Math.round(prot)} G${Math.round(glu)} L${Math.round(lip)}</div>
+        const ouvert = _ficheMenusOuverts.has(m.id);
+        const detail = aliments.length ? aliments.map(a=>`
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;">
+            <span>${esc(a.nom)}</span>
+            <span style="color:var(--text-faint);flex-shrink:0;">${a.quantite_g||'?'}g · ${Math.round(a.kcal||0)} kcal</span>
+          </div>`).join('') : `<div style="font-size:12px;color:var(--text-faint);padding:3px 0;">Aucun aliment.</div>`;
+        return `<div class="prog-row" style="cursor:pointer;flex-direction:column;align-items:stretch;margin-bottom:8px;" onclick="_toggleFicheMenu(${m.id},'${c.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">${chevron(ouvert)}<div class="p-nom">${esc(m.nom||'Menu sans nom')}</div></div>
+            <div class="p-meta" style="flex-shrink:0;">${Math.round(kcal)} kcal · P${Math.round(prot)} G${Math.round(glu)} L${Math.round(lip)}</div>
           </div>
-          <div style="font-size:11.5px;color:var(--text-faint);margin-top:4px;">${aliments.map(a=>esc(a.nom)+' ('+(a.quantite_g||'?')+'g)').join(', ') || 'Aucun aliment.'}</div>
+          ${ouvert ? `<div style="margin-top:6px;padding-left:18px;border-top:1px solid var(--hairline);padding-top:6px;">${detail}</div>` : ''}
         </div>`;
       }).join('');
 
+  const JOURNAL_TYPE_LABEL = { cible: 'Diète cible du jour', menu: 'Menu perso' };
   const journalHtml = _ficheJournal === null
     ? `<div class="fiche-prog-empty">Chargement…</div>`
     : !_ficheJournal.length ? `<div class="fiche-prog-empty">Aucune entrée de journal.</div>`
@@ -5399,13 +5411,21 @@ function _renderFicheMenusEtJournal(c){
         _ficheJournal.forEach(r => { (parDate[r.date] = parDate[r.date] || []).push(r); });
         return Object.keys(parDate).sort().reverse().slice(0, 30).map(date => {
           const entries = parDate[date].slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
-          const lignes = entries.map(r => {
-            const badge = r.type === 'cible' ? '🎯 Diète cible' : r.type === 'menu' ? '📋 Menu perso' : `🍽 Repas ${r.slot!=null?r.slot+1:''}`;
-            return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:2px 0;"><span style="color:var(--text-faint);">${badge}</span><span>${esc(r.label||'—')}</span></div>`;
+          const ouvert = _ficheJournalOuverts.has(date);
+          const dateLabel = new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+          const detail = entries.map(r => {
+            const label = r.type === 'cible' || r.type === 'menu' ? JOURNAL_TYPE_LABEL[r.type] : `Repas ${r.slot!=null?r.slot+1:'?'}`;
+            return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;">
+              <span style="color:var(--text-faint);flex-shrink:0;">${label}</span>
+              <span style="text-align:right;">${esc(r.label||'—')}</span>
+            </div>`;
           }).join('');
-          return `<div class="prog-row" style="cursor:default;flex-direction:column;align-items:stretch;margin-bottom:6px;">
-            <div style="font-size:11px;font-weight:700;color:var(--text-faint);margin-bottom:4px;">${new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'})}</div>
-            ${lignes}
+          return `<div class="prog-row" style="cursor:pointer;flex-direction:column;align-items:stretch;margin-bottom:6px;" onclick="_toggleFicheJournalDate('${date}','${c.id}')">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <div style="display:flex;align-items:center;gap:6px;"><span style="color:var(--text-faint);">${chevron(ouvert)}</span><div class="p-nom" style="text-transform:capitalize;">${esc(dateLabel)}</div></div>
+              <div class="p-meta">${entries.length} entrée${entries.length>1?'s':''}</div>
+            </div>
+            ${ouvert ? `<div style="margin-top:6px;padding-left:18px;border-top:1px solid var(--hairline);padding-top:6px;">${detail}</div>` : ''}
           </div>`;
         }).join('');
       })();
@@ -5415,6 +5435,19 @@ function _renderFicheMenusEtJournal(c){
     ${menusHtml}
     <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:8px;margin-top:20px;">Journal alimentaire (30 derniers jours renseignés)</div>
     ${journalHtml}`;
+}
+
+function _toggleFicheMenu(menuId, clientId){
+  if (_ficheMenusOuverts.has(menuId)) _ficheMenusOuverts.delete(menuId); else _ficheMenusOuverts.add(menuId);
+  const c = data.clients.find(x=>x.id===clientId);
+  const el = document.getElementById('ficheTabContent');
+  if (el && c) el.innerHTML = renderFicheDieteTab(c);
+}
+function _toggleFicheJournalDate(date, clientId){
+  if (_ficheJournalOuverts.has(date)) _ficheJournalOuverts.delete(date); else _ficheJournalOuverts.add(date);
+  const c = data.clients.find(x=>x.id===clientId);
+  const el = document.getElementById('ficheTabContent');
+  if (el && c) el.innerHTML = renderFicheDieteTab(c);
 }
 
 // Résumé kcal/macros affiché directement dans le bandeau de la diète (fiche
