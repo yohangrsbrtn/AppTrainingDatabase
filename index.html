@@ -240,7 +240,7 @@ function setPage(name) {
   // Bandeau "Retour coach" persistant en mode vue-client
   if (_viewAsClientOverride && name !== 'loading') {
     if (!document.getElementById('coachRetourBanner')) {
-      const nom = (_clientSelectionne && _clientSelectionne.nom) || _viewAsClientOverride;
+      const nom = _viewAsClientOverride;
       const banner = document.createElement('div');
       banner.id = 'coachRetourBanner';
       banner.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom) + 8px);left:50%;transform:translateX(-50%);z-index:8000;background:linear-gradient(135deg,#E8A838,#c88010);color:#1a0e00;border-radius:20px;padding:8px 16px 8px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,.5);white-space:nowrap;';
@@ -278,7 +278,6 @@ let _vueClientRetour = 'mes-clients';
 // PWA prod pour un client pourtant supabase_only (ex: recettes de la base PWA au lieu de
 // la table Supabase `recettes` — bug constaté sur la fiche de Manon Besnier).
 async function enterVueClient(clientId, andThen, retour) {
-  const nom = (_clientSelectionne && _clientSelectionne.nom) || clientId;
   _coachSavedState = {
     client: S.client,
     isCoach: S.isCoach,
