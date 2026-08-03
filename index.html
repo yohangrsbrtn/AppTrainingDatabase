@@ -1209,12 +1209,11 @@ function renderSettingsProfil() {
     : '';
 
   const MODE_PAIEMENT_LABELS = { virement: 'Virement', espece: 'Espèces', gocardless: 'Prélèvement automatique' };
-  const facturationRows = [];
-  if (profilData.jour_paiement) facturationRows.push(_stgRow({ icon:'billing', color:'grey', title:'Jour de facturation', right:`<span class="stg-val">Le ${profilData.jour_paiement} du mois</span>` }));
-  if (profilData.mode_paiement) facturationRows.push(_stgRow({ icon:'billing', color:'grey', title:'Mode de paiement', right:`<span class="stg-val">${MODE_PAIEMENT_LABELS[profilData.mode_paiement] || esc(profilData.mode_paiement)}</span>` }));
-  const facturationCard = facturationRows.length
-    ? `${_stgSecLabel('Facturation')}${_stgCard(facturationRows)}`
-    : '';
+  const facturationRows = [
+    _stgRow({ icon:'billing', color:'grey', title:'Jour de facturation', right:`<span class="stg-val">${profilData.jour_paiement ? `Le ${profilData.jour_paiement} du mois` : '—'}</span>` }),
+    _stgRow({ icon:'billing', color:'grey', title:'Mode de paiement', right:`<span class="stg-val">${profilData.mode_paiement ? (MODE_PAIEMENT_LABELS[profilData.mode_paiement] || esc(profilData.mode_paiement)) : '—'}</span>` }),
+  ];
+  const facturationCard = `${_stgSecLabel('Facturation')}${_stgCard(facturationRows)}`;
 
   return `
       ${_stgSecLabel('Pseudo & photo')}
