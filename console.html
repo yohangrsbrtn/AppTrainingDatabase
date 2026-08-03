@@ -7985,8 +7985,32 @@ const GAS_PROD_URL = 'https://script.google.com/macros/s/AKfycbwQiM6ixf-CTIWwcuN
 const GAS_ID_MAP = { 'yohanp': 'yohan' };
 function _gasId(clientId) { return GAS_ID_MAP[clientId] || clientId; }
 
-async function apiGasProd(action, clientId, params = {}) {
-  const body = { action, token: getToken(), client: _gasId(clientId), params };
+// Le token coach GAS (10 caractères, stocké côté GAS dans la feuille Clients) est
+// distinct du `at_token` Supabase Auth (JWT) utilisé par le reste de l'app depuis le
+// passage à Supabase Auth — GAS ne connaît rien de ce JWT. On maintient donc un token
+// GAS séparé, obtenu une seule fois via le code coach (action 'login' GAS, qui accepte
+// coachMode indépendamment du `client` fourni), mis en cache dans 'at_gas_token'.
+async function _getGasCoachToken(force) {
+  if (!force) {
+    const cached = localStorage.getItem('at_gas_token');
+    if (cached) return cached;
+  }
+  const mdp = prompt('Code coach (accès migration GAS) :');
+  if (!mdp) throw new Error('code_coach_requis');
+  const res = await fetch(GAS_PROD_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ action: 'login', client: 'coach', mdp }),
+  });
+  const json = await res.json();
+  if (!json.ok || !json.token) throw new Error(json.error || 'login_gas_echoue');
+  localStorage.setItem('at_gas_token', json.token);
+  return json.token;
+}
+
+async function apiGasProd(action, clientId, params = {}, _retry) {
+  const token = await _getGasCoachToken(!!_retry);
+  const body = { action, token, client: _gasId(clientId), params };
   const ctrl = new AbortController();
   const tid  = setTimeout(() => ctrl.abort(), 30000);
   try {
@@ -7997,7 +8021,13 @@ async function apiGasProd(action, clientId, params = {}) {
       signal: ctrl.signal,
     });
     const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'erreur_gas');
+    if (!json.ok) {
+      if (json.error === 'token_invalide' && !_retry) {
+        localStorage.removeItem('at_gas_token');
+        return apiGasProd(action, clientId, params, true);
+      }
+      throw new Error(json.error || 'erreur_gas');
+    }
     return json.data;
   } finally {
     clearTimeout(tid);
