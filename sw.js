@@ -67,12 +67,17 @@ self.addEventListener('push', e => {
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const ouvrirNotifs = !!(e.notification.data && e.notification.data.openNotifs);
-  const targetUrl = '/AppTrainingDatabase/' + (ouvrirNotifs ? '?openNotif=1' : '');
+  // Deep-link : si la notification cible une page précise (ex: "roadmap", posée
+  // par le coach depuis la fiche client → Roadmap → 🔔 Notifier), on y amène le
+  // client directement plutôt que juste ouvrir le panneau de notifications.
+  const page = e.notification.data && e.notification.data.page;
+  const targetUrl = '/AppTrainingDatabase/' + (page ? `?openPage=${encodeURIComponent(page)}` : (ouvrirNotifs ? '?openNotif=1' : ''));
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
       const existant = clientsArr.find(c => c.url.includes('/AppTrainingDatabase/'));
       if (existant) {
-        if (ouvrirNotifs) existant.postMessage({ type: 'openNotifs' });
+        if (page) existant.postMessage({ type: 'openPage', page });
+        else if (ouvrirNotifs) existant.postMessage({ type: 'openNotifs' });
         return existant.focus().then(c => c.navigate ? c.navigate(targetUrl) : c);
       }
       return self.clients.openWindow(targetUrl);

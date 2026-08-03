@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: CORS_HEADERS });
   }
   try {
-    const { title, body, client_id, urgent } = await req.json();
+    const { title, body, client_id, urgent, page } = await req.json();
     const cid = client_id || "yohanp";
     const url = cid === "all"
       ? `${SUPABASE_URL}/rest/v1/push_subscriptions?select=endpoint,p256dh,auth`
@@ -46,7 +46,9 @@ Deno.serve(async (req) => {
           // data.openNotifs : lu par sw.js au clic sur la notification pour
           // ouvrir directement le panneau de notifications de l'app (voir
           // notificationclick dans sw.js) plutôt que juste l'accueil.
-          JSON.stringify({ title: title || "AppTraining", body: body || "", data: { openNotifs: true } }),
+          // data.page (optionnel) : deep-link — au clic, sw.js navigue directement
+          // vers cette page de l'app (ex: "roadmap") au lieu du panneau de notifs.
+          JSON.stringify({ title: title || "AppTraining", body: body || "", data: { openNotifs: true, page: page || null } }),
           // urgent (chrono repos) : priorité "high" + TTL court — un rappel de
           // fin de repos n'a aucune valeur s'il est livré avec plusieurs minutes
           // de retard (vécu : notification arrivée très en retard sur iOS avec

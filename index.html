@@ -817,6 +817,14 @@ function _apresChargementHome() {
     history.replaceState(null, '', window.location.pathname);
     setTimeout(() => ouvrirNotificationsClient(), 300);
   }
+  // Deep-link depuis une notification poussée (ex: "Ta roadmap a été mise à
+  // jour !") sur un onglet qui n'était pas encore ouvert — amène directement
+  // sur la page ciblée au lieu du panneau de notifications générique.
+  const _openPage = new URLSearchParams(location.search).get('openPage');
+  if (_openPage) {
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => goTo(_openPage), 300);
+  }
   // Détection déblocages niveau/titres — le coach voit ses propres passages
   // de niveau/titres comme n'importe quel client, seule la vue client (coach
   // qui consulte le profil d'un autre) est exclue.
@@ -1051,6 +1059,22 @@ function _fermerNotifPleinEcran(id) {
   }).catch(() => {});
 }
 
+// Clic sur une notification de la cloche qui cible une page précise (ex: le
+// coach a notifié une mise à jour de Roadmap) : marque lue puis amène
+// directement sur cette page, comme un clic sur le push correspondant.
+function _clicNotifClient(id, page) {
+  document.getElementById('notifsClientPanel')?.remove();
+  fetch(`${SUPABASE_URL}/rest/v1/client_notifications?id=eq.${id}`, {
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ lu: true, lu_at: new Date().toISOString() })
+  }).then(() => {
+    const n = _notifsClient.find(x => x.id === id);
+    if (n) n.lu = true;
+    _notifsClientCount = _notifsClient.filter(x => !x.lu).length;
+    _majCarteHeader();
+  }).catch(() => {});
+  goTo(page);
+}
+
 function ouvrirNotificationsClient() {
   const existing = document.getElementById('notifsClientPanel');
   if (existing) existing.remove();
@@ -1058,10 +1082,10 @@ function ouvrirNotificationsClient() {
   el.id = 'notifsClientPanel';
   el.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.82);display:flex;align-items:flex-end;';
   const item = n => `
-    <div style="background:${n.lu?'#0f1117':'#161c2c'};border-radius:12px;padding:14px 16px;margin-bottom:8px;border-left:3px solid ${n.lu?'transparent':'#4f8ef7'};">
+    <div ${n.page ? `onclick="_clicNotifClient(${n.id},'${n.page}')" style="cursor:pointer;` : 'style="'}background:${n.lu?'#0f1117':'#161c2c'};border-radius:12px;padding:14px 16px;margin-bottom:8px;border-left:3px solid ${n.lu?'transparent':'#4f8ef7'};">
       <div style="font-size:14px;font-weight:700;color:#e8eaf0;margin-bottom:3px;">${esc(n.title)}</div>
       <div style="font-size:13px;color:#c8d0e0;line-height:1.5;">${esc(n.body)}</div>
-      <div style="font-size:10.5px;color:#555e7a;margin-top:6px;">${new Date(n.created_at).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})} à ${new Date(n.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+      <div style="font-size:10.5px;color:#555e7a;margin-top:6px;">${new Date(n.created_at).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})} à ${new Date(n.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}${n.page ? ' · toucher pour voir' : ''}</div>
     </div>`;
   el.innerHTML = `
     <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-width:520px;margin:0 auto;max-height:82vh;display:flex;flex-direction:column;">
@@ -2291,6 +2315,7 @@ if ('serviceWorker' in navigator) {
   // postMessage à la place et on ouvre directement le panneau.
   navigator.serviceWorker.addEventListener('message', e => {
     if (e.data && e.data.type === 'openNotifs' && S.client) ouvrirNotificationsClient();
+    else if (e.data && e.data.type === 'openPage' && e.data.page && S.client) goTo(e.data.page);
   });
 }
 
