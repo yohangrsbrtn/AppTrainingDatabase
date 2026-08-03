@@ -177,13 +177,24 @@ function _protocoleCalculer(protocole, molecules) {
 }
 
 // ── Swipe-to-close pour les volets "bottom sheet" ───────────────────────
-// Glisser vers le bas depuis la poignée (petit trait en haut du volet) ferme
-// le volet — comportement standard sur mobile que l'utilisateur essaiera de
-// toute façon en premier. Utilisé par tous les volets de index.html/diete.js/
-// programme-client.js portant la classe "sheet-handle"/"sheet-body".
+// Glisser vers le bas depuis le haut du volet le ferme — comportement standard
+// sur mobile que l'utilisateur essaiera de toute façon en premier. Utilisé par
+// tous les volets de index.html/diete.js/programme-client.js portant la classe
+// "sheet-handle"/"sheet-body".
 // onClose optionnel : certains volets doivent nettoyer autre chose qu'un
 // simple .remove() à la fermeture (ex: arrêter la caméra du scan code-barres
 // dans diete.js — sinon le flux vidéo reste actif en arrière-plan).
+//
+// Piège corrigé (2026-08-03, signalé par le coach) : la zone de prise n'était
+// QUE le trait visuel lui-même (36×4px, quasi impossible à viser précisément
+// au doigt) — tout glissé qui le manquait de peu tombait sur un élément sans
+// touch-action, et le geste tombait à travers jusqu'à l'arrière-plan (la page
+// derrière le volet scrollait/bougeait). Fix en 2 parties : (1) une zone de
+// prise invisible bien plus large, superposée en haut du volet (hors la
+// colonne de droite où se trouve parfois un bouton ✕, pour ne pas le bloquer),
+// sert de vraie zone de glisser-fermer ; (2) verrou de scroll d'arrière-plan
+// centralisé (voir plus bas) tant qu'un volet est ouvert, filet de sécurité
+// même si un geste démarre ailleurs que sur cette zone.
 function attacherSwipeFermeture(overlayEl, onClose) {
   if (!overlayEl) return;
   const handle = overlayEl.querySelector('.sheet-handle');
@@ -191,16 +202,22 @@ function attacherSwipeFermeture(overlayEl, onClose) {
   if (!handle || !sheet) return;
   const SEUIL = 80;
   let startY = null, dy = 0, dragging = false;
-  handle.style.touchAction = 'none';
-  handle.addEventListener('touchstart', e => {
+
+  const zone = document.createElement('div');
+  zone.style.cssText = 'position:absolute;top:0;left:12px;right:56px;height:34px;touch-action:none;z-index:1;';
+  if (getComputedStyle(sheet).position === 'static') sheet.style.position = 'relative';
+  sheet.insertBefore(zone, sheet.firstChild);
+
+  zone.addEventListener('touchstart', e => {
     startY = e.touches[0].clientY; dy = 0; dragging = true;
     sheet.style.transition = 'none';
   }, { passive: true });
-  handle.addEventListener('touchmove', e => {
+  zone.addEventListener('touchmove', e => {
     if (!dragging) return;
     dy = Math.max(0, e.touches[0].clientY - startY);
+    if (dy > 4) e.preventDefault(); // bloque le scroll/rebond d'arrière-plan pendant le glisser
     sheet.style.transform = `translateY(${dy}px)`;
-  }, { passive: true });
+  }, { passive: false });
   const finDrag = () => {
     if (!dragging) return;
     dragging = false;
@@ -212,6 +229,35 @@ function attacherSwipeFermeture(overlayEl, onClose) {
       sheet.style.transform = 'translateY(0)';
     }
   };
-  handle.addEventListener('touchend', finDrag);
-  handle.addEventListener('touchcancel', finDrag);
+  zone.addEventListener('touchend', finDrag);
+  zone.addEventListener('touchcancel', finDrag);
 }
+
+// Verrou de scroll d'arrière-plan tant qu'au moins un volet (.sheet-body) est
+// ouvert — centralisé via MutationObserver plutôt que dupliqué dans chaque
+// fonction d'ouverture/fermeture (une dizaine de points d'entrée différents
+// entre index.html/diete.js/programme-client.js, pas tous nettoyés au même
+// endroit). Technique classique iOS Safari : body en position:fixed pendant le
+// verrou, restauration exacte du scroll au déverrouillage.
+(function () {
+  let scrollYAvantLock = 0, verrouille = false;
+  function appliquerVerrouScroll() {
+    const doitVerrouiller = !!document.querySelector('.sheet-body');
+    if (doitVerrouiller && !verrouille) {
+      scrollYAvantLock = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = '-' + scrollYAvantLock + 'px';
+      document.body.style.width = '100%';
+      verrouille = true;
+    } else if (!doitVerrouiller && verrouille) {
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, scrollYAvantLock);
+      verrouille = false;
+    }
+  }
+  if (typeof document !== 'undefined' && document.body) {
+    new MutationObserver(appliquerVerrouScroll).observe(document.body, { childList: true });
+  }
+})();
