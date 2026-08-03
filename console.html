@@ -3230,9 +3230,9 @@ function ouvrirFormExercice(id){
         <div class="field-row"><label>Métabolique — repos</label><input id="fExoReposMeta" type="text" value="${esc(ex.repos_metabolique||'')}" placeholder="1'"></div>
         <div class="field-row"><label>Mécanique — repos</label><input id="fExoReposMeca" type="text" value="${esc(ex.repos_mecanique||'')}" placeholder="1'30"></div>
         <div class="field-row"><label>Force — repos</label><input id="fExoReposForce" type="text" value="${esc(ex.repos_force||'')}" placeholder="2'"></div>
-        <div class="field-row"><label>Métabolique — RIR</label><input id="fExoRirMeta" type="text" value="${esc(ex.rir_metabolique||'')}" placeholder="0-1"></div>
-        <div class="field-row"><label>Mécanique — RIR</label><input id="fExoRirMeca" type="text" value="${esc(ex.rir_mecanique||'')}" placeholder="1-2"></div>
-        <div class="field-row"><label>Force — RIR</label><input id="fExoRirForce" type="text" value="${esc(ex.rir_force||'')}" placeholder="2-3"></div>
+        <div class="field-row"><label>Métabolique — RIR</label><input id="fExoRirMeta" type="text" value="${esc(ex.rir_metabolique||'')}" placeholder="3"></div>
+        <div class="field-row"><label>Mécanique — RIR</label><input id="fExoRirMeca" type="text" value="${esc(ex.rir_mecanique||'')}" placeholder="2-3"></div>
+        <div class="field-row"><label>Force — RIR</label><input id="fExoRirForce" type="text" value="${esc(ex.rir_force||'')}" placeholder="1-2"></div>
         <div class="field-row"><label>Métabolique — tempo</label><input id="fExoTempoMeta" type="text" value="${esc(ex.tempo_metabolique||'')}"></div>
         <div class="field-row"><label>Mécanique — tempo</label><input id="fExoTempoMeca" type="text" value="${esc(ex.tempo_mecanique||'')}"></div>
         <div class="field-row"><label>Force — tempo</label><input id="fExoTempoForce" type="text" value="${esc(ex.tempo_force||'')}"></div>
@@ -3328,7 +3328,7 @@ function renderTemplatesSub(){
 let tplEnEdition = null;
 let tplPickerCible = null; // { bi, si }
 const BLOCS_TYPES = [{value:'',label:'Générique'},{value:'metabolique',label:'Métabolique'},{value:'mecanique',label:'Mécanique'},{value:'force',label:'Force'}];
-const RIR_PAR_TYPE  = { metabolique:'0-1',  mecanique:'1-2',  force:'2-3' };
+const RIR_PAR_TYPE  = { metabolique:'3',  mecanique:'2-3',  force:'1-2' };
 const REPS_PAR_TYPE = { metabolique:'15-20', mecanique:'10-15', force:'6-10' };
 const REPOS_PAR_TYPE= { metabolique:"1'",   mecanique:"1'30",  force:"2'" };
 
