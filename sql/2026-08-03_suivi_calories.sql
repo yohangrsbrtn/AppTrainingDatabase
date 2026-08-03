@@ -7,7 +7,10 @@ ALTER TABLE client_suivi ADD COLUMN IF NOT EXISTS gas_row INTEGER;
 -- aux valeurs historiques GAS non normalisées.
 ALTER TABLE client_suivi ADD COLUMN IF NOT EXISTS phase TEXT;
 
--- Une même ligne GAS ne doit jamais être importée deux fois pour un même client
--- (les entrées créées à la main dans la console ont gas_row = NULL, exclues de la contrainte).
+-- Une même ligne GAS ne doit jamais être importée deux fois pour un même client.
+-- Index NON partiel volontairement : PostgREST ne peut pas cibler un index
+-- partiel via ?on_conflict=. Pas un problème pour les entrées créées à la main
+-- (gas_row=NULL) — deux NULL ne sont jamais considérés égaux par une contrainte
+-- unique, donc elles ne se bloquent jamais entre elles.
 CREATE UNIQUE INDEX IF NOT EXISTS client_suivi_gas_row_uniq
-  ON client_suivi(client_id, gas_row) WHERE gas_row IS NOT NULL;
+  ON client_suivi(client_id, gas_row);
