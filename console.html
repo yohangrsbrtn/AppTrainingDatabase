@@ -643,7 +643,7 @@ async function chargerSuivi(clientId){
   return res.json();
 }
 async function sauverSuiviApi(clientId, id, entry){
-  const body = { client_id: clientId, date: entry.date, nutrition: entry.nutrition || null, entrainement: entry.entrainement || null, commentaire_general: entry.commentaire_general || null };
+  const body = { client_id: clientId, date: entry.date, nutrition: entry.nutrition || null, entrainement: entry.entrainement || null, commentaire_general: entry.commentaire_general || null, calories: entry.calories || null };
   const res = id
     ? await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) })
     : await fetch(`${SUPABASE_URL}/rest/v1/client_suivi`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
@@ -653,6 +653,39 @@ async function sauverSuiviApi(clientId, id, entry){
 async function supprimerSuiviApi(id){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
+// Total kcal d'une diète (template) = somme des repas de base (variante_index le
+// plus bas par ordre — les équivalences ne comptent pas dans le total du jour),
+// même calcul que côté client (diete.js) : kcal_par_100g/100 * quantite_g pour
+// les aliments en grammes, sans division pour les aliments en unité/portion.
+async function _kcalTotalTemplate(templateId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${templateId}&select=ordre,variante_index,repas_aliments(quantite_g,unite,kcal_par_100g)`, { headers: supaHeaders() });
+  const rows = res.ok ? await res.json() : [];
+  const base = {};
+  rows.forEach(r => { if (!(r.ordre in base) || r.variante_index < base[r.ordre].variante_index) base[r.ordre] = r; });
+  let total = 0;
+  Object.values(base).forEach(r => (r.repas_aliments||[]).forEach(a => {
+    const div = (a.unite||'g') === 'g' ? 100 : 1;
+    total += ((a.kcal_par_100g||0)/div) * (a.quantite_g||0);
+  }));
+  return Math.round(total);
+}
+
+// Texte auto "Nom diète : XXXX kcal" pour chaque diète active du client — utilisé
+// pour pré-remplir le champ Calories du suivi (une ou plusieurs diètes simultanées).
+async function _suiviCaloriesAuto(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=nom`, { headers: supaHeaders() });
+  const dietes = res.ok ? await res.json() : [];
+  if (!dietes.length) return '';
+  const lignes = [];
+  for (const d of dietes) {
+    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(d.nom)}&order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+    const tpl = tplRes.ok ? await tplRes.json() : [];
+    if (!tpl.length) { lignes.push(`${d.nom} : —`); continue; }
+    lignes.push(`${d.nom} : ${await _kcalTotalTemplate(tpl[0].id)} kcal`);
+  }
+  return lignes.join('\n');
 }
 
 // ── Roadmap client (client_roadmap) — phases datées cut/reverse/... ──
@@ -5332,6 +5365,7 @@ function renderFicheProgressionTab(){
 }
 
 const SUIVI_CHAMPS = [
+  { key:'calories', label:'Calories', icon:'🔥' },
   { key:'nutrition', label:'Nutrition', icon:'🥗' },
   { key:'entrainement', label:'Entraînement', icon:'🏋️' },
   { key:'commentaire_general', label:'Commentaire général', icon:'📝' },
@@ -5342,7 +5376,10 @@ function renderFicheSuiviTab(c){
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${entries.length} entrée${entries.length>1?'s':''}</div>
-      <button class="btn primary" onclick="ouvrirModalSuivi('${c.id}')">+ Ajouter une entrée</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" id="btn-migrer-suivi" onclick="migrerSuiviClient('${c.id}')">⬇ Migrer depuis GAS</button>
+        <button class="btn primary" onclick="ouvrirModalSuivi('${c.id}')">+ Ajouter une entrée</button>
+      </div>
     </div>
     ${entries.length ? entries.map(e => `
       <div class="fiche-card" style="margin-bottom:10px;">
@@ -5371,6 +5408,10 @@ function ouvrirModalSuivi(clientId, id) {
         <input id="su-date" type="date" value="${row.date || new Date().toISOString().slice(0,10)}" style="font-size:16px;">
       </div>
       <div class="fiche-field">
+        <label>Calories <button type="button" class="btn" style="font-size:10px;padding:2px 7px;margin-left:6px;" onclick="_recalculerSuiviCalories('${clientId}')">🔄 Recalculer depuis les diètes</button></label>
+        <textarea id="su-calories" placeholder="ex: Jour On : 2400 kcal / Jour Off : 1800 kcal" style="font-size:14px;">${esc(row.calories||'')}</textarea>
+      </div>
+      <div class="fiche-field">
         <label>Nutrition</label>
         <textarea id="su-nutrition" placeholder="ex: +150 kcal, glucides autour de l'entraînement…" style="font-size:14px;">${esc(row.nutrition||'')}</textarea>
       </div>
@@ -5389,13 +5430,26 @@ function ouvrirModalSuivi(clientId, id) {
     </div>`;
   overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+  // Pré-remplissage auto uniquement pour une nouvelle entrée sans calories déjà saisies
+  if (!id && !row.calories) _recalculerSuiviCalories(clientId);
+}
+
+async function _recalculerSuiviCalories(clientId){
+  const el = document.getElementById('su-calories');
+  if (!el) return;
+  const prev = el.value;
+  el.value = 'Calcul en cours…';
+  try {
+    const texte = await _suiviCaloriesAuto(clientId);
+    el.value = texte || 'Aucune diète active trouvée pour ce client.';
+  } catch(e) { el.value = prev; alert('Erreur calcul calories : ' + e.message); }
 }
 
 async function sauvegarderSuivi(clientId, id) {
   const v = k => document.getElementById('su-'+k)?.value || '';
   const date = v('date');
   if (!date) { alert('La date est obligatoire.'); return; }
-  const entry = { date, nutrition: v('nutrition').trim(), entrainement: v('entrainement').trim(), commentaire_general: v('commentaire').trim() };
+  const entry = { date, calories: v('calories').trim(), nutrition: v('nutrition').trim(), entrainement: v('entrainement').trim(), commentaire_general: v('commentaire').trim() };
   try {
     await sauverSuiviApi(clientId, id, entry);
     document.querySelector('.modal-overlay')?.remove();
@@ -5411,6 +5465,38 @@ async function supprimerSuiviEntry(id, clientId) {
     ficheData.suivi = await chargerSuivi(clientId);
     if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// Import idempotent de l'historique Suivi (GAS) — clé stable gas_row (numéro de
+// ligne dans la feuille), pour ne jamais dupliquer un import déjà fait. Une entrée
+// créée à la main dans la console a gas_row=NULL, jamais touchée par cet import.
+async function migrerSuiviClient(clientId) {
+  const btn = document.getElementById('btn-migrer-suivi');
+  if (!confirm('Importer l\'historique Suivi depuis GAS pour ce client ?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Import…'; }
+  try {
+    const rows = await apiGasProd('listerSuivi', clientId);
+    if (!Array.isArray(rows) || !rows.length) { alert('Aucune entrée Suivi trouvée dans GAS pour ce client.'); return; }
+    const body = rows.map(r => ({
+      client_id: clientId,
+      gas_row: r.row,
+      date: r.date,
+      calories: r.calories || null,
+      nutrition: r.nutrition || null,
+      entrainement: r.entrainement || null,
+      commentaire_general: r.commentaire || null,
+    }));
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_suivi?on_conflict=client_id,gas_row`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    ficheData.suivi = await chargerSuivi(clientId);
+    if (state.nav==='fiche-client' && state.selected===clientId) renderMain();
+    alert(`${body.length} entrée(s) de suivi importée(s)/mise(s) à jour.`);
+  } catch(e) { alert('Erreur migration Suivi : ' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '⬇ Migrer depuis GAS'; } }
 }
 
 const BLOC_LABELS_COACH = { metabolique:'Métabolique', mecanique:'Mécanique', force:'Force' };
