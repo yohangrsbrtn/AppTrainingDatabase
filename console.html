@@ -1728,6 +1728,22 @@ async function ouvrirBilanEnRetardDashboard(clientId) {
   openPanel(clientId);
 }
 
+// Depuis l'onglet Mensurations de la fiche client : ouvre directement le DERNIER bilan
+// ENVOYÉ (pas le bilan en cours, pas la liste) — pratique pour naviguer bilan ↔
+// mensurations en faisant les retours d'un client (ajustements diète, etc.) sans repasser
+// par la liste des bilans à chaque fois.
+async function _ouvrirDernierBilanEnvoye(clientId) {
+  try {
+    // order=date_validation.desc : la vraie date d'envoi, plus fiable que created_at pour
+    // les bilans migrés (même logique que le tri "bilansSupa" au chargement).
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc.nullslast&limit=1`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    if (!rows[0]) { alert('Aucun bilan envoyé pour ce client.'); return; }
+    _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1;
+    openBilanDetailSupabase(rows[0]);
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
 // Fil de navigation rapide (bilan-detail, ouvert depuis la fiche/le dashboard) :
 // sauter directement vers un autre onglet de la fiche de ce même client, sans
 // repasser par "Retour" puis re-cliquer l'onglet.
@@ -4915,7 +4931,8 @@ function renderFicheMensurationsTab(c){
 
   if (!_ficheMensurations.length) {
     return `<div class="fiche-card">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
+        <button class="btn" onclick="_ouvrirDernierBilanEnvoye('${c.id}')">📋 Dernier bilan envoyé</button>
         <button class="btn primary" onclick="ouvrirModalMensuration('${c.id}',null)">+ Ajouter</button>
       </div>
       <p style="color:var(--text-faint);">Aucune mensuration enregistrée dans Supabase.</p>
@@ -4953,7 +4970,8 @@ function renderFicheMensurationsTab(c){
   }).join('');
 
   return `<div class="fiche-card">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
+      <button class="btn" onclick="_ouvrirDernierBilanEnvoye('${c.id}')">📋 Dernier bilan envoyé</button>
       <button class="btn primary" onclick="ouvrirModalMensuration('${c.id}',null)">+ Ajouter</button>
     </div>
     ${periodeFiltreHtml}
