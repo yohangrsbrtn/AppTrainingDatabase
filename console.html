@@ -1741,7 +1741,7 @@ function openBilanHistoClient(clientId) {
   bilansHistoClientId = clientId;
   bilansHistoData = { loaded: false, error: null, bilans: [] };
   renderMain();
-  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('supabase_' + r.status)))
     .then(rows => {
       if (bilansHistoClientId !== clientId) return;
@@ -2037,10 +2037,11 @@ function _renderBilansHistorique() {
   if (bilansHistoData.error) return `${backBtn}<div style="color:var(--critical);padding:16px;">Erreur : ${esc(bilansHistoData.error)}</div>`;
   if (!bilansHistoData.bilans.length) return `${backBtn}<div class="table-card" style="padding:20px 24px;color:var(--text-faint);">Aucun bilan validé pour ${esc(nom)}.</div>`;
 
+  const _histoLabels = _bilanPeriodeLabelsList(bilansHistoData.bilans, c ? c.jour_bilan : null);
   const rows = bilansHistoData.bilans.map((h, idx) => {
     const dateFr = h.date_validation ? h.date_validation.split('-').reverse().join('/') : '—';
     return `<tr style="cursor:pointer;" onclick="openBilanFromHistorique(${idx})">
-      <td class="mono" style="font-size:12px;">${esc(h.semaine_label||dateFr)}</td>
+      <td class="mono" style="font-size:12px;">${esc(_histoLabels[idx]||dateFr)}</td>
       <td class="mono" style="font-size:12px;color:var(--text-faint);">${dateFr}</td>
       <td>${h.coach_traite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(h.envoye_coach?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)}</td>
       <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
@@ -4497,10 +4498,11 @@ function renderFicheBilansTab(c){
   }
   const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
   const selCount = _ficheBilansSel.size;
+  const _periodeLabels = _bilanPeriodeLabelsList(_ficheBilans, c.jour_bilan);
   const rows = _ficheBilans.map((b, idx) => {
     const dateRaw = b.date_validation || '';
     const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
-    const periode = _bilanPeriodeLabel(b, c.jour_bilan);
+    const periode = _periodeLabels[idx];
     const traite = b.coach_traite;
     const chip = b.envoye_coach
       ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
@@ -4594,6 +4596,32 @@ function _bilanPeriodeLabel(b, jourBilanNom) {
   // tous les bilans migrés le même jour (bug vécu : 14 bilans de Mathis Le Ray tous affichés
   // "27 Juil → 2 Août" en doublon). semaine_label brut, même imprécis, évite l'illusion de doublon.
   return b.semaine_label || '—';
+}
+
+// Variante liste de _bilanPeriodeLabel : désambiguïse les bilans migrés sans date_validation
+// qui partagent le même semaine_label brut (souvent le texte générique "SEMAINE" recopié tel
+// quel depuis les toutes premières lignes de la feuille GAS, avant que le suivi par date
+// n'existe). Sans ça plusieurs bilans réels et distincts s'affichent avec un libellé identique
+// et donnent l'illusion de doublons (vécu chez Mathis Le Ray, Manon Besnier, Nesher Carsin).
+// Ordonnés par gas_ligne_titre (ordre chronologique réel dans la feuille d'origine) à défaut
+// de date connue — pas de vrais doublons trouvés en base (vérifié : aucune paire (client,
+// gas_ligne_titre) répétée), donc jamais d'archivage/suppression ici, seulement un libellé
+// plus lisible.
+function _bilanPeriodeLabelsList(bilansList, jourBilanNom) {
+  const labels = bilansList.map(b => _bilanPeriodeLabel(b, jourBilanNom));
+  const groups = new Map();
+  bilansList.forEach((b, i) => {
+    if (b.date_validation) return;
+    const key = labels[i];
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+  groups.forEach(idxs => {
+    if (idxs.length < 2) return;
+    const sorted = [...idxs].sort((a, b2) => (bilansList[a].gas_ligne_titre||0) - (bilansList[b2].gas_ligne_titre||0));
+    sorted.forEach((idx, pos) => { labels[idx] = `${labels[idx]} (${pos+1}/${sorted.length}, sans date)`; });
+  });
+  return labels;
 }
 
 function _renderFicheBilansCorbeille(c){
