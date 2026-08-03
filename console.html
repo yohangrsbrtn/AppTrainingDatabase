@@ -3165,19 +3165,33 @@ function renderExercicesSub(){
         <button class="btn primary" onclick="ouvrirFormExercice(null)">+ Nouvel exercice</button>
       </div>
       <div class="table-scroll"><table class="clients">
-        <thead><tr><th>Nom</th><th>Groupe</th><th>Équipement</th><th>Vidéo</th><th></th></tr></thead>
+        <thead><tr><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
         <tbody>
           ${list.map(e => `
             <tr onclick="ouvrirFormExercice(${e.id})">
               <td style="font-weight:600;">${esc(e.nom)}</td>
               <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
-              <td class="mono" style="color:var(--text-faint);">${esc(e.equipement||'—')}</td>
+              <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
+              <td>${_exoResumeBlocsHtml(e)}</td>
               <td>${e.video_url ? `<a href="${esc(e.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);">▶ Voir</a>` : '—'}</td>
               <td class="row-actions"><button class="icon-btn" onclick="event.stopPropagation();retirerExercice(${e.id})">${iTrash()}</button></td>
-            </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
         </tbody>
       </table></div>
     </div>`;
+}
+
+// Résumé compact reps/repos/RIR/tempo des 3 blocs, affiché directement dans la ligne de la
+// liste des exercices — évite d'avoir à ouvrir chaque exercice pour voir ce qui est renseigné.
+const EXO_BLOC_LABEL = { metabolique:'Méta', mecanique:'Méca', force:'Force' };
+function _exoResumeBlocsHtml(e){
+  const lignes = ['metabolique','mecanique','force'].map(type => {
+    const reps = e['reps_'+type], repos = e['repos_'+type], rir = e['rir_'+type], tempo = e['tempo_'+type];
+    if (!reps && !repos && !rir && !tempo) return '';
+    const parts = [reps, repos ? '⏱'+repos : '', rir ? 'RIR '+rir : '', tempo ? 'tempo '+tempo : ''].filter(Boolean);
+    return `<div style="font-size:11px;color:${BLOC_COLOR[type]};white-space:nowrap;"><b>${EXO_BLOC_LABEL[type]}</b> ${parts.join(' · ')}</div>`;
+  }).join('');
+  return lignes || '<span style="color:var(--text-faint);">—</span>';
 }
 
 function ouvrirFormExercice(id){
@@ -3219,9 +3233,9 @@ function ouvrirFormExercice(id){
         <div class="field-row"><label>Métabolique — RIR</label><input id="fExoRirMeta" type="text" value="${esc(ex.rir_metabolique||'')}" placeholder="0-1"></div>
         <div class="field-row"><label>Mécanique — RIR</label><input id="fExoRirMeca" type="text" value="${esc(ex.rir_mecanique||'')}" placeholder="1-2"></div>
         <div class="field-row"><label>Force — RIR</label><input id="fExoRirForce" type="text" value="${esc(ex.rir_force||'')}" placeholder="2-3"></div>
-        <div class="field-row"><label>Métabolique — tempo</label><input id="fExoTempoMeta" type="text" value="${esc(ex.tempo_metabolique||'')}" placeholder="2010"></div>
-        <div class="field-row"><label>Mécanique — tempo</label><input id="fExoTempoMeca" type="text" value="${esc(ex.tempo_mecanique||'')}" placeholder="2010"></div>
-        <div class="field-row"><label>Force — tempo</label><input id="fExoTempoForce" type="text" value="${esc(ex.tempo_force||'')}" placeholder="2010"></div>
+        <div class="field-row"><label>Métabolique — tempo</label><input id="fExoTempoMeta" type="text" value="${esc(ex.tempo_metabolique||'')}"></div>
+        <div class="field-row"><label>Mécanique — tempo</label><input id="fExoTempoMeca" type="text" value="${esc(ex.tempo_mecanique||'')}"></div>
+        <div class="field-row"><label>Force — tempo</label><input id="fExoTempoForce" type="text" value="${esc(ex.tempo_force||'')}"></div>
       </div>
       <div class="field-row"><label>Notes / consignes</label><textarea id="fExoNotes" rows="3">${esc(ex.notes||'')}</textarea></div>
       <div id="fExoErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
@@ -3349,11 +3363,15 @@ function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
       else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
       if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
       else if (!ex.repos)                 ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
-      // RIR et tempo suivent maintenant le même principe que reps/repos (2026-08-03) : une
-      // correspondance bibliothèque (rir_<type>/tempo_<type>) est prioritaire, sinon le
-      // générique par type ne comble qu'un champ vide, jamais une valeur déjà présente.
-      if (lib && lib['rir_'+type])         ex.rir   = lib['rir_'+type];
-      else if (!ex.rir)                    ex.rir   = RIR_PAR_TYPE[type]   || ex.rir;
+      // RIR : contrairement à reps/repos, il n'existe aucune donnée migrée individuelle par
+      // exercice à protéger (GAS ne remonte jamais de RIR) — donc pas de mode "combler si vide
+      // seulement" ici. Une correspondance bibliothèque (rir_<type>) est prioritaire ; sinon on
+      // suit TOUJOURS le générique du type sélectionné, sans condition — sinon changer de type
+      // ne faisait plus rien dès que `ex.rir` avait déjà une valeur (ex: restée du type
+      // précédent), ce qui semblait figer le RIR peu importe le type choisi.
+      ex.rir = (lib && lib['rir_'+type]) ? lib['rir_'+type] : (RIR_PAR_TYPE[type] || ex.rir);
+      // Tempo : aucune valeur générique par type n'existe (jamais de donnée source) — seule une
+      // correspondance bibliothèque explicite le renseigne, sinon il reste vide.
       if (lib && lib['tempo_'+type])       ex.tempo = lib['tempo_'+type];
     });
   });
