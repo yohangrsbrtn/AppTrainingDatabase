@@ -3318,12 +3318,20 @@ function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ tit
 // 5 clients à chaque changement de type de bloc). Le générique par type ne sert plus qu'à
 // remplir un champ vraiment VIDE (nouvel exercice jamais renseigné), jamais à remplacer une
 // valeur existante sans correspondance en bibliothèque.
+// Lookup par nom en fallback (`exercice_id` null pour tout exercice migré — la migration
+// n'insère que le nom, jamais de FK) : sans ce fallback, changer le type d'un bloc ne faisait
+// plus RIEN sur les exercices migrés (aucun match par id → ni écrasement ni mise à jour), ce
+// qui semblait figer tous les blocs sur les valeurs Métabolique d'origine — même piège que
+// documenté plus haut dans ce fichier pour le groupe musculaire (toujours prévoir les deux
+// lookups id puis nom).
 function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
   const type = bloc.type;
   if (!type) return;
   bloc.seances.forEach(seance => {
     seance.exercices.forEach(ex => {
-      const lib = ex.exercice_id != null ? (exercicesLib||[]).find(e => e.id === ex.exercice_id) : null;
+      const lib = ex.exercice_id != null
+        ? (exercicesLib||[]).find(e => e.id === ex.exercice_id)
+        : (exercicesLib||[]).find(e => e.nom.toLowerCase() === (ex.nom||'').toLowerCase());
       if (lib && lib['reps_'+type])       ex.reps  = lib['reps_'+type];
       else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
       if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
