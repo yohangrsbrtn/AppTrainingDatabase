@@ -1741,7 +1741,7 @@ function openBilanHistoClient(clientId) {
   bilansHistoClientId = clientId;
   bilansHistoData = { loaded: false, error: null, bilans: [] };
   renderMain();
-  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=date_validation.desc.nullslast,created_at.desc`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('supabase_' + r.status)))
     .then(rows => {
       if (bilansHistoClientId !== clientId) return;
@@ -1785,7 +1785,7 @@ async function _ouvrirDernierBilanEnvoye(clientId) {
   try {
     // order=date_validation.desc : la vraie date d'envoi, plus fiable que created_at pour
     // les bilans migrés (même logique que le tri "bilansSupa" au chargement).
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc.nullslast&limit=1`, { headers: supaHeaders() });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc.nullslast,created_at.desc&limit=1`, { headers: supaHeaders() });
     const rows = res.ok ? await res.json() : [];
     if (!rows[0]) { alert('Aucun bilan envoyé pour ce client.'); return; }
     _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1;
@@ -4480,7 +4480,7 @@ function renderFicheBilansTab(c){
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
       _ficheBilansLoading = true;
-      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=date_validation.desc.nullslast,created_at.desc`, { headers: supaHeaders() })
         .then(r => r.json())
         .then(rows => {
           _ficheBilans = Array.isArray(rows) ? rows : [];
@@ -4626,7 +4626,7 @@ function _bilanPeriodeLabelsList(bilansList, jourBilanNom) {
 
 function _renderFicheBilansCorbeille(c){
   if (_ficheBilansCorbeille === null) {
-    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.true&order=date_validation.desc.nullslast`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.true&order=date_validation.desc.nullslast,created_at.desc`, { headers: supaHeaders() })
       .then(r => r.ok ? r.json() : [])
       .then(rows => {
         _ficheBilansCorbeille = Array.isArray(rows) ? rows : [];
