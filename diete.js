@@ -37,6 +37,8 @@ let _dScanInstance          = null; // instance Html5Qrcode active (pour pouvoir
 let _dScanStopPromise       = null; // promesse du stop() en cours (voir _arreterScan) — pour que le démarrage suivant attende la libération réelle de la caméra
 let _dScanLibPromise        = null; // promesse de chargement du script CDN html5-qrcode (chargé une seule fois)
 let _dScanTraitementEnCours = false; // verrou anti double-décodage pendant le traitement d'un scan (match local ou fetch OFF)
+let _dScanTimerInterval     = null; // setInterval du compteur "Recherche en cours… Xs" (feedback pendant le scan)
+let _dScanStartTs           = null;
 
 // Garde-fou anti double-tap : un bouton "Créer"/"Ajouter"/"Enregistrer" tapé deux fois
 // rapidement (avant la fin de l'appel réseau précédent) créait autant de lignes en
@@ -1600,7 +1602,11 @@ function renderModalAjoutScan() {
   return `
     <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Scanner un code-barres</div>
     <div id="dScanViewport" style="width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:260px;"></div>
-    <div style="font-size:12px;color:var(--muted);text-align:center;margin:12px 0;">Vise le code-barres du produit.</div>
+    <div id="dScanElapsed" style="font-size:12px;color:var(--muted);text-align:center;margin:12px 0;display:flex;align-items:center;justify-content:center;gap:6px;"><span class="spin" style="width:12px;height:12px;border-width:2px;"></span> Recherche en cours…</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input id="dScanManuelInput" type="text" inputmode="numeric" placeholder="Ou saisis le code-barres…" onkeydown="if(event.key==='Enter')_rechercherCodeBarreManuel();" style="flex:1;padding:11px 12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+      <button onclick="_rechercherCodeBarreManuel()" style="padding:0 16px;background:#2d3142;border:none;border-radius:10px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Rechercher</button>
+    </div>
     <button onclick="_dAjoutEtape='recherche';_afficherModalAjout(false);" style="width:100%;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Annuler</button>`;
 }
 
@@ -1631,11 +1637,31 @@ async function _demarrerScan() {
     { fps: 15, qrbox: { width: 280, height: 160 }, formatsToSupport: formats },
     onScanSuccess
   )
+    .then(() => { _demarrerCompteurScan(); })
     .catch(() => {
       showToast('Impossible d\'accéder à la caméra.', '#c0392b');
       _dAjoutEtape = 'recherche';
       _afficherModalAjout(false);
     });
+}
+
+// Feedback "Recherche en cours… Xs" — sans ça rien à l'écran n'indique que le scan tourne
+// activement pendant les quelques secondes (parfois beaucoup plus, certains codes-barres se
+// décodent mal en vidéo continue — éclairage, courbure de l'emballage, étiquette usée) où le
+// décodeur cherche encore, ce qui donne l'impression trompeuse d'une app figée.
+function _demarrerCompteurScan() {
+  _dScanStartTs = Date.now();
+  clearInterval(_dScanTimerInterval);
+  _dScanTimerInterval = setInterval(() => {
+    const el = document.getElementById('dScanElapsed');
+    if (!el) return;
+    const s = Math.floor((Date.now() - _dScanStartTs) / 1000);
+    el.innerHTML = `<span class="spin" style="width:12px;height:12px;border-width:2px;"></span> Recherche en cours… ${s}s`;
+  }, 1000);
+}
+function _arreterCompteurScan() {
+  clearInterval(_dScanTimerInterval);
+  _dScanTimerInterval = null;
 }
 
 async function onScanSuccess(codeBarre) {
@@ -1652,6 +1678,27 @@ async function onScanSuccess(codeBarre) {
     await new Promise(r => setTimeout(r, 350));
   }
   _arreterScan();
+  await _traiterCodeBarre(codeBarre);
+}
+
+// Saisie manuelle du code-barres — toujours accessible pendant le scan (pas seulement après un
+// échec) : les chiffres sont imprimés sous les barres et restent lisibles même quand la caméra
+// n'arrive pas à décoder l'image (flou, courbure de l'emballage, étiquette usée, mauvais
+// éclairage) — plus fiable et plus rapide qu'une nouvelle tentative de scan dans ce cas.
+async function _rechercherCodeBarreManuel() {
+  if (_dScanTraitementEnCours) return;
+  const input = document.getElementById('dScanManuelInput');
+  const code = ((input && input.value) || '').trim();
+  if (!code) return;
+  _dScanTraitementEnCours = true;
+  _arreterScan();
+  await _traiterCodeBarre(code);
+}
+
+// Logique de recherche partagée (scan auto + saisie manuelle) : match local d'abord (base coach
+// ou communauté déjà indexée par code-barres), sinon Open Food Facts. Remet toujours
+// _dScanTraitementEnCours à false en sortie (verrou anti double-traitement).
+async function _traiterCodeBarre(codeBarre) {
   const local = _tousLesAliments().find(a => a.codeBarre === codeBarre);
   if (local) { _dScanTraitementEnCours = false; selectionnerAliment(local.nom, local.source); return; }
   _afficherModalAjout(true);
@@ -1674,7 +1721,7 @@ async function onScanSuccess(codeBarre) {
     } else {
       _dCreationPrefill = null;
       _dCreationCodeBarre = codeBarre;
-      showToast('Produit non trouvé, tu peux le créer manuellement.', '#e0a030');
+      showToast('Aliment inconnu dans Open Food Facts — crée-le manuellement.', '#e0a030');
       ouvrirCreationAliment('');
     }
   } catch(e) {
@@ -1759,6 +1806,7 @@ async function confirmerCreationAliment() {
 // asynchrone — _dScanStopPromise garde une référence à cette attente en cours pour qu'un
 // _demarrerScan() qui suit puisse s'y accrocher même s'il est appelé après ce nulling.
 function _arreterScan() {
+  _arreterCompteurScan();
   if (_dScanInstance) {
     const inst = _dScanInstance;
     _dScanInstance = null;
