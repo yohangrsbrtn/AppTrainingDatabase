@@ -684,7 +684,7 @@ async function _completerConnexionSupabase(session) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -787,7 +787,7 @@ function _chargerTop5Home() {
     try {
       const [progRes, profilRes] = await Promise.all([
         fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
-        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie,est_coach`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,pseudo,photo_url,mode_simplifie,est_coach`, { headers: supaHeaders() }),
       ]);
       const progRows = progRes.ok ? await progRes.json() : [];
       const profils = profilRes.ok ? await profilRes.json() : [];
@@ -795,9 +795,9 @@ function _chargerTop5Home() {
       // Mode simplifié = ne pas apparaître dans le classement des autres. Le coach
       // (est_coach=true, ex: yohanp) n'apparaît pas non plus — le classement est
       // réservé aux vrais clients, pas au coach lui-même même s'il s'entraîne aussi.
-      profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+      profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = p; });
       const cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
-        id: p.client_id, nom: profilMap[p.client_id],
+        id: p.client_id, ...profilMap[p.client_id],
         xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
         titreActif: p.titre_actif || null,
       }));
@@ -882,8 +882,12 @@ function renderTop5Home(liste) {
     const tier = typeof niveauToTier === 'function' ? niveauToTier(c.niveau) : 'debutant';
     const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858'};
     const isMe = c.client === S.client || c.id === S.client;
-    const parts = (c.nom || c.prenom || c.client || '').trim().split(' ');
-    const nom = parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
+    const { principal: nomComplet, secondaire } = _nomAffichage(c);
+    // Widget compact : sans pseudo on abrège "Prénom Nom" en "Prénom N." (place limitée) ;
+    // avec pseudo, celui-ci est déjà court, on l'affiche tel quel.
+    const parts = nomComplet.trim().split(' ');
+    const nom = secondaire ? nomComplet : parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
+    const initiales = ((c.prenom ? c.prenom[0] : '') + (c.nom ? c.nom[0] : '')).toUpperCase() || '?';
     let bg, border, namec;
     if (i < 3) { bg = _podium[i].bg; border = _podium[i].border; namec = isMe ? tc.c1 : _podium[i].namec; }
     else { bg = `linear-gradient(145deg,#0f1117,${tc.c2}aa,#0f1117)`; border = isMe ? `1px solid ${tc.c1}88` : '1px solid #1e2235'; namec = isMe ? tc.c1 : '#f0f2ff'; }
@@ -892,9 +896,12 @@ function renderTop5Home(liste) {
     const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:${i===0?'10px':'8px'} 12px;border-radius:10px;margin-bottom:5px;background:${bg};border:${border};">
       <div style="font-size:16px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
-      <div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, badgeSz, 't5'+i) : ''}</div>
+      <div style="flex-shrink:0;position:relative;">
+        ${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, badgeSz, 't5'+i) : ''}
+        <div style="position:absolute;bottom:-3px;right:-3px;">${_avatarCircleHtml(c.photo_url, initiales, 16)}</div>
+      </div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:${i===0?'14':'13'}px;font-weight:700;color:${namec};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nom}${isMe?' <span style="font-size:9px;opacity:0.7;">(toi)</span>':''}${titreBadge}</div>
+        <div style="font-size:${i===0?'14':'13'}px;font-weight:700;color:${namec};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(nom)}${secondaire ? ` <span style="font-size:9px;font-weight:400;color:#8892a4;">(${esc(secondaire)})</span>` : ''}${isMe?' <span style="font-size:9px;opacity:0.7;">(toi)</span>':''}${titreBadge}</div>
         <div style="font-size:11px;color:#8892a4;margin-top:1px;">Niv. ${c.niveau} · ${(c.xpTotal||0).toLocaleString('fr')} XP</div>
       </div>
     </div>`;
@@ -961,6 +968,9 @@ function renderCarteHeader() {
   const titreId = p.titreActif || ((() => { try { return localStorage.getItem('titreActif_' + S.client) || null; } catch(e) { return null; } })());
   const titreDef = titreId && typeof TITRES_DEF !== 'undefined' ? TITRES_DEF.find(t => t.id === titreId) : null;
   const titreHtml = titreDef ? renderTitrePill(titreDef, false) : '';
+  const profilData = S.data.profil || {};
+  const { principal: nomPrincipal, secondaire: nomSecondaire } = _nomAffichage(profilData);
+  const nomAffichePrenom = nomSecondaire ? nomPrincipal : nomPrincipal.split(' ')[0];
 
   return `<div id="carteHeaderHome" style="
       background:linear-gradient(145deg,#131825 0%,${tc.c2}99 30%,${tc.c2}ee 50%,${tc.c2}99 70%,#131825 100%);
@@ -973,9 +983,10 @@ function renderCarteHeader() {
           ${simplifie ? '' : `<div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, sz, 'hm') : '⭐'}</div>`}
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <span style="font-size:18px;font-weight:700;color:#f0f2ff;">${(p.nom || S.client).split(' ')[0]}</span>
+              <span style="font-size:18px;font-weight:700;color:#f0f2ff;">${esc(nomAffichePrenom)}</span>
               ${simplifie ? '' : titreHtml}
             </div>
+            ${nomSecondaire ? `<div style="font-size:11px;color:#8892a4;margin-top:-2px;">${esc(nomSecondaire)}</div>` : ''}
             ${simplifie ? '' : `<div style="font-size:12px;color:#8892a4;margin-top:2px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
             <div style="margin-top:8px;display:flex;justify-content:space-between;">
               <span style="font-size:10px;color:#8892a4;">Niv. ${niveau}</span>
@@ -1085,19 +1096,19 @@ async function loadClassement() {
     // Classement : uniquement les clients supabase_only ayant une progression
     const [progRes, profilRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc`, { headers: supaHeaders() }),
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,mode_simplifie,est_coach`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,pseudo,photo_url,mode_simplifie,est_coach`, { headers: supaHeaders() }),
     ]);
     const progRows = progRes.ok ? await progRes.json() : [];
     const profils = profilRes.ok ? await profilRes.json() : [];
     const profilMap = {};
     // Mode simplifié = ne pas apparaître dans le classement des autres. Le coach
     // (est_coach=true) n'apparaît pas non plus.
-    profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id; });
+    profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = p; });
     S.data.classement = progRows
       .filter(p => profilMap[p.client_id])
       .map(p => ({
         id: p.client_id,
-        nom: profilMap[p.client_id],
+        ...profilMap[p.client_id],
         xpTotal: p.xp_total || 0,
         niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
         titreActif: p.titre_actif || null,
@@ -1115,12 +1126,17 @@ function renderClassement() {
     const isMe = c.id === S.client;
     const tDef = (c.titreActif && typeof TITRES_DEF !== 'undefined') ? TITRES_DEF.find(t => t.id === c.titreActif) : null;
     const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
+    const { principal, secondaire } = _nomAffichage(c);
+    const initiales = (c.prenom ? c.prenom[0] : '') + (c.nom ? c.nom[0] : '');
     return `
     <div class="list-item">
       <div class="list-icon" style="font-size:18px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
-      <div style="flex-shrink:0;">${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, 32, 'cl'+i) : ''}</div>
+      <div style="flex-shrink:0;position:relative;">
+        ${typeof getBadgeSVG === 'function' ? getBadgeSVG(tier, 32, 'cl'+i) : ''}
+        <div style="position:absolute;bottom:-4px;right:-4px;">${_avatarCircleHtml(c.photo_url, initiales.toUpperCase() || '?', 18)}</div>
+      </div>
       <div class="list-text">
-        <div class="list-title" style="${isMe ? 'color:var(--accent);' : ''}">${c.nom || c.id}${isMe ? ' <span style="font-size:9px;opacity:0.7;">(toi)</span>' : ''}${titreBadge}</div>
+        <div class="list-title" style="${isMe ? 'color:var(--accent);' : ''}">${esc(principal)}${secondaire ? ` <span style="font-size:10px;font-weight:400;color:var(--muted);">(${esc(secondaire)})</span>` : ''}${isMe ? ' <span style="font-size:9px;opacity:0.7;">(toi)</span>' : ''}${titreBadge}</div>
         <div class="list-sub">Niv. ${c.niveau} · ${(c.xpTotal||0).toLocaleString('fr')} XP</div>
       </div>
     </div>`;
@@ -1147,6 +1163,29 @@ function renderSettingsProfil() {
   const profilData = S.data.profil || {};
   const inputStyle = 'width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2d3142;background:#0f1117;color:#e8eaf0;font-size:16px;';
   const fieldLabel = (icon, color, text) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">${_stgIconChip(icon, color)}<span style="font-size:13px;font-weight:600;color:#e8eaf0;">${text}</span></div>`;
+
+  const initialesPf = ((profilData.prenom ? profilData.prenom[0] : '') + (profilData.nom ? profilData.nom[0] : '')).toUpperCase() || '?';
+  const photoPseudoCard = `<div class="stg-card"><div style="padding:14px;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+        <div style="position:relative;flex-shrink:0;">
+          ${_avatarCircleHtml(profilData.photo_url, initialesPf, 64)}
+          <div onclick="document.getElementById('pf-photo-input').click()" style="position:absolute;bottom:-2px;right:-2px;width:22px;height:22px;border-radius:50%;background:#4f6ef7;border:2px solid #151824;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><path d="M12 5v14M5 12h14"/></svg>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:#8892a4;line-height:1.4;">Photo de profil, visible dans le classement.</div>
+          <div id="pf-photo-msg" style="font-size:12px;margin-top:4px;min-height:14px;"></div>
+          ${profilData.photo_url ? `<button onclick="_supprimerPhotoProfil()" style="background:transparent;border:none;color:#ef5b5b;font-size:12px;padding:2px 0;margin-top:2px;cursor:pointer;">Supprimer la photo</button>` : ''}
+        </div>
+      </div>
+      <input id="pf-photo-input" type="file" accept="image/*" style="display:none;" onchange="_uploadPhotoProfil(event)">
+      ${fieldLabel('gauge', 'purple', 'Pseudo')}
+      <div style="font-size:11px;color:#8892a4;margin:-4px 0 10px;">Affiché à la place de ton nom (ton prénom + initiale reste visible à côté, notamment dans le classement).</div>
+      <input id="pf-pseudo" type="text" placeholder="ex: ShadowWolf" maxlength="24" value="${esc(profilData.pseudo || '')}" style="${inputStyle}margin-bottom:12px;">
+      <button class="btn-primary" onclick="doSauverPseudo()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
+      <div id="pf-pseudo-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
+    </div></div>`;
 
   const naissanceTailleCard = `<div class="stg-card"><div style="padding:14px;">
       ${fieldLabel('calendar', 'blue', 'Date de naissance')}
@@ -1179,6 +1218,8 @@ function renderSettingsProfil() {
     : '';
 
   return `
+      ${_stgSecLabel('Pseudo & photo')}
+      ${photoPseudoCard}
       ${_stgSecLabel('Informations personnelles')}
       ${naissanceTailleCard}
       ${emailCard}
@@ -1191,6 +1232,76 @@ function renderSettingsProfil() {
         <button class="btn-primary" onclick="doChangerMotDePasse()" style="width:100%;padding:10px;font-size:13px;">Changer mon mot de passe</button>
         <div id="pf-mdp-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
       </div></div>`;
+}
+
+async function doSauverPseudo() {
+  const msg = document.getElementById('pf-pseudo-msg');
+  const pseudo = (document.getElementById('pf-pseudo').value || '').trim() || null;
+  msg.style.color = '';
+  msg.textContent = '…';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, pseudo })
+    });
+    if (!res.ok) throw new Error('Erreur serveur.');
+    S.data.profil = S.data.profil || {};
+    S.data.profil.pseudo = pseudo;
+    msg.textContent = 'Enregistré ✓';
+    if (S.page === 'home-supabase') _majCarteHeader();
+  } catch(e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = e.message || 'Erreur serveur.';
+  }
+}
+
+// Upload direct vers le bucket "profils-photos" (Supabase Storage, public) — même
+// pattern que _ajouterBilanPhotoClient (bilan.js), une seule photo remplace l'ancienne.
+async function _uploadPhotoProfil(e) {
+  const file = (e.target.files || [])[0];
+  e.target.value = '';
+  if (!file) return;
+  const msg = document.getElementById('pf-photo-msg');
+  if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Envoi…'; }
+  try {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${S.client}/${Date.now()}.${ext}`;
+    const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/profils-photos/${path}`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+      body: file
+    });
+    if (!upRes.ok) throw new Error('Erreur envoi photo.');
+    const url = `${SUPABASE_URL}/storage/v1/object/public/profils-photos/${path}`;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, photo_url: url })
+    });
+    if (!res.ok) throw new Error('Erreur serveur.');
+    S.data.profil = S.data.profil || {};
+    S.data.profil.photo_url = url;
+    if (msg) { msg.style.color = ''; msg.textContent = ''; }
+    if (document.getElementById('settingsPanel')) ouvrirSettings('profil');
+    if (S.page === 'home-supabase') _majCarteHeader();
+  } catch(err) {
+    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = err.message || 'Erreur.'; }
+  }
+}
+
+async function _supprimerPhotoProfil() {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, photo_url: null })
+    });
+    S.data.profil = S.data.profil || {};
+    S.data.profil.photo_url = null;
+    if (document.getElementById('settingsPanel')) ouvrirSettings('profil');
+    if (S.page === 'home-supabase') _majCarteHeader();
+  } catch(e) {}
 }
 
 async function doSauverInfosProfil() {
@@ -1472,6 +1583,31 @@ function _stgSwitchHtml(id, on, onclick) {
   </div>`;
 }
 
+// ── Pseudo & photo de profil ─────────────────────────────────────────────
+// Le pseudo remplace le nom réel en affichage PRINCIPAL partout où un nom de client
+// apparaît (accueil, classement) — le vrai prénom + initiale du nom reste toujours
+// visible en plus petit à côté (jamais totalement caché, important pour le coach qui
+// doit pouvoir identifier qui est qui). Sans pseudo, comportement inchangé (nom complet).
+function _nomAffichage(p) {
+  const prenom = p.prenom || '';
+  const nom = p.nom || '';
+  const reel = [prenom, nom].filter(Boolean).join(' ') || p.client_id || p.id || '';
+  if (p.pseudo) {
+    const initiale = nom ? nom.charAt(0).toUpperCase() + '.' : '';
+    const reelCourt = [prenom, initiale].filter(Boolean).join(' ') || reel;
+    return { principal: p.pseudo, secondaire: reelCourt };
+  }
+  return { principal: reel, secondaire: null };
+}
+// Cercle avatar : photo si renseignée, sinon initiales sur fond dégradé (même dégradé
+// que la carte profil des Paramètres, pour rester cohérent visuellement).
+function _avatarCircleHtml(photoUrl, initiales, size) {
+  if (photoUrl) {
+    return `<img src="${esc(photoUrl)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#1e2235;" onerror="this.style.display='none';">`;
+  }
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;background:conic-gradient(from 200deg,#4f6ef7,#a78bfa,#4f6ef7);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:${Math.round(size*0.36)}px;color:#fff;">${esc(initiales)}</div>`;
+}
+
 function ouvrirSettings(tab) {
   if (tab === 'guide' || tab === 'bug' || tab === 'profil') _settingsTab = tab;
   const existing = document.getElementById('settingsPanel');
@@ -1485,8 +1621,8 @@ function ouvrirSettings(tab) {
 
   const p = S.data.prog || {};
   const profilData = S.data.profil || {};
-  const nomAffiche = [profilData.prenom, profilData.nom].filter(Boolean).join(' ') || p.nom || S.client;
-  const initiales = (nomAffiche || '?').split(' ').map(w => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
+  const { principal: nomAffiche, secondaire: nomSecondaireHero } = _nomAffichage(profilData);
+  const initiales = ((profilData.prenom ? profilData.prenom[0] : '') + (profilData.nom ? profilData.nom[0] : '')).toUpperCase() || (S.client || '?')[0].toUpperCase();
 
   el.innerHTML = `<div class="sheet-body" style="background:#0b0d13;border-radius:20px 20px 0 0;width:100%;max-width:500px;margin:0 auto;max-height:88vh;display:flex;flex-direction:column;">
     <div style="padding:12px 0 4px;display:flex;justify-content:center;flex-shrink:0;"><div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;"></div></div>
@@ -1496,9 +1632,10 @@ function ouvrirSettings(tab) {
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 20px 12px;-webkit-overflow-scrolling:touch;">
       <div class="stg-profile">
-        <div class="stg-avatar">${esc(initiales)}</div>
-        <div>
+        ${profilData.photo_url ? `<img src="${esc(profilData.photo_url)}" style="width:52px;height:52px;border-radius:16px;object-fit:cover;flex-shrink:0;">` : `<div class="stg-avatar">${esc(initiales)}</div>`}
+        <div style="min-width:0;">
           <div style="font-size:16px;font-weight:750;color:#e8eaf0;">${esc(nomAffiche)}</div>
+          ${nomSecondaireHero ? `<div style="font-size:11px;color:#8892a4;">${esc(nomSecondaireHero)}</div>` : ''}
           <div style="font-size:12px;color:#8892a4;margin-top:2px;">Niveau ${p.niveau || 1} · ${(p.xpTotal || 0).toLocaleString('fr')} XP</div>
         </div>
       </div>
