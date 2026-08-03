@@ -987,7 +987,12 @@ async function chargerDonnees(){
   // noyé au milieu des bilans migrés en masse (created_at ancien, envoye_at
   // absent) au lieu de remonter en tête de liste comme attendu. Fallback sur
   // created_at pour les bilans migrés (envoye_at jamais renseigné côté GAS).
-  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite)
+  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente)
+    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
+  // "En attente" : le coach a explicitement mis ce bilan de côté (info manquante, ex:
+  // mensurations) — sorti de "à traiter" tant qu'il n'est pas repassé "à traiter" ou
+  // marqué traité directement.
+  const bilansEnAttente = bilansAll.filter(b => b.envoye_coach && !b.coach_traite && b.en_attente)
     .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
 
   let aValiderRows = [];
@@ -1001,7 +1006,7 @@ async function chargerDonnees(){
 
   // bilansCoach (ancien format GAS ts/client/coachTraite) conservé vide pour compat —
   // tout ce qui l'utilisait lit maintenant bilansAll/bilansSupa directement.
-  data = { clients, bilansCoach: [], bilansSupa, bilansAll, logs, aValider };
+  data = { clients, bilansCoach: [], bilansSupa, bilansEnAttente, bilansAll, logs, aValider };
   // Persist pour stale-while-revalidate au prochain chargement
   try {
     localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data }));
@@ -1739,6 +1744,7 @@ function openBilanDetailSupabase(bilan) {
     ligneTitre: bilan.gas_ligne_titre || null,
     ts: null,
     coachTraite: !!bilan.coach_traite,
+    enAttente: !!bilan.en_attente,
     data: {
       dateValidation: dateFr,
       semaineLabel: bilan.semaine_label || '',
@@ -1818,7 +1824,8 @@ function _bilanJoursAvecDates(joursArr, dateValidationFr) {
 }
 
 function renderBilansPage(el) {
-  const pendingCount = (data.bilansAll||[]).filter(b => b.envoye_coach && !b.coach_traite).length;
+  const pendingCount = (data.bilansAll||[]).filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente).length;
+  const attenteCount = (data.bilansEnAttente||[]).length;
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Bilans</h1></div>
@@ -1828,20 +1835,47 @@ function renderBilansPage(el) {
       <button class="fiche-tab${bilansTab==='recents'?' active':''}" onclick="setBilansTab('recents')">
         Récents${pendingCount > 0 ? ` <span class="nav-count" style="margin-left:6px;">${pendingCount}</span>` : ''}
       </button>
+      <button class="fiche-tab${bilansTab==='attente'?' active':''}" onclick="setBilansTab('attente')">
+        En attente${attenteCount > 0 ? ` <span class="nav-count" style="margin-left:6px;">${attenteCount}</span>` : ''}
+      </button>
       <button class="fiche-tab${bilansTab==='historique'?' active':''}" onclick="setBilansTab('historique')">Historique</button>
     </div>
     <div id="bilansContent">${_renderBilansTabContent()}</div>`;
 }
 
 function _renderBilansTabContent() {
-  return bilansTab === 'recents' ? _renderBilansRecents() : _renderBilansHistorique();
+  return bilansTab === 'recents' ? _renderBilansRecents() : bilansTab === 'attente' ? _renderBilansEnAttente() : _renderBilansHistorique();
+}
+
+function _renderBilansEnAttente() {
+  const list = data.bilansEnAttente || [];
+  const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
+  const dateFrOf = b => {
+    const iso = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : '');
+    return iso ? iso.split('-').reverse().join('/') : '—';
+  };
+  const rows = list.map(b => `
+    <tr style="cursor:pointer;" onclick="openBilanByIdFromRecents(${b.id})">
+      <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(_bilanPeriodeLabel(b, (data.clients.find(x=>x.id===b.client_id)||{}).jour_bilan) || b.semaine_label || '')}</td>
+      <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
+      <td class="row-actions" onclick="event.stopPropagation();"><button class="btn" onclick="toggleBilanEnAttente(${b.id}, false)">↩ Repasser à traiter</button></td>
+    </tr>`).join('');
+  return `
+    <div class="table-card">
+      <div class="table-toolbar"><div class="title">En attente d'info ${list.length ? `<span style="color:var(--text-faint);font-size:11px;margin-left:6px;">${list.length}</span>` : ''}</div></div>
+      ${list.length ? `<div class="table-scroll"><table class="clients">
+        <thead><tr><th>Client</th><th>Semaine</th><th>Envoyé le</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : `<div style="padding:20px 24px;color:var(--text-faint);">Aucun bilan en attente.</div>`}
+    </div>`;
 }
 
 function _renderBilansRecents() {
   const now = Date.now();
   const all = data.bilansAll || [];
   const envoyes = all.filter(b => b.envoye_coach);
-  const pending = envoyes.filter(b => !b.coach_traite).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  const pending = envoyes.filter(b => !b.coach_traite && !b.en_attente).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
   const recentTraited = envoyes.filter(b => {
     if (!b.coach_traite) return false;
     const iso = b.coach_traite_at || b.date_validation || b.created_at;
@@ -2065,14 +2099,19 @@ function renderBilanDetailPage(el) {
         <div class="fiche-hero-name">${esc(nom)}</div>
         <div class="fiche-hero-meta">
           <span class="chip off">${weekRange || _semaineFromDate(dateValidation)}</span>
-          ${bilanDetailState.coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:`<span class="chip late"><span class="dot"></span>À traiter</span>`}
+          ${bilanDetailState.coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:bilanDetailState.enAttente?`<span class="chip off"><span class="dot"></span>En attente</span>`:`<span class="chip late"><span class="dot"></span>À traiter</span>`}
         </div>
         ${dateValidation?`<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Validé le ${esc(dateValidation)}</div>`:''}
         ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
       </div>
-      ${bilanDetailState._supabaseBilanId ? (bilanDetailState.coachTraite
-        ? `<button class="btn" style="flex-shrink:0;" onclick="marquerNonTraite()">↩ Repasser à traiter</button>`
-        : `<button class="btn primary" style="flex-shrink:0;" onclick="marquerTraite()">✓ Marquer comme traité</button>`) : ''}
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+        ${bilanDetailState._supabaseBilanId ? (bilanDetailState.coachTraite
+          ? `<button class="btn" onclick="marquerNonTraite()">↩ Repasser à traiter</button>`
+          : `<button class="btn primary" onclick="marquerTraite()">✓ Marquer comme traité</button>`) : ''}
+        ${bilanDetailState._supabaseBilanId && !bilanDetailState.coachTraite ? (bilanDetailState.enAttente
+          ? `<button class="btn" onclick="toggleBilanEnAttente(${bilanDetailState._supabaseBilanId}, false)">↩ Sortir de l'attente</button>`
+          : `<button class="btn" onclick="toggleBilanEnAttente(${bilanDetailState._supabaseBilanId}, true)">⏸ Mettre en attente</button>`) : ''}
+      </div>
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
@@ -3769,7 +3808,7 @@ function renderDashboard(el){
               <div><div class="t">${esc(b.nom)}</div><div class="s">Semaine ${esc(b.semaine||'')} · clic pour marquer traité</div></div>
               <div class="time">${esc(b.ts||'')}</div>
             </div>`).join('')}
-        </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan à traiter.</div>`}
       </div>
       <div class="card">
         <div class="card-head">${iClipboard()}<span class="t">Bilans en retard</span></div>
@@ -3783,15 +3822,15 @@ function renderDashboard(el){
         </div>` : `<div class="card-empty">${iCheckCircle()}Tous vos clients sont à jour.</div>`}
       </div>
       <div class="card">
-        <div class="card-head">${iClipboard()}<span class="t">Fins de coaching à venir (GoCardless)</span>${finsCoachingProches.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${finsCoachingProches.length}</span>`:''}</div>
-        ${finsCoachingProches.length ? `<div class="card-list">
-          ${finsCoachingProches.map(c => { const j = _joursRestants(c.date_fin_coaching); return `
-            <div class="card-list-row" onclick="allerFicheTab('${c.id}','profil')">
-              <div class="mini-avatar">${initials(c.nom)}</div>
-              <div><div class="t">${esc(c.nom)}</div><div class="s">Fin le ${new Date(c.date_fin_coaching+'T00:00:00').toLocaleDateString('fr-FR')}</div></div>
-              <span class="chip ${j<0?'late':'off'}"><span class="dot"></span>${j<0?`${-j}j de retard`:(j===0?"Aujourd'hui":`J-${j}`)}</span>
+        <div class="card-head">${iClipboard()}<span class="t">Bilans en attente</span>${(data.bilansEnAttente||[]).length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${data.bilansEnAttente.length}</span>`:''}</div>
+        ${(data.bilansEnAttente||[]).length ? `<div class="card-list">
+          ${data.bilansEnAttente.map(b => { const c = data.clients.find(x=>x.id===b.client_id); const nom = c ? c.nom : b.client_id; return `
+            <div class="card-list-row" onclick="ouvrirBilanDashboard(${b.id})">
+              <div class="mini-avatar">${initials(nom)}</div>
+              <div><div class="t">${esc(nom)}</div><div class="s">${esc(_bilanPeriodeLabel(b, c ? c.jour_bilan : null) || b.semaine_label || '')} · en attente d'info</div></div>
+              <button class="btn" style="font-size:10px;padding:3px 8px;" onclick="event.stopPropagation();toggleBilanEnAttente(${b.id}, false)">↩ À traiter</button>
             </div>`; }).join('')}
-        </div>` : `<div class="card-empty">${iCheckCircle()}Aucune échéance dans les 15 prochains jours.</div>`}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
       </div>
       <div class="card timeline-card" style="grid-row: span 2;">
         <div class="card-head">${iGrid()}<span class="t">Activité récente</span></div>
@@ -3814,6 +3853,17 @@ function renderDashboard(el){
               <div><div class="t">${esc(a.nom)}</div><div class="s">ajouté par ${esc(a.ajoutePar||'?')}</div></div>
             </div>`).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Rien à valider.</div>`}
+      </div>
+      <div class="card">
+        <div class="card-head">${iClipboard()}<span class="t">Fins de coaching à venir (GoCardless)</span>${finsCoachingProches.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${finsCoachingProches.length}</span>`:''}</div>
+        ${finsCoachingProches.length ? `<div class="card-list">
+          ${finsCoachingProches.map(c => { const j = _joursRestants(c.date_fin_coaching); return `
+            <div class="card-list-row" onclick="allerFicheTab('${c.id}','profil')">
+              <div class="mini-avatar">${initials(c.nom)}</div>
+              <div><div class="t">${esc(c.nom)}</div><div class="s">Fin le ${new Date(c.date_fin_coaching+'T00:00:00').toLocaleDateString('fr-FR')}</div></div>
+              <span class="chip ${j<0?'late':'off'}"><span class="dot"></span>${j<0?`${-j}j de retard`:(j===0?"Aujourd'hui":`J-${j}`)}</span>
+            </div>`; }).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucune échéance dans les 15 prochains jours.</div>`}
       </div>
     </div>`;
 }
@@ -3870,6 +3920,29 @@ async function marquerBilanSupaTraite(bilanId) {
     const ba = (data.bilansAll || []).find(b => b.id === bilanId);
     if (ba) { ba.coach_traite = true; ba.coach_traite_at = traiteAt; }
     if (state.nav === 'dashboard' || state.nav === 'bilans') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// Bascule le statut "en attente" (info manquante, ex: mensurations) d'un bilan envoyé —
+// disponible depuis le dashboard, la page Bilans et la page de détail d'un bilan.
+// Un bilan mis en attente sort de "Bilans à traiter" (mais reste envoyé, pas "traité")
+// jusqu'à ce qu'il soit repassé "à traiter" ou marqué traité directement.
+async function toggleBilanEnAttente(bilanId, enAttente) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ en_attente: enAttente })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const ba = (data.bilansAll || []).find(b => b.id === bilanId);
+    if (ba) ba.en_attente = enAttente;
+    data.bilansSupa = (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente);
+    data.bilansEnAttente = (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && b.en_attente);
+    if (_ficheBilans) {
+      const b = _ficheBilans.find(x => x.id === bilanId);
+      if (b) b.en_attente = enAttente;
+    }
+    if (bilanDetailState && bilanDetailState._supabaseBilanId === bilanId) bilanDetailState.enAttente = enAttente;
+    renderMain();
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
