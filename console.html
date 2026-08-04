@@ -3936,6 +3936,12 @@ function renderDashboard(el){
   });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
 
+  // Clients sans jour_bilan configuré : invisibles pour tous les mécanismes basés sur
+  // ce champ (rappel automatique, calcul de retard, semaine de bilan) — un client dans
+  // ce cas ne remontera JAMAIS dans "Bilans en retard" ci-dessus, il faut donc un
+  // repérage actif et séparé (demande coach 2026-08-04).
+  const clientsSansJourBilan = data.clients.filter(c => !c.estCoach && c.statut !== 'ancien' && !c.jour_bilan);
+
   // Fins de coaching à venir (GoCardless) : offre 6 mois/1 an payée d'avance,
   // aucun rappel de paiement mensuel n'existe pour ces clients (prélèvement
   // déjà fait) — le coach doit être alerté à J-15 pour éventuellement mettre
@@ -4032,6 +4038,16 @@ function renderDashboard(el){
               <span class="chip ${j<0?'late':'off'}"><span class="dot"></span>${j<0?`${-j}j de retard`:(j===0?"Aujourd'hui":`J-${j}`)}</span>
             </div>`; }).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Aucune échéance dans les 15 prochains jours.</div>`}
+      </div>
+      <div class="card">
+        <div class="card-head">${iClipboard()}<span class="t">Sans jour de bilan configuré</span>${clientsSansJourBilan.length?`<span style="margin-left:auto;background:var(--critical);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${clientsSansJourBilan.length}</span>`:''}</div>
+        ${clientsSansJourBilan.length ? `<div class="card-list">
+          ${clientsSansJourBilan.map(c => `
+            <div class="card-list-row" onclick="allerFicheTab('${c.id}','profil')">
+              <div class="mini-avatar">${initials(c.nom)}</div>
+              <div><div class="t">${esc(c.nom)}</div><div class="s">Jamais détecté "en retard" tant que ce n'est pas réglé</div></div>
+            </div>`).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Tous les clients actifs ont un jour de bilan réglé.</div>`}
       </div>
     </div>`;
 }
@@ -5823,6 +5839,7 @@ const ROADMAP_TYPES = [
   { key:'maintenance',   label:'Maintenance',    color:'#3b82f6' },
   { key:'recomposition', label:'Recomposition',  color:'#8b5cf6' },
   { key:'refeed',        label:'Refeed',         color:'#06b6d4' },
+  { key:'standby',       label:'Stand-by',       color:'#8892a4' },
 ];
 function _roadmapType(key){ return ROADMAP_TYPES.find(t=>t.key===key) || { key, label:key||'—', color:'#8892a4' }; }
 
