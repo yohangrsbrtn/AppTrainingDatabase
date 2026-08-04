@@ -1039,7 +1039,7 @@ function renderTop5Home(liste) {
     let bg, border, namec;
     if (i < 3) { bg = _podium[i].bg; border = _podium[i].border; namec = isMe ? tc.c1 : _podium[i].namec; }
     else { bg = `linear-gradient(145deg,#0f1117,${tc.c2}aa,#0f1117)`; border = isMe ? `1px solid ${tc.c1}88` : '1px solid #1e2235'; namec = isMe ? tc.c1 : '#f0f2ff'; }
-    const badgeSz = i === 0 ? 34 : 30;
+    const badgeSz = i === 0 ? 48 : 44;
     const tDef = (c.titreActif && typeof TITRES_DEF !== 'undefined') ? TITRES_DEF.find(t => t.id === c.titreActif) : null;
     const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:${i===0?'10px':'8px'} 12px;border-radius:10px;margin-bottom:5px;background:${bg};border:${border};">
