@@ -174,8 +174,8 @@ input[type="number"] { -moz-appearance:textfield; }
 <body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=11"></script>
-<script src="bilan.js?v=18"></script>
+<script src="api.js?v=12"></script>
+<script src="bilan.js?v=19"></script>
 <script src="diete.js?v=21"></script>
 <script src="mensurations.js?v=7"></script>
 <script src="recettes.js?v=4"></script>
@@ -186,6 +186,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=5"></script>
+<script src="chat.js?v=1"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -347,6 +348,8 @@ function render() {
     case 'recettes-loading': document.body.innerHTML = renderRecettesPage(); break;
     case 'roadmap':
     case 'roadmap-loading': document.body.innerHTML = renderRoadmapPage(); break;
+    case 'chat':
+    case 'chat-loading':  document.body.innerHTML = renderChatPage(); break;
     case 'classement':           app.innerHTML = renderClassement();           break;
     case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
     case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
@@ -813,9 +816,8 @@ function _homeV2BilanHtml() {
     </div>`;
   }
   const now = new Date();
-  const { fin } = _bilanWeekBounds(jourBilan, now);
   const label = _supaGetSemaineLabel(jourBilan, now);
-  const deadline = new Date(fin); deadline.setDate(deadline.getDate() + 1); deadline.setHours(12, 0, 0, 0);
+  const deadline = _bilanDeadline(jourBilan, now);
   const joursRestants = Math.ceil((deadline - now) / 86400000);
   let statutTxt, statutColor;
   if (joursRestants > 1) { statutTxt = `Dans ${joursRestants} j`; statutColor = '#8892a4'; }
@@ -1143,6 +1145,7 @@ function renderCarteHeader() {
             </div>`}
           </div>
         </div>
+        <button onclick="goTo('chat')" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0 4px 0 0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CHAT}</button>
         <button id="btnNotifsClient" onclick="ouvrirNotificationsClient()" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0 4px 0 0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CLOCHE}${_notifsClientCount > 0 ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_notifsClientCount}</span>` : ''}</button>
         <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_PARAMETRES}</button>
       </div>
@@ -2415,6 +2418,9 @@ const ICONE_PARAMETRES = `<svg width="18" height="14" viewBox="0 0 18 14" fill="
 // Icône "cloche" (notifications) — remplace l'ancien 🔔, même style trait que ICONE_PARAMETRES.
 const ICONE_CLOCHE = `<svg width="16" height="17" viewBox="0 0 16 17" fill="none"><path d="M8 1.5c-2.3 0-4 1.9-4 4.2v2.6c0 .5-.2 1-.5 1.4L2.5 11.3c-.5.6-.1 1.5.7 1.5h9.6c.8 0 1.2-.9.7-1.5l-1-1.6c-.3-.4-.5-.9-.5-1.4V5.7c0-2.3-1.7-4.2-4-4.2z" stroke="#8892a4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.2 14.5a1.9 1.9 0 0 0 3.6 0" stroke="#8892a4" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 
+// Icône "chat" (bulle de discussion) — même style trait que ICONE_CLOCHE/ICONE_PARAMETRES.
+const ICONE_CHAT = `<svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M1.5 8.2c0-3.4 3.1-6.2 7-6.2s7 2.8 7 6.2-3.1 6.2-7 6.2c-.9 0-1.8-.15-2.6-.44L2.2 15.2l.9-3C2 11.1 1.5 9.7 1.5 8.2z" stroke="#8892a4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 // Mêmes icônes SVG que les tuiles de l'accueil (pas d'emoji) — la couleur
 // pleine + l'opacité réduite indiquent l'état actif/inactif de l'onglet.
 const NAV_ICONS = {
@@ -2455,6 +2461,7 @@ function goTo(page) {
   else if (page === 'mensurations') loadMensurations();
   else if (page === 'recettes')    loadRecettes();
   else if (page === 'roadmap')     loadRoadmap();
+  else if (page === 'chat')        loadChat();
   else if (page === 'classement')  loadClassement();
   else if (page === 'progression') loadProgression();
   else if (page === 'collection')  loadCollection();

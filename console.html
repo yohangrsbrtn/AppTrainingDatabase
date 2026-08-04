@@ -449,7 +449,8 @@
   </div>
 </div>
 
-<script src="api.js?v=7"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="api.js?v=8"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -508,6 +509,7 @@ function iUnlock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx=
 function iTrash(){return svgIcon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13"/>');}
 function iCopy(){return svgIcon('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>');}
 function iBell(){return svgIcon('<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/>');}
+function iChat(){return svgIcon('<path d="M3 12c0-4.4 4-8 9-8s9 3.6 9 8-4 8-9 8c-1.1 0-2.2-.18-3.2-.53L4 21l1.1-3.6C3.8 16.1 3 14.1 3 12z"/>');}
 function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
 
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -555,6 +557,7 @@ const NAV = [
     { id:"mensurations", label:"Mensurations", icon:iRuler() },
     { id:"classement", label:"Classement", icon:iTrophy() },
     { id:"notifications", label:"Notifications", icon:iBell() },
+    { id:"chat", label:"Chat", icon:iChat() },
   ]},
   { group:"Contenu", items:[
     { id:"programmes", label:"Programmes", icon:iDumbbell() },
@@ -968,6 +971,136 @@ function renderSidebar(){
 
 function setNav(id){ state.nav = id; renderSidebar(); renderMain(); }
 
+// ── Chat commun (console coach) — même salon partagé que côté client, voir
+// chat.js (index.html). Le coach écrit sous l'identité 'yohanp' (compte
+// fusionné coach/client, voir project_architecture_clients_profil). Console
+// n'a pas de client Supabase JS chargé par défaut (tout passe par fetch) —
+// on en crée un ici, uniquement pour Realtime (chat).
+const _sbRealtime = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const CHAT_COACH_ID = 'yohanp';
+let _chatCoachMessages = [];
+let _chatCoachProfils = {};
+let _chatCoachChannel = null;
+let _chatCoachLoaded = false;
+
+async function chargerChatCoach() {
+  const [msgRes, profilRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/chat_messages?order=created_at.asc&limit=200&select=id,client_id,texte,created_at`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_profils?select=client_id,prenom,nom,pseudo,photo_url`, { headers: supaHeaders() }),
+  ]);
+  _chatCoachMessages = msgRes.ok ? await msgRes.json() : [];
+  const profils = profilRes.ok ? await profilRes.json() : [];
+  _chatCoachProfils = {};
+  profils.forEach(p => { _chatCoachProfils[p.client_id] = p; });
+  _chatCoachLoaded = true;
+}
+
+function _chatCoachSubscribe() {
+  if (_chatCoachChannel) { try { _sbRealtime.removeChannel(_chatCoachChannel); } catch(e) {} }
+  _chatCoachChannel = _sbRealtime.channel('chat_messages_console')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, payload => {
+      _chatCoachMessages.push(payload.new);
+      const el = document.getElementById('chatCoachMessages');
+      if (el && state.nav === 'chat') {
+        el.insertAdjacentHTML('beforeend', _chatCoachBulle(payload.new));
+        el.scrollTop = el.scrollHeight;
+      }
+    })
+    .subscribe();
+}
+
+function _chatCoachAvatar(p, size) {
+  const init = initials(((p&&p.prenom)||'') + ' ' + ((p&&p.nom)||''));
+  if (p && p.photo_url) return `<img src="${esc(p.photo_url)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0;">`;
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;flex-shrink:0;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${Math.round(size*0.4)}px;">${esc(init)}</div>`;
+}
+
+function _chatCoachBulle(m) {
+  const moi = m.client_id === CHAT_COACH_ID;
+  const p = _chatCoachProfils[m.client_id] || {};
+  const nom = moi ? 'Toi' : ([p.prenom, p.nom].filter(Boolean).join(' ') || m.client_id);
+  const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  if (moi) {
+    return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <div style="max-width:60%;">
+        <div style="background:var(--accent);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:13px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
+        <div style="font-size:10px;color:var(--text-faint);text-align:right;margin-top:2px;">${heure}</div>
+      </div>
+    </div>`;
+  }
+  return `<div style="display:flex;align-items:flex-end;gap:8px;margin-bottom:10px;">
+    ${_chatCoachAvatar(p, 26)}
+    <div style="max-width:60%;">
+      <div style="font-size:11px;color:var(--text-faint);margin-bottom:2px;">${esc(nom)}</div>
+      <div style="background:var(--surface-2);color:var(--text);border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:13px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
+      <div style="font-size:10px;color:var(--text-faint);margin-top:2px;">${heure}</div>
+    </div>
+  </div>`;
+}
+
+function renderChatCoachPage(el) {
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Chat</h1></div>
+      <div class="meta">Salon commun — visible par tous les clients</div>
+    </div>
+    <div style="display:flex;flex-direction:column;height:calc(100vh - 140px);background:var(--surface-1);border-radius:var(--radius);border:1px solid var(--hairline);overflow:hidden;">
+      <div id="chatCoachMessages" style="flex:1;overflow-y:auto;padding:16px;">
+        ${_chatCoachLoaded ? '' : '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>'}
+      </div>
+      <div style="flex-shrink:0;display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--hairline);background:var(--surface-2);">
+        <input id="chatCoachInput" type="text" placeholder="Écris un message…" autocomplete="off"
+          style="flex:1;padding:10px 14px;background:var(--surface-1);color:var(--text);border:1px solid var(--hairline);border-radius:20px;font-size:14px;"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChatCoach();}">
+        <button class="btn primary" onclick="envoyerMessageChatCoach()">Envoyer</button>
+      </div>
+    </div>`;
+  if (!_chatCoachLoaded) {
+    chargerChatCoach().then(() => {
+      if (state.nav !== 'chat') return;
+      const msgEl = document.getElementById('chatCoachMessages');
+      if (msgEl) {
+        msgEl.innerHTML = _chatCoachMessages.length
+          ? _chatCoachMessages.map(_chatCoachBulle).join('')
+          : `<div style="text-align:center;color:var(--text-faint);padding:40px;">Aucun message pour l'instant.</div>`;
+        msgEl.scrollTop = msgEl.scrollHeight;
+      }
+      _chatCoachSubscribe();
+    });
+  } else {
+    const msgEl = document.getElementById('chatCoachMessages');
+    if (msgEl) {
+      msgEl.innerHTML = _chatCoachMessages.length
+        ? _chatCoachMessages.map(_chatCoachBulle).join('')
+        : `<div style="text-align:center;color:var(--text-faint);padding:40px;">Aucun message pour l'instant.</div>`;
+      msgEl.scrollTop = msgEl.scrollHeight;
+    }
+    _chatCoachSubscribe();
+  }
+}
+
+async function envoyerMessageChatCoach() {
+  const input = document.getElementById('chatCoachInput');
+  if (!input) return;
+  const texte = input.value.trim();
+  if (!texte) return;
+  input.value = '';
+  input.disabled = true;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ client_id: CHAT_COACH_ID, texte })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+  } catch(e) {
+    input.value = texte;
+    alert('Message non envoyé : ' + e.message);
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+}
+
 function onSearch(v){ state.search = v; if (state.nav==='clients') renderTable(); }
 function setStatusFilter(f){ state.statusFilter = f; renderMain(); }
 function setSort(key){
@@ -1163,6 +1296,7 @@ function renderMain(){
   if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
   if (state.nav === 'notifications') { renderNotificationsPage(el); return; }
+  if (state.nav === 'chat') { renderChatCoachPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
   if (state.nav === 'protocole') { renderProtocolePage(el); return; }
   if (state.nav === 'editeur-protocole') { renderEditeurProtocolePage(el); return; }
@@ -4566,7 +4700,7 @@ function renderFicheBilansTab(c){
     // encore terminée (cf. _supaGetOrCreateBilanCourant, bilan.js) — sinon c'est un ancien
     // bilan resté non rempli/non envoyé, orphelin, remplacé depuis par un nouveau "en cours" :
     // l'afficher comme "En cours" était trompeur (deux bilans "En cours" en même temps).
-    const stillCurrent = b.created_at && new Date() <= new Date(_bilanWeekBounds(c.jour_bilan, new Date(b.created_at)).fin);
+    const stillCurrent = b.created_at && new Date() <= _bilanDeadline(c.jour_bilan, new Date(b.created_at));
     const chip = b.envoye_coach
       ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
       : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`);
