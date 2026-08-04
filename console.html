@@ -6506,6 +6506,20 @@ async function cpSetBlocActif(bi){
   renderBlocsClientProg();
 }
 
+// Volume (nb de séries) par groupe musculaire d'UNE séance — affiché sur la ligne
+// du titre dans l'éditeur programme client (demande coach : voir le volume par
+// groupe sans ouvrir le panneau "Répartition des séries" global au bloc).
+function _cpSeanceVolumeLabel(seance){
+  const map = {};
+  (seance.exercices||[]).forEach(ex => {
+    const g = ex.groupe_musculaire || 'Non défini';
+    map[g] = (map[g]||0) + (parseInt(ex.series)||0);
+  });
+  const sorted = Object.entries(map).filter(([,n])=>n>0).sort((a,b)=>b[1]-a[1]);
+  if (!sorted.length) return '';
+  return sorted.map(([g,n])=>`${esc(g)} ${n}`).join(' · ');
+}
+
 function renderBlocsClientProg(){
   const cont = document.getElementById('cpBlocsContainer');
   if (!cont) return;
@@ -6540,8 +6554,9 @@ function renderBlocsClientProg(){
         <div style="border-top:1px solid var(--hairline);">
           <div class="day-head" style="cursor:pointer;" onclick="cpToggleSeance(${bi},${si})">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
-            <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
-            ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
+            <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1 1 auto;min-width:80px;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
+            ${_cpSeanceVolumeLabel(seance) ? `<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px;">${_cpSeanceVolumeLabel(seance)}</span>` : ''}
+            ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);flex-shrink:0;">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
             <button class="icon-btn del" onclick="event.stopPropagation();cpRetirerSeance(${bi},${si})">${iTrash()}</button>
           </div>
           <div style="display:${collapsed?'none':'block'};">
