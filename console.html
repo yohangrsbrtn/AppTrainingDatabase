@@ -6617,7 +6617,17 @@ async function cpCalculerCharges(bi){
   blocNouveau.seances.forEach(s => s.exercices.forEach(ex => { if (!ex.id) manquants.push(ex.nom); }));
   if (manquants.length) { alert('Enregistre d\'abord le programme (bouton Enregistrer) avant de calculer les charges de ce bloc — certains exercices n\'ont pas encore d\'id.'); return; }
   if (!exoIdsPrec.length) { alert('Bloc précédent vide ou pas encore enregistré.'); return; }
-  if (!confirm('Calculer les charges suggérées (semaine 1) de ce bloc à partir de la dernière semaine loggée du bloc précédent ?')) return;
+  if (!confirm("Calculer les charges suggérées (semaine 1) de ce bloc à partir de la dernière semaine loggée du bloc précédent ?\n\nLes séries déjà remplies par le client (charge/reps/RIR/commentaire) ne seront jamais écrasées.")) return;
+
+  // Séries déjà loguées par le client en semaine 1 série 1 du NOUVEAU bloc — à ne
+  // jamais écraser (ex: le client a validé sa première séance avant que le coach
+  // n'ait pensé à lancer le calcul de charges). Un exercice avec au moins un champ
+  // rempli (charge, reps, rir OU commentaire) est considéré "déjà logué".
+  const exoIdsNouveau = [];
+  blocNouveau.seances.forEach(s => s.exercices.forEach(ex => { if (ex.id) exoIdsNouveau.push(ex.id); }));
+  const existingRes = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIdsNouveau.join(',')})&semaine=eq.1&numero_serie=eq.1&select=client_programme_exercice_id,charge,reps,rir,commentaire`, { headers: supaHeaders() });
+  const existingLogs = existingRes.ok ? await existingRes.json() : [];
+  const dejaLogueSet = new Set(existingLogs.filter(l => l.charge!=null || l.reps!=null || l.rir!=null || l.commentaire).map(l => l.client_programme_exercice_id));
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exoIdsPrec.join(',')})&charge=not.is.null&reps=not.is.null`, { headers: supaHeaders() });
   const logs = res.ok ? await res.json() : [];
@@ -6630,8 +6640,9 @@ async function cpCalculerCharges(bi){
   });
 
   const payload = [];
-  let ignores = 0;
+  let ignores = 0, dejaLogue = 0;
   blocNouveau.seances.forEach(s => s.exercices.forEach(ex => {
+    if (dejaLogueSet.has(ex.id)) { dejaLogue++; return; }
     const prevEx = prevExosByName[(ex.nom||'').toLowerCase()];
     const log = prevEx ? bestLogByExoId[prevEx.id] : null;
     if (!log) { ignores++; return; }
@@ -6647,11 +6658,16 @@ async function cpCalculerCharges(bi){
     payload.push({ client_programme_exercice_id: ex.id, semaine: 1, numero_serie: 1, charge: chargeSuggeree, reps: targetReps, rir: Math.round(targetRir) });
   }));
 
-  if (!payload.length) { alert('Aucune correspondance exploitable avec le bloc précédent (nom identique + log avec charge et reps requis).'); return; }
+  if (!payload.length) {
+    alert(dejaLogue ? `Rien à calculer : les ${dejaLogue} exercice(s) de ce bloc ont déjà une série 1 remplie par le client.` : 'Aucune correspondance exploitable avec le bloc précédent (nom identique + log avec charge et reps requis).');
+    return;
+  }
   await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }), body: JSON.stringify(payload)
   });
-  alert(`${payload.length} charge(s) suggérée(s) écrite(s) en semaine 1 (série 1). ${ignores} exercice(s) ignoré(s) (pas de correspondance ou de log exploitable dans le bloc précédent).`);
+  alert(`${payload.length} charge(s) suggérée(s) écrite(s) en semaine 1 (série 1).`
+    + (dejaLogue ? ` ${dejaLogue} déjà loguée(s) par le client, non modifiée(s).` : '')
+    + (ignores ? ` ${ignores} ignoré(s) (pas de correspondance ou de log exploitable dans le bloc précédent).` : ''));
 }
 
 function cpMonterBloc(bi){ if(bi===0) return; const b=clientProgEnEdition.blocs; [b[bi-1],b[bi]]=[b[bi],b[bi-1]]; renderBlocsClientProg(); }
