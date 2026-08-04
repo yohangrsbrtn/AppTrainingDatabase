@@ -328,6 +328,7 @@ function render() {
     case 'loading':       app.innerHTML = renderFullSpinner(); break;
     case 'login':         app.innerHTML = renderLogin();   bindLogin(); break;
     case 'home-supabase': document.body.innerHTML = renderHomeSupabase(); break;
+    case 'home-supabase-v2': document.body.innerHTML = renderHomeSupabaseV2(); break;
     case 'training':
     case 'bilan':
     case 'bilan-loading': document.body.innerHTML = renderBilanPage(); break;
@@ -698,8 +699,146 @@ async function loadHomeSupabase(){
     }
     _journeeData = journee;
   } catch(e) { S.data.profil = {}; _journeeData = { aucun: true }; }
-  setPage('home-supabase');
+  // Nouvel accueil "briques" (2026-08-04) — en test sur le compte du coach
+  // uniquement (_homeV2Actif), page Supabase séparée (home-supabase-v2),
+  // renderHomeSupabase() d'origine jamais touché : retour arrière = juste
+  // retirer le gate ci-dessous, rien à reconstruire.
+  if (_homeV2Actif()) {
+    await _chargerHomeV2Extra().catch(() => { _homeV2Data = null; });
+    setPage('home-supabase-v2');
+  } else {
+    setPage('home-supabase');
+  }
   _apresChargementHome();
+}
+
+// ── Accueil v2 "briques" — test coach uniquement, voir loadHomeSupabase ──
+function _homeV2Actif() { return S.client === 'yohanp'; }
+
+let _homeV2Data = null;
+async function _chargerHomeV2Extra() {
+  const clientId = getClient();
+  const [progRes, roadmapRes, mensRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
+  ]);
+  const progArr = progRes.ok ? await progRes.json() : [];
+  const roadmapArr = roadmapRes.ok ? await roadmapRes.json() : [];
+  const mensArr = mensRes.ok ? await mensRes.json() : [];
+  const prog = progArr[0] || null;
+  const blocs = (prog && prog.client_programme_blocs) || [];
+  const blocActif = prog ? (blocs.find(b => b.id === prog.bloc_actif_id) || blocs[0] || null) : null;
+  _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr };
+}
+
+function renderHomeSupabaseV2() {
+  if (S.data.profil && S.data.profil.prenom) {
+    if (!S.data.prog) S.data.prog = {};
+    S.data.prog.nom = (S.data.profil.prenom || '') + ' ' + (S.data.profil.nom || '');
+  }
+  const d = _homeV2Data || {};
+  return `<div id="app" style="background:#0f1117;min-height:100dvh;padding:16px 16px calc(80px + env(safe-area-inset-bottom));max-width:500px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top));">
+
+    ${renderCarteHeader()}
+
+    ${renderCarteJournee(_journeeData)}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+      ${_homeV2ActiviteHtml(d)}
+      ${_homeV2RoadmapHtml(d)}
+    </div>
+
+    ${_homeV2BilanHtml()}
+
+    ${_homeV2MensurationsHtml(d)}
+
+    <div id="top5Home"></div>
+
+  ${renderNavBar('home')}
+  </div>`;
+}
+
+function _homeV2ActiviteHtml(d) {
+  const p = S.data.profil || {};
+  const prog = d.programme;
+  const bloc = d.blocActif;
+  const blocLabel = bloc ? (BLOC_LABELS[bloc.type] || 'Bloc en cours') : null;
+  const lignes = [
+    p.steps_cible ? `${Number(p.steps_cible).toLocaleString('fr-FR')} pas/j` : null,
+    p.seances_cible ? `${p.seances_cible} séance${p.seances_cible>1?'s':''}/sem` : null,
+    p.cardio_consigne ? p.cardio_consigne : null,
+  ].filter(Boolean);
+  return `
+    <div onclick="goTo('training')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #4f8ef7;-webkit-tap-highlight-color:transparent;min-height:112px;box-sizing:border-box;">
+      <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Activité physique</div>
+      ${prog ? `<div style="font-size:13px;font-weight:700;color:#e8eaf0;">${esc(prog.nom)}</div>` : ''}
+      ${blocLabel ? `<div style="font-size:11px;color:#4f8ef7;margin-bottom:6px;">${esc(blocLabel)}</div>` : (prog ? '<div style="margin-bottom:6px;"></div>' : '')}
+      ${lignes.length ? lignes.map(l=>`<div style="font-size:12px;color:#c8d0e0;margin-top:2px;">${esc(String(l))}</div>`).join('') : `<div style="font-size:12px;color:#555e7a;">${prog ? 'Rien de réglé' : 'Aucun programme actif'}</div>`}
+    </div>`;
+}
+
+function _homeV2RoadmapHtml(d) {
+  const phases = d.roadmapPhases || [];
+  const today = new Date().toISOString().slice(0,10);
+  const enCours = phases.find(p => p.date_debut <= today && p.date_fin >= today);
+  let body;
+  if (enCours) {
+    const t = _rmType(enCours.type);
+    const jours = _rmJours(enCours);
+    const ecoules = Math.min(jours, Math.max(0, _rmJoursEcoules(enCours.date_debut)));
+    const restants = Math.max(0, jours - ecoules);
+    body = `
+      <div style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:${t.color}22;color:${t.color};margin-bottom:8px;">${esc(t.label)}</div>
+      <div style="font-size:20px;font-weight:700;color:#e8eaf0;">${restants}<span style="font-size:12px;color:#8892a4;font-weight:600;"> j restant${restants>1?'s':''}</span></div>`;
+  } else {
+    body = `<div style="font-size:12px;color:#555e7a;">Aucune phase en cours</div>`;
+  }
+  return `
+    <div onclick="goTo('roadmap')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #8b5cf6;-webkit-tap-highlight-color:transparent;min-height:112px;box-sizing:border-box;">
+      <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Roadmap</div>
+      ${body}
+    </div>`;
+}
+
+function _homeV2BilanHtml() {
+  const p = S.data.profil || {};
+  const jourBilan = p.jour_bilan;
+  if (!jourBilan) {
+    return `<div onclick="goTo('bilan')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #f59e0b;margin-top:10px;-webkit-tap-highlight-color:transparent;">
+      <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">État du bilan</div>
+      <div style="font-size:12px;color:#555e7a;">Jour de bilan non réglé — demande à ton coach</div>
+    </div>`;
+  }
+  const now = new Date();
+  const { fin } = _bilanWeekBounds(jourBilan, now);
+  const label = _supaGetSemaineLabel(jourBilan, now);
+  const deadline = new Date(fin); deadline.setDate(deadline.getDate() + 1); deadline.setHours(12, 0, 0, 0);
+  const joursRestants = Math.ceil((deadline - now) / 86400000);
+  let statutTxt, statutColor;
+  if (joursRestants > 1) { statutTxt = `Dans ${joursRestants} j`; statutColor = '#8892a4'; }
+  else if (joursRestants === 1) { statutTxt = 'Demain'; statutColor = '#f59e0b'; }
+  else if (joursRestants === 0) { statutTxt = "Aujourd'hui"; statutColor = '#f59e0b'; }
+  else { statutTxt = 'En retard'; statutColor = '#e74c3c'; }
+  return `
+    <div onclick="goTo('bilan')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #f59e0b;margin-top:10px;-webkit-tap-highlight-color:transparent;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div>
+        <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">État du bilan</div>
+        <div style="font-size:13px;font-weight:700;color:#e8eaf0;">Bilan le ${esc(jourBilan)}</div>
+        <div style="font-size:12px;color:#8892a4;margin-top:2px;">${esc(label)}</div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:${statutColor};white-space:nowrap;flex-shrink:0;">${statutTxt}</div>
+    </div>`;
+}
+
+function _homeV2MensurationsHtml(d) {
+  const rows = (d.mensurations || []).filter(r => r.poids || r.mesure);
+  const chart = rows.length >= 2 ? _buildMensChart('home_mens', rows, ['poids','mesure'], ['#f0a500','#3ecf8e'], ['Poids (kg)','Tour de taille (cm)'], '') : '';
+  return `
+    <div onclick="goTo('mensurations')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #3ecf8e;margin-top:10px;-webkit-tap-highlight-color:transparent;">
+      <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Mensurations</div>
+      ${chart || `<div style="font-size:12px;color:#555e7a;">Pas encore assez de données</div>`}
+    </div>`;
 }
 function renderHomeSupabase(){
   if (S.data.profil && S.data.profil.prenom) {
@@ -942,7 +1081,7 @@ async function toggleModeSimplifie() {
   // réécrit document.body.innerHTML et détruirait le panneau réglages qu'on
   // vient de réafficher juste au-dessus (c'était le bug : le toggle semblait
   // ne prendre effet qu'après avoir rechargé l'app).
-  if (S.page === 'home-supabase') {
+  if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2')) {
     _majCarteHeader();
     const top5El = document.getElementById('top5Home');
     if (nouveau) { if (top5El) top5El.innerHTML = ''; }
@@ -1271,7 +1410,7 @@ async function doSauverPseudo() {
     S.data.profil = S.data.profil || {};
     S.data.profil.pseudo = pseudo;
     msg.textContent = 'Enregistré ✓';
-    if (S.page === 'home-supabase') _majCarteHeader();
+    if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2')) _majCarteHeader();
   } catch(e) {
     msg.style.color = 'var(--red)';
     msg.textContent = e.message || 'Erreur serveur.';
@@ -1430,7 +1569,7 @@ async function _uploadPhotoProfilBlob(blob) {
     S.data.profil.photo_url = url;
     if (msg) { msg.style.color = ''; msg.textContent = ''; }
     if (document.getElementById('settingsPanel')) ouvrirSettings('profil');
-    if (S.page === 'home-supabase') _majCarteHeader();
+    if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2')) _majCarteHeader();
   } catch(err) {
     if (msg) { msg.style.color = 'var(--red)'; msg.textContent = err.message || 'Erreur.'; }
   }
@@ -1446,7 +1585,7 @@ async function _supprimerPhotoProfil() {
     S.data.profil = S.data.profil || {};
     S.data.profil.photo_url = null;
     if (document.getElementById('settingsPanel')) ouvrirSettings('profil');
-    if (S.page === 'home-supabase') _majCarteHeader();
+    if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2')) _majCarteHeader();
   } catch(e) {}
 }
 
@@ -2355,7 +2494,7 @@ if (S.token && S.client) {
         if (estCoachReel !== S.isCoach) {
           S.isCoach = estCoachReel;
           localStorage.setItem('at_coach', estCoachReel ? '1' : '0');
-          if (S.page === 'home-supabase') loadHomeSupabase();
+          if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2')) loadHomeSupabase();
         }
       }).catch(() => {});
     loadHomeSupabase();
