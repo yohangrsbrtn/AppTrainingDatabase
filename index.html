@@ -2104,21 +2104,20 @@ function renderGuideApplication() {
       </div>
       ${_calloutBox('#4f8ef7', 'ℹ️ Bon à savoir', "Une seule validation par jour. Si l'objectif de pas est atteint tu reçois +10 XP bonus en plus.")}
     `)}
-    ${_accordionItem('bilan', '📋', 'Mon bilan', 'Remplir, clôturer et envoyer le bilan hebdo', `
+    ${_accordionItem('bilan', '📋', 'Mon bilan', 'Remplir et envoyer le bilan hebdo', `
       <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
         ${_stepItem('1', '#4f8ef7', 'Accueil → carte "Mon Bilan"', "Le bilan de la semaine en cours s'ouvre automatiquement")}
         ${_stepItem('2', '#4f8ef7', 'Remplis chaque jour : poids, eau, pas, diète, training, cardio', 'Sauvegarde automatique à chaque modification')}
-        ${_stepItem('📤', '#378ADD', '"Envoyer au coach" — dans les temps = +20 XP', "Envoie en avance, le jour J ou le lendemain avant l'heure limite pour décrocher le bonus. Envoyé plus tard, ton coach reste prévenu mais sans le bonus XP.", true)}
-        ${_stepItem('🔒', '#1D9E75', '"Clôturer la semaine" — quand tu veux, sans deadline', "Un récap de ta semaine s'affiche avant confirmation (diète tenue, moyenne de pas, séances). Calcule l'XP complet du bilan.", true)}
+        ${_stepItem('📤', '#378ADD', '"Envoyer au coach" — +50 XP de base', "+20 XP de bonus supplémentaires si envoyé en avance ou le jour J, avant midi. Envoyé après, ton coach reste prévenu mais sans ce bonus.", true)}
       </div>
-      ${_calloutBox('#4f8ef7', 'ℹ️ Bon à savoir', "Les deux boutons sont indépendants : tu peux envoyer au coach sans clôturer, ou clôturer sans envoyer. Un bilan clôturé reste modifiable mais ne peut pas être re-clôturé. Depuis l'historique, tu peux aussi envoyer plus tard un bilan déjà clôturé que tu n'aurais pas encore transmis.")}
+      ${_calloutBox('#4f8ef7', 'ℹ️ Bon à savoir', "Un bilan envoyé reste modifiable jusqu'à la fin de sa semaine — tu peux continuer à remplir tes journées après l'avoir envoyé.")}
     `)}
     ${_accordionItem('mensurations', '📐', 'Mensurations', 'Saisir poids et tour de taille', `
       <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
         ${_stepItem('1', '#4f8ef7', 'Accueil → carte "Mensurations"', 'Historique et graphiques de ton évolution')}
         ${_stepItem('✓', '#1D9E75', 'Saisis ton poids et ton tour de taille', 'Sauvegarde automatique à chaque saisie', true)}
       </div>
-      ${_calloutBox('#a78bfa', '💡 Indépendant du bilan', "Tu peux envoyer ou clôturer ton bilan même sans avoir renseigné tes mensurations de la semaine. Renseigne-les régulièrement pour que ton coach suive bien ton évolution.")}
+      ${_calloutBox('#a78bfa', '💡 Indépendant du bilan', "Tu peux envoyer ton bilan même sans avoir renseigné tes mensurations de la semaine. Renseigne-les régulièrement pour que ton coach suive bien ton évolution.")}
     `)}
     ${_accordionItem('titres', '🎖️', 'Niveaux & Titres', 'Montée de niveau et déblocage de titres', `
       <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
@@ -2149,18 +2148,15 @@ function renderGuideXP() {
       ${row('✅ Journée validée', "Valider ta journée depuis l'accueil", '+5 XP', '#1D9E75')}
       ${row('🦶 Objectif pas atteint', 'Quota de pas quotidien dépassé', '+10 XP', '#1D9E75')}
     </div>
-    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Bilan — Clôture</div>
-    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:6px;">
-      ${row('🔒 Clôture de semaine', 'À chaque bilan clôturé', '+50 XP', '#4f8ef7')}
+    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Bilan — Envoi au coach</div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px;">
+      ${row('📤 Envoi du bilan', 'À chaque bilan envoyé à ton coach', '+50 XP', '#4f8ef7')}
       ${row('🥗 Diète 6/7 jours', '6 jours de diète tenus dans la semaine', '+15 XP', '#4f8ef7')}
       ${row('🥗🔥 Diète 7/7 jours', 'Les 7 jours sans exception', '+30 XP', '#4f8ef7')}
       ${row('💪 Séances complètes', "100% de l'objectif séances de la semaine", '+25 XP', '#4f8ef7')}
       ${row('👟 Pas cumulés', 'Moyenne quotidienne de la semaine — 1 XP / 500 pas', 'variable', '#4f8ef7')}
       ${row('🎯 Objectif pas hebdo atteint', 'Moyenne ≥ cible fixée par ton coach', '+20 XP', '#4f8ef7')}
-    </div>
-    <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;margin-top:10px;">Bilan — Envoi au coach</div>
-    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px;">
-      ${row('⏱️ Dans les temps', "Envoyé en avance, le jour J ou le lendemain avant l'heure limite", '+20 XP', '#4f8ef7')}
+      ${row('⏱️ Envoyé à temps', "En avance ou le jour J, avant midi — pas de délai le lendemain", '+20 XP', '#4f8ef7')}
     </div>
     <div style="font-size:11px;font-weight:700;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Streaks bilans</div>
     <div style="display:flex;flex-direction:column;gap:7px;">
