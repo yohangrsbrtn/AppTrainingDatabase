@@ -149,15 +149,24 @@ async function _supaLoadHistorique() {
   setPage('bilan-loading');
   try {
     const clientId = getClient();
+    // Inclut aussi les bilans non-envoyés (anciens bilans restés non remplis, remplacés
+    // depuis par un rollover — cf. chargerBilansEnAttente) : sinon un client qui va dans
+    // "Historique" pour retrouver/compléter un vieux bilan non envoyé ne le trouve jamais,
+    // il n'existe que dans la page séparée "Bilans en attente". Le bilan EN COURS (_bilanId)
+    // est exclu — ce n'est pas de l'historique. Tri identique à celui de la console
+    // (envoye_coach.asc,date_validation.desc.nullslast,created_at.desc) : trier uniquement
+    // sur created_at mélangeait l'ordre pour les bilans migrés (created_at = date de migration,
+    // pas la vraie date du bilan) — c'est ce qui donnait une liste "pas dans l'ordre".
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.true&order=created_at.desc`,
+      `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&archive=eq.false&order=envoye_coach.asc,date_validation.desc.nullslast,created_at.desc`,
       { headers: supaHeaders() }
     );
-    S.data.historiqueBilans = (await res.json()).map(row => ({
+    const rows = res.ok ? await res.json() : [];
+    S.data.historiqueBilans = rows.filter(row => row.id !== _bilanId).map(row => ({
       id:           row.id,
       semaine:      row.semaine_label,
       date:         row.date_validation || row.created_at,
-      dejaEnvoye:   true,
+      dejaEnvoye:   !!row.envoye_coach,
     }));
     _bilanMode = 'history-list';
     setPage('bilan');
@@ -449,14 +458,14 @@ function _bilanWeekRange(dateStr) {
 function _renderHistoriqueListSupa() {
   const hist = S.data.historiqueBilans || [];
   const rows = hist.length === 0
-    ? `<div class="empty"><div class="empty-text">Aucun bilan envoyé pour l'instant.</div></div>`
+    ? `<div class="empty"><div class="empty-text">Aucun bilan pour l'instant.</div></div>`
     : hist.map(b => `
-      <div class="list-item" onclick="_supaLoadBilanHistoriqueById(${b.id})">
-        <div class="list-icon">📋</div>
+      <div class="list-item" onclick="${b.dejaEnvoye ? `_supaLoadBilanHistoriqueById(${b.id})` : `_ouvrirBilanEnAttente(${b.id})`}">
+        <div class="list-icon">${b.dejaEnvoye ? '📋' : '⏳'}</div>
         <div class="list-text" style="flex:1;min-width:0;">
           <div class="list-title">${esc(b.semaine || 'Bilan')}</div>
         </div>
-        <span style="font-size:11px;color:#1D9E75;font-weight:600;white-space:nowrap;flex-shrink:0;">✅ Envoyé</span>
+        <span style="font-size:11px;color:${b.dejaEnvoye ? '#1D9E75' : '#f0a500'};font-weight:600;white-space:nowrap;flex-shrink:0;">${b.dejaEnvoye ? '✅ Envoyé' : '⏳ Non envoyé'}</span>
         <div class="list-arrow">›</div>
       </div>`).join('');
 
