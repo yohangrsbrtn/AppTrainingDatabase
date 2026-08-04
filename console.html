@@ -618,6 +618,8 @@ let _cpPickerCible = null;
 let _cpDragExoSource = null;
 let dieteTemplatesData = null;
 let dieteTplEnEdition = null;
+let _dieteCompare = { A: null, B: null }; // mode "Comparer 2 diètes" — voir ouvrirEditeurDieteCompare
+let _dieteCompareClientId = null;
 let dietesPageTab = 'templates'; // 'templates' | 'recettes'
 let recettesCoachData = null;
 let recetteEnEdition = null;
@@ -630,6 +632,7 @@ let alimOffResults = [];        // résultats OFF sur la page Base alimentaire
 let alimOffQuery = '';
 let ajoutAlimTab = 'base';      // 'base' | 'off' | 'manuel'
 let ajoutAlimRI = null;
+let ajoutAlimSlot = null;       // 'A'/'B' si le picker cible une colonne du mode comparaison, sinon null
 let _ajoutAlimCount = 0;        // nb d'aliments ajoutés dans la session picker en cours
 let _dietNavBack = 'dietes';    // où revenir après save/cancel éditeur diète
 
@@ -1145,6 +1148,14 @@ const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement',
 function renderMain(){
   if (NAV_RESTORE_SIMPLE.has(state.nav) || state.nav === 'fiche-client' || state.nav === 'mensurations') _saveNavState();
   const el = document.getElementById('main');
+  // Le mode "Comparer 2 diètes" désactive le scroll de .main (chaque colonne
+  // défile de son côté, voir renderEditeurDieteComparePage) — remis à l'état
+  // normal ici pour TOUTE autre page, même si on quitte cette vue par un lien
+  // de la sidebar plutôt que par son bouton "← Retour" dédié.
+  if (state.nav !== 'editeur-diete-compare') {
+    const mainEl = document.querySelector('.main');
+    if (mainEl && mainEl.style.overflow) mainEl.style.overflow = '';
+  }
   if (state.nav === 'dashboard') { renderDashboard(el); return; }
   if (state.nav === 'clients') { renderClientsPage(el); return; }
   if (state.nav === 'bilans') { renderBilansPage(el); return; }
@@ -1157,6 +1168,7 @@ function renderMain(){
   if (state.nav === 'programmes') { renderProgrammesPage(el); return; }
   if (state.nav === 'dietes') { renderDietesPage(el); return; }
   if (state.nav === 'editeur-diete') { renderEditeurDietePage(el); return; }
+  if (state.nav === 'editeur-diete-compare') { renderEditeurDieteComparePage(el); return; }
   if (state.nav === 'fiche-client') { renderFicheClientPage(el); return; }
   if (state.nav === 'prog-logs') { renderProgLogsPage(el); return; }
   if (state.nav === 'editeur-client-prog') { renderEditeurProgrammeClient(el); return; }
@@ -5383,6 +5395,7 @@ function renderFicheDieteTab(c){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${actives.length} diète${actives.length>1?'s':''} assignée${actives.length>1?'s':''}</div>
       <div style="display:flex;gap:8px;">
+        ${dietes.length >= 2 ? `<button class="btn" onclick="ouvrirComparerDietes('${c.id}')" title="Éditer 2 diètes côte à côte (ex: Jour On / Jour Off)">⇄ Comparer 2 diètes</button>` : ''}
         <button class="btn" onclick="ouvrirCreerDietePourClient('${c.id}')">+ Créer</button>
         <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">+ Assigner</button>
       </div>
@@ -7400,6 +7413,15 @@ async function supprimerDieteTemplate(id){
 }
 
 // ── Éditeur de template diète ─────────────────────────────────────────
+// `slot` ('A'/'B') identifie quel côté on édite en mode comparaison
+// (voir plus bas "Comparer 2 diètes") — undefined/null = éditeur classique
+// à une seule diète (dieteTplEnEdition), comportement inchangé. Toutes les
+// fonctions de mutation ci-dessous acceptent ce paramètre en dernière
+// position, jamais requis par les appels déjà existants.
+function _dieteEnEdition(slot){ return slot ? _dieteCompare[slot] : dieteTplEnEdition; }
+function _slotSuffix(slot){ return slot ? '-'+slot : ''; }
+function _reRenderDieteEditeur(slot){ if (slot) renderMain(); else setNav('editeur-diete'); }
+
 async function ouvrirEditeurDiete(id){
   _dietNavBack = 'dietes';
   if (id) {
@@ -7418,17 +7440,19 @@ async function ouvrirEditeurDiete(id){
 }
 
 // ── Helper : HTML aliments d'un repas (mis à jour sans re-render complet) ──
-function _renderAlimListHtml(ri) {
-  const r = dieteTplEnEdition.repas[ri];
+function _renderAlimListHtml(ri, slot) {
+  const r = _dieteEnEdition(slot).repas[ri];
   if (!r) return '';
+  const sfx = _slotSuffix(slot);
+  const slotArg = slot ? `,'${slot}'` : '';
   const repasM = macrosDiete([{ repas_aliments: r.aliments }]);
   return `
     ${r.aliments.map((a,ai) => `
-      <div class="aliment-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="alimOnDrop(event,${ri},${ai})">
-        <span class="drag-handle" draggable="true" ondragstart="alimOnDragStart(event,${ri},${ai})" ondragend="alimOnDragEnd()" title="Glisser pour réordonner">⠿</span>
+      <div class="aliment-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="alimOnDrop(event,${ri},${ai}${slotArg})">
+        <span class="drag-handle" draggable="true" ondragstart="alimOnDragStart(event,${ri},${ai}${slotArg})" ondragend="alimOnDragEnd()" title="Glisser pour réordonner">⠿</span>
         <span class="a-nom">${esc(a.nom)}</span>
         <input type="number" class="a-qte" inputmode="decimal" min="0" step="1" value="${a.quantite_g!=null?a.quantite_g:''}"
-          onchange="alimChangerQuantite(${ri},${ai},this.value)"
+          onchange="alimChangerQuantite(${ri},${ai},this.value${slotArg})"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
         <span class="a-unite">${a.unite==='unite'?'u.':a.unite==='portion'?'portion':(a.unite&&a.unite!=='g'?esc(a.unite):'g')}</span>
         <span class="macro-pills">${(() => {
@@ -7440,25 +7464,26 @@ function _renderAlimListHtml(ri) {
           return `${k}k P${p} G${g} L${l}`;
         })()}</span>
         <label title="Afficher une pastille « modifié » côté app client" style="display:flex;align-items:center;flex-shrink:0;cursor:pointer;">
-          <input type="checkbox" ${a.modifie?'checked':''} onchange="alimToggleModifie(${ri},${ai},this.checked)" style="width:13px;height:13px;flex-shrink:0;accent-color:#f59e0b;">
+          <input type="checkbox" ${a.modifie?'checked':''} onchange="alimToggleModifie(${ri},${ai},this.checked${slotArg})" style="width:13px;height:13px;flex-shrink:0;accent-color:#f59e0b;">
         </label>
-        <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai})">${iTrash()}</button>
+        <button class="icon-btn" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerAlimentDiete(${ri},${ai}${slotArg})">${iTrash()}</button>
       </div>`).join('')}
-    ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}">
+    ${repasM.kcal ? `<div class="macro-band" id="repas-macros-${ri}${sfx}">
       <div><div class="mk">Repas</div><div class="mn">${repasM.kcal}</div><div class="mu">kcal</div></div>
       <div><div class="mk"> </div><div class="mn">${repasM.prot}g</div><div class="mu">prot</div></div>
       <div><div class="mk"> </div><div class="mn">${repasM.glu}g</div><div class="mu">gluc</div></div>
       <div><div class="mk"> </div><div class="mn">${repasM.lip}g</div><div class="mu">lip</div></div>
-    </div>` : `<div id="repas-macros-${ri}"></div>`}`;
+    </div>` : `<div id="repas-macros-${ri}${sfx}"></div>`}`;
 }
 
-function _updateAlimentsDom(ri) {
-  const el = document.getElementById(`alim-list-${ri}`);
-  if (el) el.innerHTML = _renderAlimListHtml(ri);
+function _updateAlimentsDom(ri, slot) {
+  const sfx = _slotSuffix(slot);
+  const el = document.getElementById(`alim-list-${ri}${sfx}`);
+  if (el) el.innerHTML = _renderAlimListHtml(ri, slot);
   // Recalcul total
-  const tpl = dieteTplEnEdition;
+  const tpl = _dieteEnEdition(slot);
   const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
-  const tot = document.getElementById('ed-total-macros');
+  const tot = document.getElementById(`ed-total-macros${sfx}`);
   if (tot) tot.innerHTML = totalM.kcal ? `
     <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
     <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
@@ -7468,10 +7493,13 @@ function _updateAlimentsDom(ri) {
 
 function renderEditeurDiete() { setNav('editeur-diete'); }
 
-function renderEditeurDietePage(el) {
-  const tpl = dieteTplEnEdition;
-  const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
-
+// Rendu partagé des blocs "repas" d'une diète, factorisé pour être réutilisé
+// à l'identique par l'éditeur classique (slot=undefined) ET par chaque
+// colonne du mode "Comparer 2 diètes" (slot='A'/'B') — voir plus bas.
+function _renderDieteBlocsHtml(slot){
+  const tpl = _dieteEnEdition(slot);
+  const slotArg = slot ? `,'${slot}'` : '';
+  const slotArgFirst = slot ? `'${slot}'` : '';
   const grouped = {};
   tpl.repas.forEach((r,ri) => {
     const o = r.ordre != null ? r.ordre : ri;
@@ -7480,7 +7508,7 @@ function renderEditeurDietePage(el) {
   });
   const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
 
-  const repasHtml = ordres.map((ordre, gi) => {
+  return ordres.map((ordre, gi) => {
     const variants = grouped[ordre];
     const blocksHtml = variants.map(r => {
       const ri = r._ri;
@@ -7488,23 +7516,29 @@ function renderEditeurDietePage(el) {
       return `
       <div class="repas-block" style="${isVariante ? 'margin-left:16px;border-left:3px solid #a78bfa;padding-left:4px;background:linear-gradient(90deg,#a78bfa1f,var(--surface-2) 24px);' : ''}">
         <div class="repas-head">
-          ${isVariante ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa26;border:1px solid #a78bfa66;border-radius:5px;padding:2px 7px;margin-right:6px;flex-shrink:0;white-space:nowrap;letter-spacing:.03em;">≡ ÉQUIVALENT</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi})" ondragend="repasOnDragEnd()" title="Glisser pour réordonner ce repas">⠿</span>`}
-          <input type="text" value="${esc(r.nom)}" onchange="dieteTplEnEdition.repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
-          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri})">${iTrash()}</button>
+          ${isVariante ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa26;border:1px solid #a78bfa66;border-radius:5px;padding:2px 7px;margin-right:6px;flex-shrink:0;white-space:nowrap;letter-spacing:.03em;">≡ ÉQUIVALENT</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi}${slotArg})" ondragend="repasOnDragEnd()" title="Glisser pour réordonner ce repas">⠿</span>`}
+          <input type="text" value="${esc(r.nom)}" onchange="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
+          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
         </div>
-        <div id="alim-list-${ri}">${_renderAlimListHtml(ri)}</div>
+        <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
         <div style="padding:8px 14px;">
-          <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri})">+ Ajouter des aliments</button>
+          <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri}${slotArg})">+ Ajouter des aliments</button>
         </div>
       </div>`;
     }).join('');
-    return `<div class="repas-group" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="repasOnDrop(event,${gi})">
+    return `<div class="repas-group" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="repasOnDrop(event,${gi}${slotArg})">
       ${blocksHtml}
       <div style="padding:0 0 10px ${variants.length>1?'16':'0'}px;">
-        <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--accent);" onclick="ajouterVarianteRepas(${ordre})">≡ + Variante</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--accent);" onclick="ajouterVarianteRepas(${ordre}${slotArg})">≡ + Variante</button>
       </div>
     </div>`;
   }).join('');
+}
+
+function renderEditeurDietePage(el) {
+  const tpl = dieteTplEnEdition;
+  const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
+  const repasHtml = _renderDieteBlocsHtml();
 
   const isClient = !!(_ficheCreateClientId || _ficheEditClientId);
   const titre = _ficheCreateClientId ? 'Nouvelle diète client'
@@ -7551,37 +7585,42 @@ function retourDepuisEditeurDiete() {
   else { setNav(_dietNavBack || 'dietes'); }
 }
 
-function ajouterRepas(){
-  const maxOrdre = dieteTplEnEdition.repas.reduce((m,r) => Math.max(m, r.ordre != null ? r.ordre : 0), -1);
-  dieteTplEnEdition.repas.push({ nom:`Repas ${maxOrdre+2}`, ordre:maxOrdre+1, variante_index:0, aliments:[] });
-  setNav('editeur-diete');
+function ajouterRepas(slot){
+  const tpl = _dieteEnEdition(slot);
+  const maxOrdre = tpl.repas.reduce((m,r) => Math.max(m, r.ordre != null ? r.ordre : 0), -1);
+  tpl.repas.push({ nom:`Repas ${maxOrdre+2}`, ordre:maxOrdre+1, variante_index:0, aliments:[] });
+  _reRenderDieteEditeur(slot);
 }
 
-function ajouterVarianteRepas(ordre){
+function ajouterVarianteRepas(ordre, slot){
   ordre = parseInt(ordre);
-  const existing = dieteTplEnEdition.repas.filter(r => (r.ordre != null ? r.ordre : 0) === ordre);
+  const tpl = _dieteEnEdition(slot);
+  const existing = tpl.repas.filter(r => (r.ordre != null ? r.ordre : 0) === ordre);
   const maxVariante = existing.reduce((m,r) => Math.max(m, r.variante_index||0), 0);
   const mainNom = (existing.find(r=>(r.variante_index||0)===0)||existing[0]||{}).nom || 'Repas';
-  dieteTplEnEdition.repas.push({ nom:mainNom+' (variante)', ordre, variante_index:maxVariante+1, aliments:[] });
-  setNav('editeur-diete');
+  tpl.repas.push({ nom:mainNom+' (variante)', ordre, variante_index:maxVariante+1, aliments:[] });
+  _reRenderDieteEditeur(slot);
 }
 
-function supprimerRepas(ri){
-  dieteTplEnEdition.repas.splice(ri,1);
-  setNav('editeur-diete');
+function supprimerRepas(ri, slot){
+  _dieteEnEdition(slot).repas.splice(ri,1);
+  _reRenderDieteEditeur(slot);
 }
 
 // Réordonner les repas (groupes ordre, variantes comprises) par glisser-déposer
 // de la poignée du repas principal. gi = index dans le tableau `ordres` trié au
 // moment du render — recalculé ici à l'identique pour rester valide après un drop.
+// `slot` empêche un drag commencé sur une colonne de "sauter" vers l'autre en
+// mode comparaison (deux diètes indépendantes, jamais mélangées).
 let _dietDragRepasSource = null;
-function repasOnDragStart(e, gi){ _dietDragRepasSource = gi; e.dataTransfer.effectAllowed = 'move'; }
+function repasOnDragStart(e, gi, slot){ _dietDragRepasSource = {gi, slot: slot||null}; e.dataTransfer.effectAllowed = 'move'; }
 function repasOnDragEnd(){ _dietDragRepasSource = null; }
-function repasOnDrop(e, targetGi){
+function repasOnDrop(e, targetGi, slot){
   e.preventDefault();
-  const srcGi = _dietDragRepasSource; _dietDragRepasSource = null;
-  if (srcGi == null || srcGi === targetGi) { setNav('editeur-diete'); return; }
-  const tpl = dieteTplEnEdition;
+  const src = _dietDragRepasSource; _dietDragRepasSource = null;
+  if (!src || src.slot !== (slot||null) || src.gi === targetGi) { _reRenderDieteEditeur(slot); return; }
+  const srcGi = src.gi;
+  const tpl = _dieteEnEdition(slot);
   const grouped = {};
   tpl.repas.forEach((r,ri) => { const o = r.ordre != null ? r.ordre : ri; (grouped[o]=grouped[o]||[]).push(ri); });
   const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
@@ -7590,50 +7629,52 @@ function repasOnDrop(e, targetGi){
   // Renumérote 0..N-1 dans le nouvel ordre — tous les repas d'un même groupe
   // (variantes incluses) reçoivent le même nouvel ordre pour rester ensemble.
   ordres.forEach((oldOrdre, i) => { grouped[oldOrdre].forEach(ri => { tpl.repas[ri].ordre = i; }); });
-  setNav('editeur-diete');
+  _reRenderDieteEditeur(slot);
 }
 
-function supprimerAlimentDiete(ri, ai){
-  dieteTplEnEdition.repas[ri].aliments.splice(ai,1);
-  _updateAlimentsDom(ri);
+function supprimerAlimentDiete(ri, ai, slot){
+  _dieteEnEdition(slot).repas[ri].aliments.splice(ai,1);
+  _updateAlimentsDom(ri, slot);
 }
 
 // Grammage éditable inline — parseFloat avec remplacement virgule→point (clavier
 // iOS en locale FR insère une virgule comme séparateur décimal, cf. programme-client.js).
-function alimChangerQuantite(ri, ai, valeur){
+function alimChangerQuantite(ri, ai, valeur, slot){
   const q = parseFloat((valeur+'').replace(',','.'));
-  const a = dieteTplEnEdition.repas[ri].aliments[ai];
+  const a = _dieteEnEdition(slot).repas[ri].aliments[ai];
   const ancien = a.quantite_g;
   a.quantite_g = isNaN(q) ? 0 : q;
   // Aliment déjà existant (a un id) dont le grammage change réellement : on
   // coche automatiquement "modifié" — le coach peut décocher s'il ne veut pas
   // afficher la pastille côté client.
   if (a.id != null && ancien !== a.quantite_g) a.modifie = true;
-  _updateAlimentsDom(ri);
+  _updateAlimentsDom(ri, slot);
 }
 
-function alimToggleModifie(ri, ai, checked){
-  dieteTplEnEdition.repas[ri].aliments[ai].modifie = checked;
+function alimToggleModifie(ri, ai, checked, slot){
+  _dieteEnEdition(slot).repas[ri].aliments[ai].modifie = checked;
 }
 
 // Réordonner les aliments d'un repas par glisser-déposer — même pattern que
 // cpOnDragStartExo/cpOnDropExo (éditeur programme), limité à l'intérieur d'un
-// même repas (pas de drag entre deux repas différents).
+// même repas (pas de drag entre deux repas différents, ni entre deux colonnes
+// en mode comparaison).
 let _dietDragAlimSource = null;
-function alimOnDragStart(e, ri, ai){ _dietDragAlimSource = {ri, ai}; e.dataTransfer.effectAllowed = 'move'; }
+function alimOnDragStart(e, ri, ai, slot){ _dietDragAlimSource = {ri, ai, slot: slot||null}; e.dataTransfer.effectAllowed = 'move'; }
 function alimOnDragEnd(){ _dietDragAlimSource = null; }
-function alimOnDrop(e, ri, ai){
+function alimOnDrop(e, ri, ai, slot){
   e.preventDefault();
   const src = _dietDragAlimSource; _dietDragAlimSource = null;
-  if (!src || src.ri !== ri || src.ai === ai) { _updateAlimentsDom(ri); return; }
-  const arr = dieteTplEnEdition.repas[ri].aliments;
+  if (!src || src.ri !== ri || src.ai === ai || src.slot !== (slot||null)) { _updateAlimentsDom(ri, slot); return; }
+  const arr = _dieteEnEdition(slot).repas[ri].aliments;
   const [moved] = arr.splice(src.ai, 1);
   arr.splice(src.ai < ai ? ai - 1 : ai, 0, moved);
-  _updateAlimentsDom(ri);
+  _updateAlimentsDom(ri, slot);
 }
 
-function ouvrirAjoutAliment(ri){
+function ouvrirAjoutAliment(ri, slot){
   ajoutAlimRI = ri;
+  ajoutAlimSlot = slot || null;
   ajoutAlimTab = 'base';
   _ajoutAlimCount = 0;
   _renderModalAjoutAliment();
@@ -7654,7 +7695,7 @@ function _renderModalAjoutAliment(){
     <div class="modal-box" style="max-width:460px;">
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
         <h3 style="margin:0;">Ajouter des aliments</h3>
-        ${ajoutAlimRI !== null && dieteTplEnEdition?.repas?.[ajoutAlimRI] ? `<span style="font-size:11px;color:var(--text-faint);">→ ${esc(dieteTplEnEdition.repas[ajoutAlimRI].nom)}</span>` : ''}
+        ${ajoutAlimRI !== null && _dieteEnEdition(ajoutAlimSlot)?.repas?.[ajoutAlimRI] ? `<span style="font-size:11px;color:var(--text-faint);">→ ${esc(_dieteEnEdition(ajoutAlimSlot).repas[ajoutAlimRI].nom)}</span>` : ''}
       </div>
       <div class="modal-tabs">
         <button class="modal-tab ${ajoutAlimTab==='base'?'active':''}" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">📦 Base coach</button>
@@ -7822,9 +7863,9 @@ function _ouvrirSaisieQuantite(nom, kcal100, prot100, glu100, lip100, unite){
 function _confirmerAlimSelectionne(nom, kcal100, prot100, glu100, lip100, unite){
   unite = unite || 'g';
   const qte = parseFloat(document.getElementById('aQteSelected').value)||0;
-  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite, quantite_g:qte, kcal_par_100g:kcal100, prot_par_100g:prot100, glu_par_100g:glu100, lip_par_100g:lip100 });
+  _dieteEnEdition(ajoutAlimSlot).repas[ajoutAlimRI].aliments.push({ nom, unite, quantite_g:qte, kcal_par_100g:kcal100, prot_par_100g:prot100, glu_par_100g:glu100, lip_par_100g:lip100 });
   _ajoutAlimCount++;
-  _updateAlimentsDom(ajoutAlimRI);
+  _updateAlimentsDom(ajoutAlimRI, ajoutAlimSlot);
   // Retour à la recherche avec flash de confirmation
   ajoutAlimTab = 'base';
   _renderModalAjoutAliment();
@@ -7844,9 +7885,9 @@ function confirmerAjoutAliment(){
   const prot = parseFloat(document.getElementById('aProt').value)||0;
   const glu  = parseFloat(document.getElementById('aGlu').value)||0;
   const lip  = parseFloat(document.getElementById('aLip').value)||0;
-  dieteTplEnEdition.repas[ajoutAlimRI].aliments.push({ nom, unite:'g', quantite_g:qte, kcal_par_100g:kcal, prot_par_100g:prot, glu_par_100g:glu, lip_par_100g:lip });
+  _dieteEnEdition(ajoutAlimSlot).repas[ajoutAlimRI].aliments.push({ nom, unite:'g', quantite_g:qte, kcal_par_100g:kcal, prot_par_100g:prot, glu_par_100g:glu, lip_par_100g:lip });
   _ajoutAlimCount++;
-  _updateAlimentsDom(ajoutAlimRI);
+  _updateAlimentsDom(ajoutAlimRI, ajoutAlimSlot);
   // Reset le formulaire pour un autre ajout manuel
   document.getElementById('aNom').value = '';
   document.getElementById('aQte').value = '100';
@@ -7908,6 +7949,187 @@ async function sauvegarderDieteTemplate(){
       setNav('dietes');
     }
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+// ── Comparer 2 diètes côte à côte (ex: Jour On / Jour Off) ──────────────
+// Demande du coach : éditer deux diètes déjà assignées en même temps, l'une
+// à côté de l'autre, chacune avec son propre bandeau de macros figé en haut
+// pendant le défilement, et un seul bouton qui enregistre les deux d'un coup.
+// Réutilise tous les mutateurs de l'éditeur classique (généralisés avec un
+// paramètre `slot` 'A'/'B' — voir _dieteEnEdition/_renderDieteBlocsHtml plus
+// haut) plutôt que de dupliquer la logique d'édition.
+
+function ouvrirComparerDietes(clientId){
+  const dietes = ficheData.tous_dietes || [];
+  if (dietes.length < 2) { alert('Il faut au moins 2 diètes assignées à ce client pour les comparer.'); return; }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-comparer-dietes';
+  overlay.onclick = e => { if (e.target===overlay) overlay.remove(); };
+  const opts = dietes.map(d => `<option value="${d.id}">${esc(d.nom||'Diète sans nom')}${d.actif?'':' (archivée)'}</option>`).join('');
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>⇄ Comparer 2 diètes</h3>
+      <div class="field-row"><label>Diète A</label><select id="cmpDieteA" style="font-size:16px;">${opts}</select></div>
+      <div class="field-row"><label>Diète B</label><select id="cmpDieteB" style="font-size:16px;">${opts}</select></div>
+      <div id="cmpErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-comparer-dietes').remove()">Annuler</button>
+        <button class="btn primary" id="cmpBtn" onclick="confirmerComparerDietes('${clientId}')">Comparer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Pré-sélectionne 2 diètes différentes par défaut si possible (souvent Jour On / Jour Off).
+  if (dietes[1]) document.getElementById('cmpDieteB').value = dietes[1].id;
+}
+
+async function confirmerComparerDietes(clientId){
+  const idA = document.getElementById('cmpDieteA').value;
+  const idB = document.getElementById('cmpDieteB').value;
+  const errEl = document.getElementById('cmpErr');
+  if (!idA || !idB) { errEl.textContent = 'Choisis 2 diètes.'; errEl.style.display = 'block'; return; }
+  if (idA === idB) { errEl.textContent = 'Choisis 2 diètes différentes.'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('cmpBtn');
+  btn.disabled = true; btn.textContent = 'Chargement…';
+  try {
+    await ouvrirEditeurDieteCompare(clientId, +idA, +idB);
+    document.getElementById('modal-comparer-dietes')?.remove();
+  } catch(e) {
+    errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Comparer';
+  }
+}
+
+// Charge une diète client (par son id client_dietes) sous la même forme que
+// dieteTplEnEdition — même logique de résolution que editerDieteClient
+// (diete_template_id fiable en priorité, fallback par nom).
+async function _chargerDieteTplPourCompare(clientDieteId){
+  const cdRes = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${clientDieteId}&select=*`, { headers: supaHeaders() });
+  const cd = cdRes.ok ? await cdRes.json() : [];
+  if (!cd.length) throw new Error('diète introuvable');
+  let tpl = null;
+  if (cd[0].diete_template_id) {
+    const tRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${cd[0].diete_template_id}&select=*`, { headers: supaHeaders() });
+    if (tRes.ok) { const t = await tRes.json(); tpl = t[0] || null; }
+  }
+  if (!tpl) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(cd[0].nom)}&order=id.desc&limit=1&select=*`, { headers: supaHeaders() });
+    const tpls = res.ok ? await res.json() : [];
+    if (!tpls.length) throw new Error(`Aucun template trouvé pour "${cd[0].nom}"`);
+    tpl = tpls[0];
+  }
+  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers: supaHeaders() });
+  const repasRaw = repasRes.ok ? await repasRes.json() : [];
+  const obj = {
+    id: tpl.id, nom: tpl.nom, description: tpl.description||'',
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
+  };
+  if (!obj.repas.length) obj.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
+  return obj;
+}
+
+async function ouvrirEditeurDieteCompare(clientId, clientDieteIdA, clientDieteIdB){
+  const [a, b] = await Promise.all([_chargerDieteTplPourCompare(clientDieteIdA), _chargerDieteTplPourCompare(clientDieteIdB)]);
+  _dieteCompare = { A:a, B:b };
+  _dieteCompareClientId = clientId;
+  setNav('editeur-diete-compare');
+}
+
+function _dcColHtml(slot){
+  const tpl = _dieteCompare[slot];
+  const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
+  return `
+    <div class="dc-col" style="flex:1;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+      <div style="position:sticky;top:0;z-index:9;background:var(--bg);">
+        <div style="padding:12px 16px 8px;font-weight:700;font-size:14px;">${esc(tpl.nom)}</div>
+        <div id="ed-total-macros-${slot}" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin:0 16px 12px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;box-shadow:0 8px 12px -6px rgba(0,0,0,.35);${totalM.kcal?'':'display:none;'}">
+          ${totalM.kcal ? `
+          <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
+          <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
+          <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
+          <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>` : ''}
+        </div>
+      </div>
+      <div style="padding:0 16px 24px;">
+        ${_renderDieteBlocsHtml(slot)}
+        <button class="btn" style="width:100%;justify-content:center;" onclick="ajouterRepas('${slot}')">+ Ajouter un repas</button>
+      </div>
+    </div>`;
+}
+
+function renderEditeurDieteComparePage(el){
+  const { A, B } = _dieteCompare;
+  if (!A || !B) { el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-faint);">Aucune comparaison en cours. <button class="btn" onclick="setNav('dietes')">← Retour</button></div>`; return; }
+  el.innerHTML = `
+    <div id="dc-toolbar" style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--border);">
+      <button class="btn" onclick="retourDepuisEditeurDieteCompare()">← Retour</button>
+      <div style="flex:1;">
+        <div class="eyebrow">Comparer 2 diètes</div>
+        <div style="font-weight:700;font-size:15px;">${esc(A.nom)} ⇄ ${esc(B.nom)}</div>
+      </div>
+      <div id="dcErr" style="color:var(--critical);font-size:12px;display:none;"></div>
+      <button class="btn primary" id="dcSaveBtn" onclick="sauvegarderDieteComparee()">Enregistrer les 2 diètes</button>
+    </div>
+    <div id="dc-cols-row" style="display:flex;">
+      ${_dcColHtml('A')}
+      <div style="width:1px;background:var(--hairline);flex-shrink:0;"></div>
+      ${_dcColHtml('B')}
+    </div>`;
+  // Chaque colonne défile indépendamment (bandeau macros sticky à l'intérieur
+  // de SA colonne) — .main doit donc arrêter de défiler lui-même, sinon on se
+  // retrouve avec un double scroll. Hauteur de la ligne calée sur ce qui reste
+  // sous la barre d'outils (mesurée, pas de valeur en dur qui casserait si le
+  // CSS du shell change).
+  setTimeout(() => {
+    const mainEl = document.querySelector('.main');
+    if (mainEl) { mainEl.style.overflow = 'hidden'; mainEl.scrollTop = 0; }
+    const toolbar = document.getElementById('dc-toolbar');
+    const row = document.getElementById('dc-cols-row');
+    if (toolbar && row) row.style.height = `calc(100vh - ${toolbar.getBoundingClientRect().bottom}px)`;
+  }, 0);
+}
+
+function retourDepuisEditeurDieteCompare(){
+  const mainEl = document.querySelector('.main');
+  if (mainEl) mainEl.style.overflow = '';
+  const cid = _dieteCompareClientId;
+  _dieteCompare = { A:null, B:null };
+  _dieteCompareClientId = null;
+  if (cid) { openPanel(cid).then(() => { setFicheTab('diete'); setNav('fiche-client'); }); }
+  else setNav('dietes');
+}
+
+// Persiste UNE diète existante (schéma identique à la branche "PATCH" de
+// sauvegarderDieteTemplate) — repas + aliments remplacés en bloc. Pas de
+// renommage possible en mode comparaison (pas de champ nom/description
+// affiché) : le focus est macros/aliments, pas la métadonnée du template.
+async function _sauvegarderUneDieteComparee(tpl){
+  await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}`, { method:'DELETE', headers:supaHeaders() });
+  for (let ri=0; ri<tpl.repas.length; ri++){
+    const r = tpl.repas[ri];
+    const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tpl.id, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0 }) });
+    if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
+    const savedR = (await rRes.json())[0];
+    if (r.aliments.length){
+      const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_100g:a.kcal_par_100g, prot_par_100g:a.prot_par_100g, glu_par_100g:a.glu_par_100g, lip_par_100g:a.lip_par_100g, ordre:ai, modifie:!!a.modifie }));
+      await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
+    }
+  }
+}
+
+async function sauvegarderDieteComparee(){
+  const errEl = document.getElementById('dcErr');
+  const btn = document.getElementById('dcSaveBtn');
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await Promise.all([_sauvegarderUneDieteComparee(_dieteCompare.A), _sauvegarderUneDieteComparee(_dieteCompare.B)]);
+    dieteTemplatesData = null;
+    retourDepuisEditeurDieteCompare();
+  } catch(e) {
+    errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Enregistrer les 2 diètes';
+  }
 }
 
 // ── Assigner une diète à un client ────────────────────────────────────
