@@ -7,6 +7,7 @@ const RM_TYPES = {
   maintenance:   { label:'Maintenance',    color:'#3b82f6' },
   recomposition: { label:'Recomposition',  color:'#8b5cf6' },
   refeed:        { label:'Refeed',         color:'#06b6d4' },
+  standby:       { label:'Stand-by',       color:'#8892a4' },
 };
 function _rmType(key) { return RM_TYPES[key] || { label: key || '—', color:'#8892a4' }; }
 
