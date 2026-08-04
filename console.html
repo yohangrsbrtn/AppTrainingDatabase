@@ -5408,7 +5408,7 @@ function renderFicheDieteTab(c){
         </div>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="dupliquerDieteClient(${d.id},'${c.id}')" title="Créer une copie indépendante de cette diète pour ce client">Dupliquer</button>
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d'être mise à jour.')" title="Notifier">🔔</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d\\'être mise à jour.')" title="Notifier">🔔</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
       </div>`).join('') : `
       <div class="fiche-prog-empty" style="text-align:center;padding:24px;margin-bottom:16px;">
