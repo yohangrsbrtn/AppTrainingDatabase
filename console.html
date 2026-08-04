@@ -449,7 +449,7 @@
   </div>
 </div>
 
-<script src="api.js?v=6"></script>
+<script src="api.js?v=7"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -1012,7 +1012,7 @@ async function chargerDonnees(){
     return {
       id: p.client_id,
       nom: [p.prenom, p.nom].filter(Boolean).join(' ') || p.client_id,
-      niveau: Math.max(1, Math.floor(xpTotal/50) + 1),
+      niveau: _niveauDepuisXp(xpTotal),
       titreActif: prog.titre_actif || null,
       chimieActif: !!p.chimie_actif,
       chimieActifSupa: !!p.chimie_actif,
@@ -7133,9 +7133,6 @@ async function chargerClientProgressionXP(clientId){
   // xp_total est un compteur stocké, incrémenté uniquement côté serveur à
   // l'envoi d'un bilan (bilan.js, _crediterXpBilanEnvoye), dédoublonné via
   // bilans.xp_credite — jamais recalculé ici. Voir progression.js.
-  // XP_PAR_NIVEAU=50, pas de plafond : aligné sur le système GAS réel
-  // (confirmé via Perrine, xp_total=747 → niveau 15 = floor(747/50)+1).
-  const XP_PAR_NIVEAU = 50;
   const xpTotal = progRow.xp_total || 0;
   const bilansValidies = bilans.filter(b => b.envoye_coach && b.date_validation).length;
   let seancesValidees = 0;
@@ -7143,10 +7140,12 @@ async function chargerClientProgressionXP(clientId){
     if (!b.envoye_coach || !b.date_validation) return;
     seancesValidees += (b.jours || []).filter(j=>j.training).length;
   });
-  const niveau = Math.max(1, Math.floor(xpTotal / XP_PAR_NIVEAU) + 1);
+  const niveau = _niveauDepuisXp(xpTotal);
   const niveauMaxAtteint = false;
-  const xpManquant = niveau * XP_PAR_NIVEAU - xpTotal;
-  const pct = Math.round((xpTotal - (niveau-1)*XP_PAR_NIVEAU) / XP_PAR_NIVEAU * 100);
+  const xpDebutNiveau = _xpPourNiveau(niveau);
+  const xpFinNiveau = _xpPourNiveau(niveau + 1);
+  const xpManquant = xpFinNiveau - xpTotal;
+  const pct = Math.round((xpTotal - xpDebutNiveau) / (xpFinNiveau - xpDebutNiveau) * 100);
   // 4 = ancien comportement par défaut tant que le coach n'a pas encore
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
   const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut_suivi || profil.date_debut) : 0) || bilans.length || 1;
@@ -7252,16 +7251,12 @@ function ouvrirNouveauClient(){
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-box">
-      <h3>Nouveau client (Supabase)</h3>
+      <h3>Nouveau client</h3>
       <div class="field-row"><label>Identifiant (doit correspondre à l'ID GAS si le client existe déjà dans Code.js)</label><input id="fNewClientId" type="text" placeholder="ex: matthieuesnouf"></div>
       <div class="field-row"><label>Prénom</label><input id="fNewClientPrenom" type="text"></div>
       <div class="field-row"><label>Nom</label><input id="fNewClientNom" type="text"></div>
       <div class="field-row"><label>Date de naissance</label><input id="fNewClientNaissance" type="date"></div>
       <div class="field-row"><label>Email</label><input id="fNewClientEmail" type="email"></div>
-      <div class="field-row" style="flex-direction:row;align-items:center;gap:10px;">
-        <input id="fNewClientSupaOnly" type="checkbox">
-        <label for="fNewClientSupaOnly" style="margin:0;cursor:pointer;">Supabase only (cocher uniquement si le client n'utilisera plus jamais l'auth GAS)</label>
-      </div>
       <div id="newClientErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
       <div class="modal-actions">
         <button class="btn" onclick="document.getElementById('modal-nouveau-client').remove()">Annuler</button>
@@ -7281,7 +7276,7 @@ async function confirmerNouveauClient(){
     nom: document.getElementById('fNewClientNom').value.trim(),
     date_naissance: document.getElementById('fNewClientNaissance').value || null,
     email: document.getElementById('fNewClientEmail').value.trim(),
-    supabase_only: !!document.getElementById('fNewClientSupaOnly').checked,
+    supabase_only: true,
   };
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });

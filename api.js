@@ -9,6 +9,28 @@ let _viewAsClientOverride = null;
 // affichait le bilan du COACH (jour_bilan différent) au lieu de celui d'Éric.
 function getClient() { return _viewAsClientOverride || localStorage.getItem('at_client') || ''; }
 
+// ── Courbe de niveau progressive (2026-08-05) ───────────────────────────
+// Remplace l'ancien palier plat (XP_PAR_NIVEAU=50, aligné sur le système GAS
+// mais jugé trop rapide par le coach une fois vu à l'usage réel — niveau 60
+// en ~3,5 mois pour un client assidu). Nouvelle règle : passer du niveau N
+// au niveau N+1 coûte `NIVEAU_COUT_PALIER × N` XP (coût croissant, comme un
+// jeu classique) — calibrée avec le coach pour qu'un client "assez assidu"
+// (avec vacances et oublis, ~180 XP/semaine sur ~42 semaines actives/an)
+// atteigne le niveau 60 en environ 1 an (~8000 XP cumulés).
+// XP cumulée pour ATTEINDRE le niveau N (niveau 1 = 0 XP) : coût(n)=k×n pour
+// n=1..N-1, somme = k×N×(N-1)/2.
+const NIVEAU_COUT_PALIER = 4.5;
+function _xpPourNiveau(niveau) {
+  const n = Math.max(1, niveau);
+  return Math.round(NIVEAU_COUT_PALIER * n * (n - 1) / 2);
+}
+// Inverse de _xpPourNiveau : plus grand N tel que _xpPourNiveau(N) <= xpTotal.
+// Résolution directe de k×N×(N-1)/2 <= xp -> N <= (1+sqrt(1+8×xp/k))/2.
+function _niveauDepuisXp(xpTotal) {
+  const xp = Math.max(0, xpTotal || 0);
+  return Math.max(1, Math.floor((1 + Math.sqrt(1 + (8 * xp) / NIVEAU_COUT_PALIER)) / 2));
+}
+
 const SUPABASE_URL      = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmYWNqYndpY3p3a2NqcHduZXlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjgzNTAsImV4cCI6MjEwMDIwNDM1MH0.mrjPbOuQROMihzxZWrUNbncQIos0jK2VexpQDoRZXzY';
 function supaHeaders(extra) {

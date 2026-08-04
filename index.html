@@ -174,12 +174,12 @@ input[type="number"] { -moz-appearance:textfield; }
 <body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=10"></script>
+<script src="api.js?v=11"></script>
 <script src="bilan.js?v=18"></script>
 <script src="diete.js?v=21"></script>
 <script src="mensurations.js?v=7"></script>
 <script src="recettes.js?v=4"></script>
-<script src="progression.js?v=6"></script>
+<script src="progression.js?v=7"></script>
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=4"></script>
@@ -938,7 +938,7 @@ function _chargerTop5Home() {
       profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = p; });
       const cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
         id: p.client_id, ...profilMap[p.client_id],
-        xpTotal: p.xp_total || 0, niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+        xpTotal: p.xp_total || 0, niveau: _niveauDepuisXp(p.xp_total || 0),
         titreActif: p.titre_actif || null,
       }));
       S.data.classement = cl;
@@ -1025,7 +1025,6 @@ function renderTop5Home(liste) {
     { bg:'linear-gradient(135deg,#101420,#1e2838)', border:'1.5px solid #94a3b8', namec:'#d4d8e0' },
     { bg:'linear-gradient(135deg,#140e09,#271c0d)', border:'1px solid #b45309',   namec:'#d4956a' }
   ];
-  const medals = ['🥇','🥈','🥉'];
   const rows = liste.map((c, i) => {
     const tier = typeof niveauToTier === 'function' ? niveauToTier(c.niveau) : 'debutant';
     const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858'};
@@ -1043,7 +1042,7 @@ function renderTop5Home(liste) {
     const tDef = (c.titreActif && typeof TITRES_DEF !== 'undefined') ? TITRES_DEF.find(t => t.id === c.titreActif) : null;
     const titreBadge = tDef ? `<span style="display:inline-flex;align-items:center;gap:3px;background:linear-gradient(90deg,${tDef.c2}cc,${tDef.c1}99);border:1px solid ${tDef.c1}55;border-radius:5px;padding:1px 6px 1px 4px;font-size:9px;font-weight:700;color:#f0f2ff;margin-left:6px;vertical-align:middle;">${tDef.icon} ${tDef.nom}</span>` : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:${i===0?'10px':'8px'} 12px;border-radius:10px;margin-bottom:5px;background:${bg};border:${border};">
-      <div style="font-size:16px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
+      <div style="min-width:22px;display:flex;align-items:center;justify-content:center;font-size:16px;">${i < 3 ? _rangMedailleSvg(i+1, 26) : (i+1)+'.'}</div>
       <div style="flex-shrink:0;">${_avatarAvecBadge(c.photo_url, initiales, tier, badgeSz, Math.round(badgeSz*0.5), 't5'+i)}
       </div>
       <div style="flex:1;min-width:0;">
@@ -1273,7 +1272,7 @@ async function loadClassement() {
         id: p.client_id,
         ...profilMap[p.client_id],
         xpTotal: p.xp_total || 0,
-        niveau: Math.max(1, Math.floor((p.xp_total || 0) / 50) + 1),
+        niveau: _niveauDepuisXp(p.xp_total || 0),
         titreActif: p.titre_actif || null,
       }));
     hideLoadingOverlay();
@@ -1283,7 +1282,6 @@ async function loadClassement() {
 
 function renderClassement() {
   const items = S.data.classement || [];
-  const medals = ['🥇','🥈','🥉'];
   const rows = items.map((c, i) => {
     const tier = typeof niveauToTier === 'function' ? niveauToTier(c.niveau) : 'debutant';
     const isMe = c.id === S.client;
@@ -1293,7 +1291,7 @@ function renderClassement() {
     const initiales = (c.prenom ? c.prenom[0] : '') + (c.nom ? c.nom[0] : '');
     return `
     <div class="list-item">
-      <div class="list-icon" style="font-size:18px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
+      <div class="list-icon" style="display:flex;align-items:center;justify-content:center;font-size:18px;min-width:22px;">${i < 3 ? _rangMedailleSvg(i+1, 28) : (i+1)+'.'}</div>
       <div style="flex-shrink:0;">${_avatarAvecBadge(c.photo_url, initiales.toUpperCase() || '?', tier, 48, 24, 'cl'+i)}</div>
       <div class="list-text">
         <div class="list-title" style="${isMe ? 'color:var(--accent);' : ''}">${esc(principal)}${secondaire ? ` <span style="font-size:10px;font-weight:400;color:var(--muted);">(${esc(secondaire)})</span>` : ''}${isMe ? ' <span style="font-size:9px;opacity:0.7;">(toi)</span>' : ''}${titreBadge}</div>
@@ -1885,6 +1883,26 @@ function _nomAffichage(p) {
     return { principal: p.pseudo, secondaire: reelCourt };
   }
   return { principal: reel, secondaire: null };
+}
+// Médaille SVG pour les 3 premières places du classement (Top 10 accueil + page
+// Classement) — remplace les emoji 🥇🥈🥉 par un badge sphérique dégradé (même
+// esprit que les badges de tier collection.js, en plus simple), plus stylé.
+function _rangMedailleSvg(rang, size) {
+  size = size || 26;
+  const PAL = {
+    1: { c1:'#FFF2C4', c2:'#F5C542', c3:'#7a5600', ring:'#FFD966' },
+    2: { c1:'#F5F6F8', c2:'#B7BEC9', c3:'#4d525a', ring:'#D4D9E0' },
+    3: { c1:'#F3C696', c2:'#B5651D', c3:'#43250c', ring:'#D18A46' },
+  }[rang];
+  const id = 'rgmdl' + rang;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+    <defs><radialGradient id="${id}" cx="35%" cy="26%" r="72%">
+      <stop offset="0%" stop-color="${PAL.c1}"/><stop offset="55%" stop-color="${PAL.c2}"/><stop offset="100%" stop-color="${PAL.c3}"/>
+    </radialGradient></defs>
+    <circle cx="20" cy="20" r="18" fill="${PAL.c3}" opacity="0.35"/>
+    <circle cx="20" cy="20" r="17" fill="url(#${id})" stroke="${PAL.ring}" stroke-width="1.4"/>
+    <text x="20" y="27" text-anchor="middle" font-size="18" font-weight="800" fill="#1a1208" opacity="0.82">${rang}</text>
+  </svg>`;
 }
 // Cercle avatar : photo si renseignée, sinon initiales sur fond dégradé (même dégradé
 // que la carte profil des Paramètres, pour rester cohérent visuellement).
