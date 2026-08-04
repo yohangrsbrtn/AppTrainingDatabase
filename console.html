@@ -4937,6 +4937,11 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   // Phases : un trait fin vertical à chaque changement de phase entre deux relevés
   // consécutifs, + une fine bande colorée collée à l'axe des dates indiquant la phase
   // couvrant chaque segment (regroupe les relevés consécutifs de même phase).
+  // La phase inscrite sur un relevé décrit l'état du client DEPUIS le relevé précédent
+  // (pas à partir de sa propre date) — demande coach 2026-08-04 : quand une nouvelle
+  // phase apparaît sur une ligne, elle a en réalité commencé au moment du relevé
+  // d'avant. La bande d'un segment démarre donc à la date du relevé PRÉCÉDENT le
+  // premier relevé du segment (sauf tout premier segment, sans relevé antérieur connu).
   let phaseBand = '', phaseTransitions = '';
   const phasesPresentes = new Set();
   if (rows.some(r => r.phase)) {
@@ -4947,11 +4952,11 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
         const p = rows[start].phase;
         if (p) {
           phasesPresentes.add(p);
-          const x1 = xs[start], x2 = xs[i - 1];
+          const x1 = xs[start > 0 ? start - 1 : start], x2 = xs[i - 1];
           phaseBand += `<rect x="${x1}" y="${bandY}" width="${Math.max(x2 - x1, 3)}" height="${bandH}" rx="1" fill="${_mensPhaseColor(p)}" opacity="0.85"/>`;
         }
         if (i < n) {
-          const xt = +((xs[i - 1] + xs[i]) / 2).toFixed(2);
+          const xt = xs[i - 1];
           phaseTransitions += `<line x1="${xt}" y1="${PT}" x2="${xt}" y2="${PT+ch}" stroke="var(--text-faint)" stroke-width="0.6" stroke-dasharray="2 2" opacity="0.45"/>`;
         }
         start = i;
