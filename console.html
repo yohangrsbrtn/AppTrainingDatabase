@@ -1375,6 +1375,15 @@ async function envoyerNotification(clientId, page){
   const err = document.getElementById('ntf-err');
   const btn = document.getElementById('ntf-btn');
   if (!titre || !corps) { err.textContent = 'Titre et message obligatoires.'; err.style.display = 'block'; return; }
+  // Confirmation explicite avant tout envoi réel (push + inbox client) — garde-fou
+  // demandé par le coach après avoir eu l'impression qu'une notif partait "toute
+  // seule" en modifiant une roadmap : aucun déclenchement automatique n'existe
+  // (vérifié : chaque ligne notif_envois ne peut venir que d'un clic "Envoyer"
+  // ici), mais le bouton 🔔 Notifier est juste à côté d'actions d'édition
+  // fréquentes (+ Ajouter une phase, etc.) — ce 2e "sont-ils prêts ?" empêche un
+  // envoi réel déclenché par habitude/enchaînement de clics.
+  const nomAffiche = document.querySelector('.modal-overlay h3')?.textContent.replace('🔔 Notifier ', '') || clientId;
+  if (!confirm(`Envoyer cette notification à ${nomAffiche} maintenant ?\n\n« ${titre} »`)) return;
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
