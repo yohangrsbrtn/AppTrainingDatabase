@@ -74,6 +74,23 @@ function _bilanWeekBounds(jourBilanNom, refDate) {
   return { debut, fin };
 }
 
+// Deadline réelle d'un bilan = le jour_bilan lui-même à midi (`fin` de
+// _bilanWeekBounds est la VEILLE du jour_bilan à 23:59:59, donc +1 jour ici).
+// Source unique partagée par _bilanEstPonctuel (bonus XP) ET
+// _supaGetOrCreateBilanCourant (bilan.js, décide si on bascule sur la semaine
+// suivante) — les deux doivent utiliser EXACTEMENT la même limite, sinon le
+// bilan de la semaine prochaine peut apparaître AVANT que le délai d'envoi de
+// la semaine en cours soit passé (bug vécu : jour_bilan=Mercredi, un nouveau
+// bilan "semaine prochaine" était créé dès mercredi 00h00 au lieu d'attendre
+// mercredi midi, alors que le client avait jusqu'à midi pour envoyer).
+function _bilanDeadline(jourBilanNom, refDate) {
+  const { fin } = _bilanWeekBounds(jourBilanNom, refDate);
+  const limite = new Date(fin);
+  limite.setDate(limite.getDate() + 1);
+  limite.setHours(12, 0, 0, 0);
+  return limite;
+}
+
 // Ponctuel = envoyé au plus tard le jour de bilan assigné (client_profils.jour_bilan),
 // avant midi — envoyer plus tôt dans la semaine est toujours ponctuel, envoyer ce
 // jour-là après midi ou un jour plus tard ne l'est pas. Sans jour assigné, toujours
@@ -82,12 +99,7 @@ function _bilanWeekBounds(jourBilanNom, refDate) {
 // pénalisé ni avantagé.
 function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
   if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt || !envoyeAtStr) return true;
-  const { fin } = _bilanWeekBounds(jourBilanNom, new Date(bilanCreatedAt));
-  // `fin` = veille du jour_bilan (depuis le décalage 2026-08-03) — la deadline de
-  // ponctualité reste le jour_bilan lui-même, donc +1 jour par rapport à `fin`.
-  const limite = new Date(fin);
-  limite.setDate(limite.getDate() + 1);
-  limite.setHours(12, 0, 0, 0);
+  const limite = _bilanDeadline(jourBilanNom, new Date(bilanCreatedAt));
   return new Date(envoyeAtStr) <= limite;
 }
 

@@ -59,8 +59,14 @@ async function _supaGetOrCreateBilanCourant(clientId) {
   );
   const arr = res.ok ? await res.json() : [];
   if (arr.length > 0) {
-    const { fin } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
-    if (new Date() <= fin) {
+    // Bascule sur la semaine suivante seulement après la vraie deadline d'envoi
+    // (jour_bilan à midi, _bilanDeadline/api.js) — PAS dès le début du jour_bilan
+    // (minuit). Sans ce garde-fou, le bilan de la semaine prochaine apparaissait
+    // déjà avant que le client ait fini son délai pour envoyer celui en cours
+    // (bug vécu : jour_bilan=Mercredi, "semaine prochaine" créée dès mercredi
+    // 00h00 au lieu d'attendre mercredi midi).
+    const limite = _bilanDeadline(jourBilanNom, new Date(arr[0].created_at));
+    if (new Date() <= limite) {
       // semaine_label est figé au moment de la création du bilan — si le client modifie
       // jour_bilan pendant que ce bilan est en cours, le libellé affiché reste celui calculé
       // avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. On recalcule à chaque
