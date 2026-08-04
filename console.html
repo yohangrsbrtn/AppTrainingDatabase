@@ -10493,7 +10493,12 @@ function toggleTodoPanel(){
 function renderTodoList(){
   const el = document.getElementById('todoListEl');
   if (!el) return;
-  const todos = _todos || [];
+  // Distingue "pas encore chargé" de "chargé et vraiment vide" — sans ça les
+  // deux affichaient le même texte "Rien pour l'instant.", donnant l'impression
+  // que la note qu'on venait d'ajouter avait disparu si le premier fetch de
+  // boot (_showShell) n'avait pas encore fini au moment où on ouvre le panneau.
+  if (_todos === null) { el.innerHTML = `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Chargement…</div>`; return; }
+  const todos = _todos;
   el.innerHTML = todos.length ? todos.map(t => `
     <div style="display:flex;align-items:flex-start;gap:7px;padding:6px 2px;border-bottom:1px solid var(--hairline);">
       <input type="checkbox" ${t.fait?'checked':''} onchange="toggleTodo(${t.id},this.checked)" style="margin-top:2px;flex-shrink:0;">
@@ -10563,6 +10568,15 @@ function _restoreNavState() {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 (async function boot(){
+  // Le bouton flottant 📌 (#todoFab) vit hors du shell (#shell reste caché
+  // derrière #loading jusqu'à _showShell) mais reste cliquable dès le premier
+  // instant — sur un chargement à froid, chargerDonnees() peut prendre
+  // plusieurs secondes (jusqu'au timeout de 15s ci-dessous) avant que
+  // _showShell() soit atteint. Sans cet appel précoce, ouvrir le pense-bête
+  // pendant ce délai le laissait affiché "vide" bien plus longtemps que
+  // nécessaire (corrigé : renderTodoList distingue maintenant "Chargement…"
+  // de "Rien pour l'instant.", mais autant réduire le délai à la source).
+  chargerTodos();
   const cached = localStorage.getItem('at_console_cache_v2');
   if (cached) {
     try { data = JSON.parse(cached).data; } catch(e) {}
