@@ -407,6 +407,7 @@ let _loginStep   = 'identifiant'; // 'identifiant' | 'password' | 'create' | 're
 let _loginClient = '';
 let _loginAuthEmail = ''; // email réellement utilisé pour l'auth Supabase (fictif ou réel confirmé)
 let _loginEmailConfirme = false;
+let _loginKnownEmail = ''; // email déjà saisi par le coach dans la fiche (client_profils.email) — pré-rempli à la création du mot de passe, jamais utilisé sans confirmation du client
 
 function renderLogin() {
   if (_loginStep === 'password')       return renderLoginPassword();
@@ -467,8 +468,8 @@ function renderLoginCreate() {
     <div class="login-title">🔐 Crée ton mot de passe</div>
     <div class="login-sub">Pour sécuriser ton espace coaching</div>
     <div class="login-form">
-      <input id="l-email-create" type="email" placeholder="Ton adresse e-mail" autocomplete="email" style="font-size:16px">
-      <div class="login-hint" style="font-size:13px;color:#888;margin-top:-8px;">Pour récupérer ton mot de passe si besoin</div>
+      <input id="l-email-create" type="email" placeholder="Ton adresse e-mail" autocomplete="email" style="font-size:16px" value="${esc(_loginKnownEmail||'')}">
+      <div class="login-hint" style="font-size:13px;color:#888;margin-top:-8px;">${_loginKnownEmail ? 'Vérifie que c\'est bien la bonne adresse' : 'Pour récupérer ton mot de passe si besoin'}</div>
       <input id="l-mdp1" type="password" placeholder="Minimum 6 caractères" autocomplete="new-password">
       <input id="l-mdp2" type="password" placeholder="Répète ton mot de passe" autocomplete="new-password">
       <button class="btn-primary" id="l-btn">Créer mon mot de passe →</button>
@@ -515,6 +516,7 @@ async function doVerifierClient() {
     _loginClient = client;
     _loginEmailConfirme = !!p.email_confirme;
     _loginAuthEmail = (p.email_confirme && p.email) ? p.email : (client + '@apptraining-users.com');
+    _loginKnownEmail = (!p.email_confirme && p.email) ? p.email : '';
     // mdp_defini connu à l'avance : on ne devine plus depuis l'erreur générique de signInWithPassword.
     _loginStep = p.mdp_defini ? 'password' : 'create';
     setPage('login');
