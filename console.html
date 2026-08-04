@@ -5372,19 +5372,42 @@ function _ficheProgRow(p, c, archived){
       </div>`;
 }
 
-function _ficheProgActivitePhysiqueHtml(){
+function _ficheProgActivitePhysiqueHtml(c){
   const p = ficheData.profil || {};
-  const items = [
-    p.steps_cible ? `${esc(p.steps_cible)} pas/jour` : null,
+  const autres = [
     p.seances_cible ? `${esc(p.seances_cible)} séance${p.seances_cible>1?'s':''}/semaine` : null,
     p.cardio_consigne ? esc(p.cardio_consigne) : null,
   ].filter(Boolean);
-  if (!items.length) return '';
   return `
     <div class="fiche-card" style="margin-bottom:14px;padding:10px 14px;">
       <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:700;margin-bottom:6px;">Activité physique demandée</div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">${items.map(i=>`<span>${i}</span>`).join('')}</div>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:13px;">
+        <span style="display:flex;align-items:center;gap:6px;">
+          <input type="number" min="0" step="500" value="${esc(p.steps_cible||'')}" placeholder="ex: 8000"
+            style="width:90px;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-family:inherit;"
+            onchange="_ficheChangerStepsCible('${c.id}', this.value)"> pas/jour
+        </span>
+        ${autres.map(i=>`<span>${i}</span>`).join('')}
+        <button class="btn" style="font-size:11px;padding:3px 9px;margin-left:auto;"
+          onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g,"\\'")}','Objectif de pas mis à jour','Ton coach a changé ton objectif de pas quotidien, va voir ta nouvelle consigne dans Mon programme.','training')"
+          title="Notifier le client de ce changement">🔔 Notifier</button>
+      </div>
     </div>`;
+}
+
+// PATCH steps_cible seul depuis l'input inline de l'onglet Programme — évite de passer
+// par sauvegarderFicheSandbox (formulaire complet, onglet Profil) pour ce seul champ,
+// demandé éditable directement là où il est affiché (voir aussi le bouton Notifier juste
+// à côté, pour prévenir le client du changement).
+async function _ficheChangerStepsCible(clientId, value){
+  const steps = parseInt(value) || null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ steps_cible: steps })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (ficheData.profil) ficheData.profil.steps_cible = steps;
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 function renderFicheProgTab(c){
@@ -5392,7 +5415,7 @@ function renderFicheProgTab(c){
   const progs = all.filter(p => !p.archive);
   const archives = all.filter(p => p.archive);
   return `
-    ${_ficheProgActivitePhysiqueHtml()}
+    ${_ficheProgActivitePhysiqueHtml(c)}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${progs.length} programme${progs.length>1?'s':''} assigné${progs.length>1?'s':''}</div>
       <div style="display:flex;gap:8px;">
