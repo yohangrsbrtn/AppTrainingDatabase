@@ -1,8 +1,13 @@
-function getClient() { return localStorage.getItem('at_client') || ''; }
-
 // Quand le coach navigue en "vue client" (enterVueClient/exitVueClient dans
 // index.html), ce champ porte l'identité du client visé.
 let _viewAsClientOverride = null;
+
+// _viewAsClientOverride prioritaire : sinon toute page qui lit getClient() (bilan,
+// programme, progression, protocole, training perso, collection...) retombe sur
+// localStorage.at_client, qui reste l'identité du COACH en vue client (enterVueClient
+// ne le réécrit jamais) — bug vécu : en vue client sur Éric de Lorenzo, "Mon bilan"
+// affichait le bilan du COACH (jour_bilan différent) au lieu de celui d'Éric.
+function getClient() { return _viewAsClientOverride || localStorage.getItem('at_client') || ''; }
 
 const SUPABASE_URL      = 'https://sfacjbwiczwkcjpwneyg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmYWNqYndpY3p3a2NqcHduZXlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MjgzNTAsImV4cCI6MjEwMDIwNDM1MH0.mrjPbOuQROMihzxZWrUNbncQIos0jK2VexpQDoRZXzY';
