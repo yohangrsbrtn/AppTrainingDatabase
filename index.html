@@ -1294,7 +1294,7 @@ function renderClassement() {
     return `
     <div class="list-item">
       <div class="list-icon" style="font-size:18px;min-width:22px;text-align:center;">${i < 3 ? medals[i] : (i+1)+'.'}</div>
-      <div style="flex-shrink:0;">${_avatarAvecBadge(c.photo_url, initiales.toUpperCase() || '?', tier, 36, 18, 'cl'+i)}</div>
+      <div style="flex-shrink:0;">${_avatarAvecBadge(c.photo_url, initiales.toUpperCase() || '?', tier, 48, 24, 'cl'+i)}</div>
       <div class="list-text">
         <div class="list-title" style="${isMe ? 'color:var(--accent);' : ''}">${esc(principal)}${secondaire ? ` <span style="font-size:10px;font-weight:400;color:var(--muted);">(${esc(secondaire)})</span>` : ''}${isMe ? ' <span style="font-size:9px;opacity:0.7;">(toi)</span>' : ''}${titreBadge}</div>
         <div class="list-sub">Niv. ${c.niveau} · ${(c.xpTotal||0).toLocaleString('fr')} XP</div>
