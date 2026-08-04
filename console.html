@@ -10241,7 +10241,13 @@ function toggleTodoPanel(){
   _todoPanelOuvert = !_todoPanelOuvert;
   document.getElementById('todoPanel').style.display = _todoPanelOuvert ? 'flex' : 'none';
   if (_todoPanelOuvert) {
-    renderTodoList();
+    renderTodoList(); // affiche tout de suite ce qu'on a déjà en mémoire
+    chargerTodos();   // puis resynchronise avec la base à CHAQUE ouverture — le
+                       // chargement fait une seule fois au démarrage de la page
+                       // (_showShell) pouvait laisser le panneau affiché avec un
+                       // contenu périmé si l'utilisateur rouvrait la console
+                       // après un moment (ex: juste après un refresh, quand le
+                       // fetch de boot n'a pas eu le temps de finir avant le clic).
     document.getElementById('todoNewInput').focus();
   }
 }
