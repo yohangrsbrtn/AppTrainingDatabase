@@ -506,6 +506,7 @@ function iSend(){return svgIcon('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9
 function iLock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>');}
 function iUnlock(){return svgIcon('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 017.6-1.8"/>');}
 function iTrash(){return svgIcon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 2h6a2 2 0 002-2l1-13"/>');}
+function iCopy(){return svgIcon('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>');}
 function iBell(){return svgIcon('<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/>');}
 function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
 
@@ -7539,6 +7540,7 @@ function _renderDieteBlocsHtml(slot){
         <div class="repas-head">
           ${isVariante ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa26;border:1px solid #a78bfa66;border-radius:5px;padding:2px 7px;margin-right:6px;flex-shrink:0;white-space:nowrap;letter-spacing:.03em;">≡ ÉQUIVALENT</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi}${slotArg})" ondragend="repasOnDragEnd()" title="Glisser pour réordonner ce repas">⠿</span>`}
           <input type="text" value="${esc(r.nom)}" onchange="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
+          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="dupliquerRepas(${ri}${slotArg})" title="Dupliquer en équivalence (garde les mêmes aliments)">${iCopy()}</button>
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
         </div>
         <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
@@ -7620,6 +7622,24 @@ function ajouterVarianteRepas(ordre, slot){
   const maxVariante = existing.reduce((m,r) => Math.max(m, r.variante_index||0), 0);
   const mainNom = (existing.find(r=>(r.variante_index||0)===0)||existing[0]||{}).nom || 'Repas';
   tpl.repas.push({ nom:mainNom+' (variante)', ordre, variante_index:maxVariante+1, aliments:[] });
+  _reRenderDieteEditeur(slot);
+}
+
+// Duplique un repas en équivalence du même emplacement (même ordre), avec une copie
+// indépendante de ses aliments — pratique pour ne remplacer qu'un aliment (ex: riz →
+// pomme de terre) sans ressaisir tout le reste (poulet, huile, haricots...).
+function dupliquerRepas(ri, slot){
+  const tpl = _dieteEnEdition(slot);
+  const src = tpl.repas[ri];
+  const ordre = src.ordre != null ? src.ordre : 0;
+  const existing = tpl.repas.filter(r => (r.ordre != null ? r.ordre : 0) === ordre);
+  const maxVariante = existing.reduce((m,r) => Math.max(m, r.variante_index||0), 0);
+  tpl.repas.push({
+    nom: src.nom + ' (équivalent)',
+    ordre,
+    variante_index: maxVariante + 1,
+    aliments: src.aliments.map(a => ({ ...a }))
+  });
   _reRenderDieteEditeur(slot);
 }
 
