@@ -1106,7 +1106,7 @@ function renderCarteHeader() {
   const niveau = p.niveau || 1;
   const tier = typeof niveauToTier === 'function' ? niveauToTier(niveau) : 'debutant';
   const tc = typeof getTierColors === 'function' ? getTierColors(tier) : {c1:'#a8b0c8',c2:'#404858',bar:'linear-gradient(90deg,#808898,#c0c8d8)'};
-  const sz = tier === 'legendaire' ? 62 : tier === 'diamant' ? 56 : tier === 'platine' ? 50 : 44;
+  const sz = tier === 'legendaire' ? 76 : tier === 'diamant' ? 70 : tier === 'platine' ? 64 : 58;
   const xpPct = p.pct || 0;
   const xpTotal = p.xpTotal || 0;
   const xpManquant = p.xpManquant != null ? p.xpManquant : 10;
@@ -1125,7 +1125,7 @@ function renderCarteHeader() {
       padding:14px 16px;margin-bottom:16px;
       box-shadow:inset 0 1px 0 ${tc.c1}88,0 0 28px ${tc.c1}44,0 2px 14px rgba(0,0,0,0.45);">
       <div style="display:flex;align-items:center;gap:14px;">
-        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
+        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
           ${simplifie ? '' : _avatarAvecBadge(profilData.photo_url, initialesHm, tier, sz, Math.round(sz*0.5), 'hm')}
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
