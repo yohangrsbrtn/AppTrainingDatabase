@@ -956,8 +956,14 @@ let _journeeData = null;
 function _chargerTop5Home() {
   setTimeout(async () => {
     try {
+      // limit=10 sur client_progression AVANT le filtrage (mode simplifié/coach exclus)
+      // faisait perdre une place à chaque fois qu'un des 10 meilleurs XP tombait sur un
+      // profil filtré (typiquement le coach lui-même, souvent bien classé) — le Top 10
+      // affichait alors 9 lignes au lieu de 10. On sur-fetch large, puis on retaille à 10
+      // APRÈS filtrage (même correctif que la page Classement complète, qui ne limite pas
+      // du tout côté requête).
       const [progRes, profilRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=10`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_progression?select=client_id,xp_total,titre_actif&order=xp_total.desc&limit=50`, { headers: supaHeaders() }),
         fetch(`${SUPABASE_URL}/rest/v1/client_profils?supabase_only=eq.true&select=client_id,prenom,nom,pseudo,photo_url,mode_simplifie,est_coach`, { headers: supaHeaders() }),
       ]);
       const progRows = progRes.ok ? await progRes.json() : [];
@@ -967,7 +973,7 @@ function _chargerTop5Home() {
       // (est_coach=true, ex: yohanp) n'apparaît pas non plus — le classement est
       // réservé aux vrais clients, pas au coach lui-même même s'il s'entraîne aussi.
       profils.filter(p => !p.mode_simplifie && !p.est_coach).forEach(p => { profilMap[p.client_id] = p; });
-      const cl = progRows.filter(p => profilMap[p.client_id]).map(p => ({
+      const cl = progRows.filter(p => profilMap[p.client_id]).slice(0, 10).map(p => ({
         id: p.client_id, ...profilMap[p.client_id],
         xpTotal: p.xp_total || 0, niveau: _niveauDepuisXp(p.xp_total || 0),
         titreActif: p.titre_actif || null,
