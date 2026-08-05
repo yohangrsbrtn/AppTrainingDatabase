@@ -1384,7 +1384,7 @@ function renderSettingsProfil() {
       <input id="pf-photo-input" type="file" accept="image/*" style="display:none;" onchange="_choisirPhotoProfilFichier(event)">
       ${fieldLabel('gauge', 'purple', 'Pseudo')}
       <div style="font-size:11px;color:#8892a4;margin:-4px 0 10px;">Affiché à la place de ton nom (ton prénom + initiale reste visible à côté, notamment dans le classement).</div>
-      <input id="pf-pseudo" type="text" placeholder="ex: ShadowWolf" maxlength="24" value="${esc(profilData.pseudo || '')}" style="${inputStyle}margin-bottom:12px;">
+      <input id="pf-pseudo" type="text" maxlength="24" value="${esc(profilData.pseudo || '')}" style="${inputStyle}margin-bottom:12px;">
       <button class="btn-primary" onclick="doSauverPseudo()" style="width:100%;padding:10px;font-size:13px;">Enregistrer</button>
       <div id="pf-pseudo-msg" style="font-size:13px;text-align:center;margin-top:8px;min-height:16px;"></div>
     </div></div>`;
