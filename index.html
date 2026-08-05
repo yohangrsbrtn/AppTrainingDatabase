@@ -192,7 +192,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
-<script src="chat.js?v=10"></script>
+<script src="chat.js?v=11"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -2101,7 +2101,7 @@ function toggleChatFab() {
 // N'affecte QUE les rappels automatiques (journée 21h30, paiement...) — les
 // messages envoyés manuellement par le coach passent toujours (voir
 // sql/2026-08-01_rappel_journee.sql).
-let _notifPrefs = { push_actif: true, rappel_journee: true, rappel_bilan: true };
+let _notifPrefs = { push_actif: true, rappel_journee: true, rappel_bilan: true, chat_push: true };
 
 async function chargerNotifPrefs() {
   try {
@@ -2146,6 +2146,7 @@ function ouvrirGererRappels() {
       <div style="flex:1;overflow-y:auto;padding:4px 20px calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;">
         ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 21h30 si tu n'as pas encore validé ta journée")}
         ${toggleRow('rappel_bilan', 'Rappel de bilan', "Vers 10h le jour de ton bilan si tu ne l'as pas encore envoyé")}
+        ${toggleRow('chat_push', 'Nouveau message chat', "Une seule notification au premier message non lu, pas à chaque message")}
       </div>
     </div>`;
   el.onclick = e => { if (e.target === el) el.remove(); };

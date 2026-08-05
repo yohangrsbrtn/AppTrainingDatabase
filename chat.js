@@ -58,6 +58,20 @@ function _chatMarquerToutLu() {
   if (!_chatMessages.length) return;
   const maxId = Math.max(..._chatMessages.map(m => m.id));
   localStorage.setItem(_chatLastReadKey(), String(maxId));
+  _chatSyncLectureServeur(maxId);
+}
+
+// Copie serveur de "dernier message lu" (table chat_lecture) — le localStorage seul
+// ne suffit pas pour décider d'envoyer un push : ça doit marcher app fermée. Upsert
+// fire-and-forget, ne bloque jamais l'UI si ça échoue (juste un push en retard).
+let _chatSyncLectureDerniereMaj = 0;
+function _chatSyncLectureServeur(maxId) {
+  if (!S.client || maxId <= _chatSyncLectureDerniereMaj) return;
+  _chatSyncLectureDerniereMaj = maxId;
+  fetch(`${SUPABASE_URL}/rest/v1/chat_lecture?on_conflict=client_id`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+    body: JSON.stringify({ client_id: S.client, dernier_lu_id: maxId, updated_at: new Date().toISOString() })
+  }).catch(() => {});
 }
 
 // ── Bouton flottant ──────────────────────────────────────────────────────

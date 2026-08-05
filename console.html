@@ -1004,9 +1004,25 @@ function _chatCoachSubscribe() {
       if (el && state.nav === 'chat') {
         el.insertAdjacentHTML('beforeend', _chatCoachBulle(payload.new));
         el.scrollTop = el.scrollHeight;
+        _chatCoachMarquerLu();
       }
     })
     .subscribe();
+}
+
+// Copie serveur "dernier message lu" pour le coach (table chat_lecture, partagée avec
+// chat.js côté client) — sans ça, le coach recevrait un push à chaque réouverture de la
+// page Chat même juste après l'avoir déjà lue, faute de synchro de sa lecture.
+let _chatCoachDerniereMaj = 0;
+function _chatCoachMarquerLu() {
+  if (!_chatCoachMessages.length) return;
+  const maxId = Math.max(..._chatCoachMessages.map(m => m.id));
+  if (maxId <= _chatCoachDerniereMaj) return;
+  _chatCoachDerniereMaj = maxId;
+  fetch(`${SUPABASE_URL}/rest/v1/chat_lecture?on_conflict=client_id`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+    body: JSON.stringify({ client_id: CHAT_COACH_ID, dernier_lu_id: maxId, updated_at: new Date().toISOString() })
+  }).catch(() => {});
 }
 
 function _chatCoachAvatar(p, size) {
@@ -1066,6 +1082,7 @@ function renderChatCoachPage(el) {
         msgEl.scrollTop = msgEl.scrollHeight;
       }
       _chatCoachSubscribe();
+      _chatCoachMarquerLu();
     });
   } else {
     const msgEl = document.getElementById('chatCoachMessages');
@@ -1076,6 +1093,7 @@ function renderChatCoachPage(el) {
       msgEl.scrollTop = msgEl.scrollHeight;
     }
     _chatCoachSubscribe();
+    _chatCoachMarquerLu();
   }
 }
 
