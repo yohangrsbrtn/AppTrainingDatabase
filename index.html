@@ -1164,13 +1164,13 @@ function renderCarteHeader() {
               ${simplifie ? '' : titreHtml}
             </div>
             ${nomSecondaire ? `<div style="font-size:11px;color:#8892a4;margin-top:-2px;">${esc(nomSecondaire)}</div>` : ''}
-            ${simplifie ? '' : `<div style="font-size:12px;color:#8892a4;margin-top:2px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
-            <div style="margin-top:8px;display:flex;justify-content:space-between;">
-              <span style="font-size:10px;color:#8892a4;">Niv. ${niveau}</span>
-              <span style="font-size:10px;color:${tc.c1};font-weight:600;">${p.niveauMaxAtteint ? '👑 Niveau max' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
+            ${simplifie ? '' : `<div style="font-size:14px;color:#8892a4;margin-top:5px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
+            <div style="margin-top:15px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;">
+              <span style="font-size:12px;color:#8892a4;white-space:nowrap;">Niv. ${niveau}</span>
+              <span style="font-size:12px;color:${tc.c1};font-weight:600;white-space:nowrap;">${p.niveauMaxAtteint ? '👑 Niveau max' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
             </div>
-            <div style="height:4px;background:#1e2235;border-radius:2px;overflow:hidden;margin-top:6px;">
-              <div style="height:4px;border-radius:2px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
+            <div style="height:8px;background:#1e2235;border-radius:4px;overflow:hidden;margin-top:10px;">
+              <div style="height:8px;border-radius:4px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
             </div>`}
           </div>
         </div>
