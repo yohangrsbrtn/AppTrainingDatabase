@@ -362,7 +362,7 @@ function _chatReactionsBarHtml(messageId) {
   const map = _chatReactions[messageId] || {};
   return Object.keys(map).filter(e => map[e].size > 0).map(e => {
     const mine = map[e].has(S.client);
-    return `<span onclick="_chatToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:2px 7px;border-radius:10px;background:${mine ? '#4f6ef733' : '#1e223580'};border:1px solid ${mine ? '#4f6ef7' : '#2d3142'};cursor:pointer;">${e} ${map[e].size}</span>`;
+    return `<span onclick="_chatToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:2px;font-size:10.5px;line-height:1;padding:3px 6px;border-radius:9px;background:${mine ? '#4f6ef733' : '#1e223580'};border:1px solid ${mine ? '#4f6ef7' : '#2d3142'};cursor:pointer;">${e} ${map[e].size}</span>`;
   }).join('');
 }
 
@@ -449,7 +449,10 @@ function _chatBulleHtml(m) {
   // À cheval sur le coin bas-droit de la bulle (position:absolute ancrée sur la bulle
   // elle-même, pas dans le flux) — le padding de la bulle protège le texte, la pastille
   // ne peut déborder que sous la ligne de base du texte, jamais par-dessus.
-  const reactBar = `<div id="chatReact-${m.id}" style="position:absolute;bottom:-9px;right:8px;display:flex;gap:3px;z-index:2;">${_chatReactionsBarHtml(m.id)}</div>`;
+  // L'essentiel de la pastille pend SOUS la bulle — seule une fine tranche (≤ le padding
+  // vertical de la bulle, 9px) chevauche le bas, jamais la ligne de texte elle-même,
+  // même sur un message court d'une seule ligne (le padding protège toujours ce seuil).
+  const reactBar = `<div id="chatReact-${m.id}" style="position:absolute;bottom:-11px;right:8px;display:flex;gap:3px;z-index:2;">${_chatReactionsBarHtml(m.id)}</div>`;
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:78%;">

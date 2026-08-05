@@ -1025,7 +1025,7 @@ function _chatCoachReactionsBarHtml(messageId) {
   const map = _chatCoachReactions[messageId] || {};
   return Object.keys(map).filter(e => map[e].size > 0).map(e => {
     const mine = map[e].has(CHAT_COACH_ID);
-    return `<span onclick="_chatCoachToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:2px 7px;border-radius:10px;background:${mine ? 'var(--accent-soft)' : 'var(--surface-2)'};border:1px solid ${mine ? 'var(--accent)' : 'var(--hairline)'};cursor:pointer;">${e} ${map[e].size}</span>`;
+    return `<span onclick="_chatCoachToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:2px;font-size:10.5px;line-height:1;padding:3px 6px;border-radius:9px;background:${mine ? 'var(--accent-soft)' : 'var(--surface-2)'};border:1px solid ${mine ? 'var(--accent)' : 'var(--hairline)'};cursor:pointer;">${e} ${map[e].size}</span>`;
   }).join('');
 }
 function _chatCoachUpdateReactionBar(messageId) {
@@ -1151,7 +1151,7 @@ function _chatCoachBulle(m) {
   const p = _chatCoachProfils[m.client_id] || {};
   const nom = moi ? 'Toi' : ([p.prenom, p.nom].filter(Boolean).join(' ') || m.client_id);
   const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
-  const reactBar = `<div id="chatCoachReact-${m.id}" style="position:absolute;bottom:-9px;right:8px;display:flex;gap:3px;z-index:2;">${_chatCoachReactionsBarHtml(m.id)}</div>`;
+  const reactBar = `<div id="chatCoachReact-${m.id}" style="position:absolute;bottom:-11px;right:8px;display:flex;gap:3px;z-index:2;">${_chatCoachReactionsBarHtml(m.id)}</div>`;
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:60%;">
