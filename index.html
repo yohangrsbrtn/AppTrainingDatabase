@@ -1156,13 +1156,19 @@ function renderCarteHeader() {
   const initialesHm = ((profilData.prenom ? profilData.prenom[0] : '') + (profilData.nom ? profilData.nom[0] : '')).toUpperCase() || (S.client||'?')[0].toUpperCase();
 
   return `<div id="carteHeaderHome" style="
+      position:relative;
       background:linear-gradient(145deg,#131825 0%,${tc.c2}99 30%,${tc.c2}ee 50%,${tc.c2}99 70%,#131825 100%);
       border-radius:12px;border-top:4px solid ${tc.c1};
       border-left:1px solid ${tc.c1}33;border-right:1px solid ${tc.c1}33;border-bottom:1px solid ${tc.c1}22;
       padding:14px 16px;margin-bottom:16px;
       box-shadow:inset 0 1px 0 ${tc.c1}88,0 0 28px ${tc.c1}44,0 2px 14px rgba(0,0,0,0.45);">
+      <div style="position:absolute;top:14px;right:16px;display:flex;align-items:center;gap:6px;z-index:2;">
+        <button id="btnChatHeader" onclick="goTo('chat')" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">${ICONE_CHAT}${(typeof _chatNonLus !== 'undefined' && _chatNonLus > 0) ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_chatNonLus > 9 ? '9+' : _chatNonLus}</span>` : ''}</button>
+        <button id="btnNotifsClient" onclick="ouvrirNotificationsClient()" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">${ICONE_CLOCHE}${_notifsClientCount > 0 ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_notifsClientCount}</span>` : ''}</button>
+        <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">${ICONE_PARAMETRES}</button>
+      </div>
       <div style="display:flex;align-items:center;gap:14px;">
-        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
+        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding-right:118px;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
           ${simplifie ? '' : _avatarAvecBadge(profilData.photo_url, initialesHm, tier, sz, Math.round(sz*0.5), 'hm')}
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -1171,11 +1177,6 @@ function renderCarteHeader() {
             ${nomSecondaire ? `<div style="font-size:11px;color:#8892a4;margin-top:-2px;">${esc(nomSecondaire)}</div>` : ''}
             ${simplifie ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:3px;"><span style="font-size:14px;color:#8892a4;white-space:nowrap;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</span>${titreHtml}</div>`}
           </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-          <button id="btnChatHeader" onclick="goTo('chat')" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CHAT}${(typeof _chatNonLus !== 'undefined' && _chatNonLus > 0) ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_chatNonLus > 9 ? '9+' : _chatNonLus}</span>` : ''}</button>
-          <button id="btnNotifsClient" onclick="ouvrirNotificationsClient()" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CLOCHE}${_notifsClientCount > 0 ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_notifsClientCount}</span>` : ''}</button>
-          <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_PARAMETRES}</button>
         </div>
       </div>
       ${simplifie ? '' : `<div style="margin-top:10px;">
