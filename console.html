@@ -1627,30 +1627,12 @@ async function _majStatutPush(){
 }
 
 // ── Envoyer une notification push à un client (ou tous) ────────────────
-// Rappel de paiement automatique désactivé (voir sql/2026-08-05_desactive_rappel_paiement_auto.sql)
-// — reste disponible en préréglage manuel ici, texte identique à l'ancien envoi auto.
-const _NTF_PRESETS = {
-  paiement: { titre: '💳 Petit rappel', corps: "N'oublie pas de faire le virement à ton coach pour qu'il puisse acheter sa créatine 💪", source: 'rappel_paiement' },
-};
-let _ntfPresetSource = null;
-function _ntfAppliquerPreset(id){
-  const p = _NTF_PRESETS[id];
-  if (!p) return;
-  document.getElementById('ntf-titre').value = p.titre;
-  document.getElementById('ntf-corps').value = p.corps;
-  _ntfPresetSource = p.source;
-}
-
 function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps, presetPage){
-  _ntfPresetSource = null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:440px;width:100%;">
       <h3 style="margin:0 0 16px;">🔔 Notifier ${esc(clientNom)}</h3>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
-        <button type="button" class="btn" style="font-size:11.5px;padding:5px 10px;" onclick="_ntfAppliquerPreset('paiement')">💳 Rappel de paiement</button>
-      </div>
       <div class="fiche-field">
         <label>Titre</label>
         <input id="ntf-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;" value="${esc(presetTitre||'')}">
@@ -1743,7 +1725,7 @@ async function envoyerNotification(clientId, page){
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    const j = await _envoyerNotifCore(clientId, titre, corps, pleinEcran, _ntfPresetSource || 'manuel', page);
+    const j = await _envoyerNotifCore(clientId, titre, corps, pleinEcran, 'manuel', page);
     document.querySelector('.modal-overlay')?.remove();
     alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
     if (state.nav === 'notifications') { await chargerHistoriqueNotifs(); renderMain(); }
@@ -1832,6 +1814,17 @@ function _renderNotifRappelsList(){
     </div>`).join('');
 }
 
+// Rappel de paiement automatique désactivé (voir sql/2026-08-05_desactive_rappel_paiement_auto.sql)
+// — reste disponible en préréglage manuel ici, texte identique à l'ancien envoi auto,
+// tagué source='rappel_paiement' pour continuer à apparaître dans l'historique auto.
+let _notifSelPresetSource = null;
+function _notifSelAppliquerPreset(id){
+  if (id !== 'paiement') return;
+  _notifSelTitre = '💳 Petit rappel';
+  _notifSelCorps = "N'oublie pas de faire le virement à ton coach pour qu'il puisse acheter sa créatine 💪";
+  _notifSelPresetSource = 'rappel_paiement';
+  if (state.nav === 'notifications') renderMain();
+}
 let _notifSelClients = new Set();
 let _notifSelTitre = '';
 let _notifSelCorps = '';
@@ -1951,6 +1944,9 @@ function _renderNotifEnvoyerSection(){
   return `
     <div class="card" style="margin-bottom:8px;">
       <h2 style="font-size:15px;margin:0 0 12px;">Envoyer à une sélection de clients</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+        <button type="button" class="btn" style="font-size:11.5px;padding:5px 10px;" onclick="_notifSelAppliquerPreset('paiement')">💳 Rappel de paiement</button>
+      </div>
       <div class="fiche-field">
         <label>Titre</label>
         <input id="ntfsel-titre" type="text" placeholder="ex: Nouveau message de ton coach" style="font-size:16px;" value="${esc(_notifSelTitre)}" oninput="_notifSelTitre=this.value">
@@ -2009,8 +2005,8 @@ async function envoyerNotificationSelection(){
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    const j = await _envoyerNotifCore(Array.from(_notifSelClients), titre, corps, _notifSelPlein, 'manuel');
-    _notifSelClients = new Set(); _notifSelTitre = ''; _notifSelCorps = ''; _notifSelPlein = false;
+    const j = await _envoyerNotifCore(Array.from(_notifSelClients), titre, corps, _notifSelPlein, _notifSelPresetSource || 'manuel');
+    _notifSelClients = new Set(); _notifSelTitre = ''; _notifSelCorps = ''; _notifSelPlein = false; _notifSelPresetSource = null;
     alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
     await chargerHistoriqueNotifs();
     if (state.nav === 'notifications') renderMain();
@@ -4538,7 +4534,6 @@ function renderClientsPage(el){
       <div><div class="eyebrow">Console coach</div><h1>Clients</h1></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="meta" id="clientCount"></div>
-        <button class="btn" onclick="ouvrirModalNotifier('all','Tous les clients')">📣 Notifier tous les clients</button>
         <button class="btn" onclick="recalibrerAssiduiteTousLesClients()">🔄 Recalibrer assiduité (tous)</button>
         <button class="btn primary" onclick="ouvrirNouveauClient()">+ Nouveau client</button>
       </div>
