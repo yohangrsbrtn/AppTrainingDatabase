@@ -34,6 +34,24 @@ async function loadHistoriqueBilans() { await _supaLoadHistorique(); }
 // non-envoyé, toujours visible du coach comme en retard — mais il n'est
 // plus accessible pour édition/envoi depuis l'app cliente (pas de vue
 // listant les bilans non-envoyés autre que le plus récent).
+// semaine_label est figé au moment de la création du bilan — si le client modifie
+// jour_bilan pendant que ce bilan est en cours, le libellé affiché reste celui calculé
+// avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. Appelé à chaque ouverture,
+// réécrit en base si le jour_bilan a changé entre temps (bug vécu : jour_bilan passé à
+// Mercredi, bilan encore affiché "lundi→dimanche"). Mute `row` en place (même référence
+// que ce que renvoie _supaGetOrCreateBilanCourant à son appelant).
+async function _supaResyncSemaineLabel(row, jourBilanNom) {
+  const labelAttendu = _supaGetSemaineLabel(jourBilanNom, new Date(row.created_at));
+  if (row.semaine_label === labelAttendu) return;
+  row.semaine_label = labelAttendu;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${row.id}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ semaine_label: labelAttendu })
+    });
+  } catch(e) {}
+}
+
 async function _supaGetOrCreateBilanCourant(clientId) {
   const profilRes = await fetch(
     `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`,
@@ -42,45 +60,40 @@ async function _supaGetOrCreateBilanCourant(clientId) {
   const profilArr = profilRes.ok ? await profilRes.json() : [];
   const jourBilanNom = (profilArr[0] && profilArr[0].jour_bilan) || null;
 
-  // Dernier bilan non archivé (envoyé ou pas) — s'il est encore dans sa PROPRE semaine (le
-  // jour_bilan qu'il couvre n'est pas encore passé), c'est TOUJOURS le bilan "en cours" pour
-  // les saisies du jour (journée validée, séance, steps...), MÊME s'il a déjà été envoyé au
-  // coach : un bilan envoyé reste modifiable jusqu'à la fin de sa semaine (bannière "Bilan
-  // envoyé au coach — toujours modifiable"). Filtrer avant sur envoye_coach=eq.false était le
-  // bug : un client qui envoie son bilan le jour même de son jour_bilan puis valide sa journée
-  // dans la foulée voyait sa saisie partir dans un TOUT NOUVEAU bilan pour la semaine suivante
-  // au lieu de continuer à remplir celui qui vient d'être envoyé (bug vécu : Perrine valide sa
-  // journée de dimanche, ça remplit le dimanche de la semaine PROCHAINE au lieu de celui du
-  // bilan déjà envoyé). archive=eq.false : un doublon supprimé par le coach ne doit jamais être
-  // repris comme "bilan en cours" (bug distinct, déjà corrigé).
+  // Dernier bilan non archivé (envoyé ou pas). archive=eq.false : un doublon supprimé par le
+  // coach ne doit jamais être repris comme "bilan en cours" (bug distinct, déjà corrigé).
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=created_at.desc&limit=1`,
     { headers: supaHeaders() }
   );
   const arr = res.ok ? await res.json() : [];
   if (arr.length > 0) {
-    // Bascule sur la semaine suivante seulement après la vraie deadline d'envoi
-    // (jour_bilan à midi, _bilanDeadline/api.js) — PAS dès le début du jour_bilan
-    // (minuit). Sans ce garde-fou, le bilan de la semaine prochaine apparaissait
-    // déjà avant que le client ait fini son délai pour envoyer celui en cours
-    // (bug vécu : jour_bilan=Mercredi, "semaine prochaine" créée dès mercredi
-    // 00h00 au lieu d'attendre mercredi midi).
-    const limite = _bilanDeadline(jourBilanNom, new Date(arr[0].created_at));
-    if (new Date() <= limite) {
-      // semaine_label est figé au moment de la création du bilan — si le client modifie
-      // jour_bilan pendant que ce bilan est en cours, le libellé affiché reste celui calculé
-      // avec l'ancien jour_bilan tant qu'on ne le recalcule pas ici. On recalcule à chaque
-      // ouverture et on réécrit en base si le jour_bilan a changé entre temps (bug vécu :
-      // jour_bilan passé à Mercredi, bilan encore affiché "lundi→dimanche").
-      const labelAttendu = _supaGetSemaineLabel(jourBilanNom, new Date(arr[0].created_at));
-      if (arr[0].semaine_label !== labelAttendu) {
-        arr[0].semaine_label = labelAttendu;
-        fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${arr[0].id}`, {
-          method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
-          body: JSON.stringify({ semaine_label: labelAttendu })
-        }).catch(() => {});
-      }
+    // Le dernier bilan couvre-t-il RÉELLEMENT la semaine qui contient aujourd'hui (comparaison
+    // des bornes de semaine — pas juste la deadline d'envoi) ? jour_bilan démarre sa PROPRE
+    // semaine (cf. _bilanWeekBounds) : le matin du jour_bilan, le dernier bilan connu (créé
+    // plus tôt dans la semaine qui vient de s'achever) ne couvre PLUS aujourd'hui, même s'il
+    // est encore dans sa fenêtre de grâce d'envoi. Sans ce test, "Journée en cours"/"séance
+    // validée" écrivaient dans la case du MAUVAIS jour — celui de la semaine PRÉCÉDENTE, déjà
+    // envoyée et créditée en XP — au lieu d'aujourd'hui (bug vécu, 2026-08-05 : le mercredi
+    // matin, jour_bilan, "Journée en cours" affichait "Mercredi" mais avec les données du
+    // mercredi de la semaine précédente, issues d'un bilan déjà envoyé et déjà crédité en XP).
+    const { debut: debutDernier }     = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
+    const { debut: debutAujourdhui }  = _bilanWeekBounds(jourBilanNom, new Date());
+    if (debutDernier.getTime() === debutAujourdhui.getTime()) {
+      await _supaResyncSemaineLabel(arr[0], jourBilanNom);
       return { row: arr[0], jourBilanNom };
+    }
+    // Le dernier bilan couvre une semaine déjà terminée. On ne le quitte QUE s'il n'a pas
+    // encore été envoyé ET qu'on est encore dans sa fenêtre de grâce (jour_bilan à midi,
+    // _bilanDeadline/api.js) — le temps de laisser le client l'envoyer avant de basculer sur
+    // la semaine suivante. Dès qu'il est envoyé (ou la grâce dépassée), plus aucune raison de
+    // continuer à écrire dedans : on tombe dans la création d'un nouveau bilan ci-dessous.
+    if (!arr[0].envoye_coach) {
+      const limite = _bilanDeadline(jourBilanNom, new Date(arr[0].created_at));
+      if (new Date() <= limite) {
+        await _supaResyncSemaineLabel(arr[0], jourBilanNom);
+        return { row: arr[0], jourBilanNom };
+      }
     }
   }
   // Référence de la semaine du nouveau bilan : "maintenant" par défaut, SAUF si ce dernier

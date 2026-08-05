@@ -36,11 +36,15 @@ function _chatEnsureFab() {
   let pos = null;
   try { pos = JSON.parse(localStorage.getItem(_CHAT_FAB_POS_KEY) || 'null'); } catch(e) {}
 
+  // Style "léger" — même logique que les boutons de notation non cliqués du bilan
+  // (_styleNoteBtn/bilan.js) : fond teinté très transparent + bordure discrète dans la
+  // même couleur, pas de aplat plein ni d'ombre marquée.
+  const _CHAT_FAB_COLOR = '#f0a500';
   const fab = document.createElement('div');
   fab.id = 'chatFab';
-  fab.style.cssText = `position:fixed;right:${pos ? pos.right + 'px' : '16px'};bottom:${pos ? pos.bottom + 'px' : 'calc(88px + env(safe-area-inset-bottom))'};width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#4f6ef7,#3b5ce0);box-shadow:0 6px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:8500;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;`;
-  fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 17 17" fill="none"><path d="M1.5 8.2c0-3.4 3.1-6.2 7-6.2s7 2.8 7 6.2-3.1 6.2-7 6.2c-.9 0-1.8-.15-2.6-.44L2.2 15.2l.9-3C2 11.1 1.5 9.7 1.5 8.2z" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <div id="chatFabBadge" style="display:none;position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;background:#e74c3c;border-radius:8px;color:#fff;font-size:10px;font-weight:700;align-items:center;justify-content:center;box-shadow:0 0 0 2px #0f1117;"></div>`;
+  fab.style.cssText = `position:fixed;right:${pos ? pos.right + 'px' : '16px'};bottom:${pos ? pos.bottom + 'px' : 'calc(88px + env(safe-area-inset-bottom))'};width:50px;height:50px;border-radius:50%;background:${_CHAT_FAB_COLOR}22;border:1px solid ${_CHAT_FAB_COLOR}55;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;z-index:8500;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;`;
+  fab.innerHTML = `<svg width="22" height="22" viewBox="0 0 17 17" fill="none"><path d="M1.5 8.2c0-3.4 3.1-6.2 7-6.2s7 2.8 7 6.2-3.1 6.2-7 6.2c-.9 0-1.8-.15-2.6-.44L2.2 15.2l.9-3C2 11.1 1.5 9.7 1.5 8.2z" stroke="${_CHAT_FAB_COLOR}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div id="chatFabBadge" style="display:none;position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;background:#e05c5c;border-radius:9px;color:#fff;font-size:10px;font-weight:700;align-items:center;justify-content:center;box-shadow:0 0 0 2px #0f1117;"></div>`;
   document.body.appendChild(fab);
   _chatBindFabDrag(fab);
   _chatUpdateFabBadge();
