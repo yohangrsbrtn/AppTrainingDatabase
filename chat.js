@@ -48,6 +48,26 @@ function _chatEnsureFab() {
   document.body.appendChild(fab);
   _chatBindFabDrag(fab);
   _chatUpdateFabBadge();
+  _chatWatchModals();
+}
+
+// Masque le bouton flottant tant qu'une fenêtre plein écran (Paramètres...) est ouverte
+// par-dessus — sinon il reste visible au-dessus du fond assombri, son z-index élevé
+// n'ayant aucune raison de céder devant celui de ces panneaux. Un MutationObserver plutôt
+// que d'accrocher chaque bouton de fermeture individuellement (backdrop, croix, swipe,
+// déconnexion...) : settingsPanel peut se fermer par plusieurs chemins différents.
+const _CHAT_MODALS_QUI_MASQUENT = ['settingsPanel'];
+let _chatModalObserver = null;
+function _chatWatchModals() {
+  if (_chatModalObserver) return;
+  _chatModalObserver = new MutationObserver(() => {
+    const fab = document.getElementById('chatFab');
+    if (!fab) return;
+    const modalOuverte = _CHAT_MODALS_QUI_MASQUENT.some(id => document.getElementById(id));
+    if (modalOuverte) fab.style.display = 'none';
+    else if (!_chatOuvert) fab.style.display = 'flex';
+  });
+  _chatModalObserver.observe(document.body, { childList: true });
 }
 
 // Pointer events (touch + souris unifiés) SEULEMENT pour détecter le déplacement (drag)
