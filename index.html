@@ -1162,7 +1162,7 @@ function renderCarteHeader() {
       padding:14px 16px;margin-bottom:16px;
       box-shadow:inset 0 1px 0 ${tc.c1}88,0 0 28px ${tc.c1}44,0 2px 14px rgba(0,0,0,0.45);">
       <div style="display:flex;align-items:center;gap:14px;">
-        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
+        <div ${simplifie ? '' : 'onclick="loadProgression()"'} style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:${simplifie ? 'default' : 'pointer'};" ${simplifie ? '' : `ontouchstart="this.style.opacity='.75'" ontouchend="this.style.opacity='1'"`}>
           ${simplifie ? '' : _avatarAvecBadge(profilData.photo_url, initialesHm, tier, sz, Math.round(sz*0.5), 'hm')}
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -1170,20 +1170,22 @@ function renderCarteHeader() {
               ${simplifie ? '' : titreHtml}
             </div>
             ${nomSecondaire ? `<div style="font-size:11px;color:#8892a4;margin-top:-2px;">${esc(nomSecondaire)}</div>` : ''}
-            ${simplifie ? '' : `<div style="font-size:14px;color:#8892a4;margin-top:5px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>
-            <div style="margin-top:15px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;">
-              <span style="font-size:12px;color:#8892a4;white-space:nowrap;">Niv. ${niveau}</span>
-              <span style="font-size:12px;color:${tc.c1};font-weight:600;white-space:nowrap;">${p.niveauMaxAtteint ? '👑 Niveau max' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
-            </div>
-            <div style="height:8px;background:#1e2235;border-radius:4px;overflow:hidden;margin-top:10px;">
-              <div style="height:8px;border-radius:4px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
-            </div>`}
+            ${simplifie ? '' : `<div style="font-size:14px;color:#8892a4;margin-top:3px;">${xpTotal ? xpTotal.toLocaleString('fr') + ' XP' : '—'}</div>`}
           </div>
         </div>
         <button id="btnChatHeader" onclick="goTo('chat')" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0 4px 0 0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CHAT}${(typeof _chatNonLus !== 'undefined' && _chatNonLus > 0) ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_chatNonLus > 9 ? '9+' : _chatNonLus}</span>` : ''}</button>
         <button id="btnNotifsClient" onclick="ouvrirNotificationsClient()" style="position:relative;width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0 4px 0 0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_CLOCHE}${_notifsClientCount > 0 ? `<span style="position:absolute;top:-5px;right:-5px;background:#e05c5c;color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${_notifsClientCount}</span>` : ''}</button>
         <button onclick="ouvrirSettings()" style="width:36px;height:36px;background:transparent;border:1px solid #2a2f45;border-radius:9px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;align-self:flex-start;cursor:pointer;">${ICONE_PARAMETRES}</button>
       </div>
+      ${simplifie ? '' : `<div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;">
+          <span style="font-size:12px;color:#8892a4;white-space:nowrap;">Niv. ${niveau}</span>
+          <span style="font-size:12px;color:${tc.c1};font-weight:600;white-space:nowrap;">${p.niveauMaxAtteint ? '👑 Niveau max' : xpManquant.toLocaleString('fr') + ' XP → Niv. ' + (niveau+1)}</span>
+        </div>
+        <div style="height:8px;background:#1e2235;border-radius:4px;overflow:hidden;margin-top:6px;">
+          <div style="height:8px;border-radius:4px;width:${xpPct}%;background:${tc.bar};transition:width .6s ease;"></div>
+        </div>
+      </div>`}
     </div>`;
 }
 
