@@ -1580,7 +1580,16 @@ function _coachNotifToggleRow(key, label, desc){
   </div>`;
 }
 
+// Chargé une seule fois (lazy, comme les autres pages) — PAS à chaque render de la
+// page Paramètres. Sans ce garde-fou, toggleCoachNotifPref() ci-dessous déclenchait
+// une course : son renderMain() re-rendait la page, qui rappelait cette fonction, dont
+// le GET pouvait arriver AVANT que le POST du toggle ait fini d'écrire en base — le
+// GET récupérait alors encore l'ancienne valeur et écrasait le clic, remettant le
+// bouton dans son état d'avant (bug vécu : "reste vert quand je clique dessus").
+let _coachNotifPrefsLoaded = false;
 async function _chargerCoachNotifPrefs(){
+  if (_coachNotifPrefsLoaded) return;
+  _coachNotifPrefsLoaded = true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_notif_prefs?id=eq.1`, { headers: supaHeaders() });
     const rows = res.ok ? await res.json() : [];
