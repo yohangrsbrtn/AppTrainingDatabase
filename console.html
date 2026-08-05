@@ -449,6 +449,19 @@
   </div>
 </div>
 
+<button id="chatCoachFab" onclick="toggleChatCoachFab()" title="Chat" style="position:fixed;bottom:78px;right:22px;width:46px;height:46px;border-radius:50%;background:var(--accent);color:#1a0e00;border:none;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:pointer;z-index:150;display:flex;align-items:center;justify-content:center;position:relative;">💬<span id="chatCoachFabBadge" style="display:none;position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;background:#e05c5c;border-radius:9px;color:#fff;font-size:10.5px;font-weight:700;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--surface-1);"></span></button>
+<div id="chatCoachFabPanel" style="display:none;position:fixed;bottom:134px;right:22px;width:320px;max-height:60vh;background:var(--surface-3);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:150;flex-direction:column;overflow:hidden;">
+  <div style="padding:10px 14px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <span style="font-size:13px;font-weight:700;">💬 Chat — salon commun</span>
+    <button class="icon-btn" style="width:22px;height:22px;" onclick="toggleChatCoachFab()">✕</button>
+  </div>
+  <div id="chatCoachFabMessages" style="flex:1;overflow-y:auto;padding:10px 12px;"></div>
+  <div style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;display:flex;gap:6px;">
+    <input id="chatCoachFabInput" type="text" placeholder="Écris un message…" autocomplete="off" style="flex:1;font-size:14px;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChatCoachFab();}">
+    <button class="btn primary" style="padding:7px 12px;" onclick="envoyerMessageChatCoachFab()">Envoyer</button>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=8"></script>
 <script src="collection.js?v=2"></script>
@@ -1000,11 +1013,22 @@ function _chatCoachSubscribe() {
   _chatCoachChannel = _sbRealtime.channel('chat_messages_console')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, payload => {
       _chatCoachMessages.push(payload.new);
-      const el = document.getElementById('chatCoachMessages');
-      if (el && state.nav === 'chat') {
-        el.insertAdjacentHTML('beforeend', _chatCoachBulle(payload.new));
-        el.scrollTop = el.scrollHeight;
+      const pageOuverte = state.nav === 'chat';
+      const elPage = document.getElementById('chatCoachMessages');
+      if (elPage && pageOuverte) {
+        elPage.insertAdjacentHTML('beforeend', _chatCoachBulle(payload.new));
+        elPage.scrollTop = elPage.scrollHeight;
+      }
+      const elFab = document.getElementById('chatCoachFabMessages');
+      if (elFab && _chatCoachFabOpen) {
+        elFab.insertAdjacentHTML('beforeend', _chatCoachBulle(payload.new));
+        elFab.scrollTop = elFab.scrollHeight;
+      }
+      if (pageOuverte || _chatCoachFabOpen) {
         _chatCoachMarquerLu();
+      } else if (payload.new.client_id !== CHAT_COACH_ID) {
+        _chatCoachNonLus++;
+        _chatCoachUpdateFabBadge();
       }
     })
     .subscribe();
@@ -1097,8 +1121,8 @@ function renderChatCoachPage(el) {
   }
 }
 
-async function envoyerMessageChatCoach() {
-  const input = document.getElementById('chatCoachInput');
+async function _envoyerMessageChatCoachCore(inputId) {
+  const input = document.getElementById(inputId);
   if (!input) return;
   const texte = input.value.trim();
   if (!texte) return;
@@ -1116,6 +1140,72 @@ async function envoyerMessageChatCoach() {
   } finally {
     input.disabled = false;
     input.focus();
+  }
+}
+function envoyerMessageChatCoach() { return _envoyerMessageChatCoachCore('chatCoachInput'); }
+function envoyerMessageChatCoachFab() { return _envoyerMessageChatCoachCore('chatCoachFabInput'); }
+
+// ── Bouton flottant chat (💬, accès rapide depuis toute la console, comme le
+// pense-bête 📌 juste en-dessous) — panneau indépendant de la page dédiée
+// state.nav='chat' (renderChatCoachPage), partage juste les mêmes données en
+// mémoire (_chatCoachMessages/_chatCoachProfils) et le même canal Realtime.
+let _chatCoachFabOpen = false;
+let _chatCoachNonLus = 0;
+
+function _chatCoachUpdateFabBadge() {
+  const badge = document.getElementById('chatCoachFabBadge');
+  if (!badge) return;
+  if (_chatCoachNonLus > 0) { badge.style.display = 'flex'; badge.textContent = _chatCoachNonLus > 9 ? '9+' : String(_chatCoachNonLus); }
+  else badge.style.display = 'none';
+}
+
+// Compte les non-lus au démarrage (pas seulement ceux reçus pendant que la console est
+// ouverte) en comparant chat_lecture.dernier_lu_id (partagé avec chat.js côté client) au
+// nombre réel de messages plus récents envoyés par d'autres. Absence de ligne = jamais lu
+// → 0 par défaut côté serveur (COALESCE), donc tout l'historique compterait comme non lu ;
+// pour éviter ça au tout premier lancement de cette fonctionnalité côté coach, une valeur
+// nulle est traitée comme "à jour" (pas de rattrapage rétroactif), même logique que
+// _chatInitNonLus côté client.
+async function _chatCoachInitNonLus() {
+  try {
+    const lecRes = await fetch(`${SUPABASE_URL}/rest/v1/chat_lecture?client_id=eq.${encodeURIComponent(CHAT_COACH_ID)}&select=dernier_lu_id`, { headers: supaHeaders() });
+    const lecArr = lecRes.ok ? await lecRes.json() : [];
+    if (!lecArr.length) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages?order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+      const arr = res.ok ? await res.json() : [];
+      await fetch(`${SUPABASE_URL}/rest/v1/chat_lecture?on_conflict=client_id`, {
+        method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+        body: JSON.stringify({ client_id: CHAT_COACH_ID, dernier_lu_id: (arr[0] && arr[0].id) || 0 })
+      });
+      _chatCoachNonLus = 0;
+    } else {
+      const dernierLu = lecArr[0].dernier_lu_id || 0;
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages?id=gt.${dernierLu}&client_id=neq.${encodeURIComponent(CHAT_COACH_ID)}&select=id`, { headers: supaHeaders() });
+      const arr = res.ok ? await res.json() : [];
+      _chatCoachNonLus = arr.length;
+    }
+  } catch(e) { _chatCoachNonLus = 0; }
+  _chatCoachUpdateFabBadge();
+}
+
+function toggleChatCoachFab() {
+  _chatCoachFabOpen = !_chatCoachFabOpen;
+  document.getElementById('chatCoachFabPanel').style.display = _chatCoachFabOpen ? 'flex' : 'none';
+  if (_chatCoachFabOpen) {
+    _chatCoachNonLus = 0;
+    _chatCoachUpdateFabBadge();
+    const render = () => {
+      const el = document.getElementById('chatCoachFabMessages');
+      if (el) {
+        el.innerHTML = _chatCoachMessages.length
+          ? _chatCoachMessages.map(_chatCoachBulle).join('')
+          : `<div style="text-align:center;color:var(--text-faint);padding:40px 10px;">Aucun message pour l'instant.</div>`;
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+    if (!_chatCoachLoaded) chargerChatCoach().then(() => { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); });
+    else { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); }
+    document.getElementById('chatCoachFabInput').focus();
   }
 }
 
@@ -10819,6 +10909,12 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
   // nécessaire (corrigé : renderTodoList distingue maintenant "Chargement…"
   // de "Rien pour l'instant.", mais autant réduire le délai à la source).
   chargerTodos();
+  // Même logique que le pense-bête : souscription + badge de non-lus dès le boot, pas
+  // seulement à l'ouverture du panneau/de la page Chat — sinon le badge du bouton
+  // flottant ne reflèterait jamais les messages arrivés pendant que le coach navigue
+  // ailleurs dans la console.
+  _chatCoachSubscribe();
+  _chatCoachInitNonLus();
   const cached = localStorage.getItem('at_console_cache_v2');
   if (cached) {
     try { data = JSON.parse(cached).data; } catch(e) {}
