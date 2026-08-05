@@ -1,6 +1,7 @@
 // ── Roadmap page (client) — phases datées cut/reverse/prise de masse/... ──
 
 const RM_TYPES = {
+  calibration:   { label:'Calibration',    color:'#eab308' },
   cut:           { label:'Cut',            color:'#e5484d' },
   reverse:       { label:'Reverse',        color:'#f5a623' },
   prise_masse:   { label:'Prise de masse', color:'#30a46c' },
