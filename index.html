@@ -192,7 +192,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
-<script src="chat.js?v=4"></script>
+<script src="chat.js?v=5"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -2081,8 +2081,6 @@ function toggleChatFab() {
     localStorage.setItem(_CHAT_FAB_HIDDEN_KEY, '1');
     const fab = document.getElementById('chatFab');
     if (fab) fab.remove();
-    const hint = document.getElementById('chatFabHint');
-    if (hint) hint.remove();
   } else {
     localStorage.removeItem(_CHAT_FAB_HIDDEN_KEY);
     if (typeof _chatEnsureFab === 'function') _chatEnsureFab();

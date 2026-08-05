@@ -48,28 +48,6 @@ function _chatEnsureFab() {
   document.body.appendChild(fab);
   _chatBindFabDrag(fab);
   _chatUpdateFabBadge();
-  _chatMontrerBulleIndication(fab);
-}
-
-// Petite bulle "💬 Chat" à côté du bouton flottant, à chaque ouverture de l'app (chaque
-// fois que le bouton est (re)créé après un chargement de page — pas à chaque navigation
-// interne, puisque le bouton persiste déjà entre les pages, cf. _chatEnsureFab). Purement
-// indicative, disparaît seule après quelques secondes, ne bloque aucun clic en dessous.
-function _chatMontrerBulleIndication(fab) {
-  const existante = document.getElementById('chatFabHint');
-  if (existante) existante.remove();
-  const rect = fab.getBoundingClientRect();
-  const bulle = document.createElement('div');
-  bulle.id = 'chatFabHint';
-  bulle.style.cssText = `position:fixed;right:${window.innerWidth - rect.right}px;bottom:${window.innerHeight - rect.top + 10}px;z-index:8499;background:#1a1d29;color:#e8eaf0;font-size:12px;font-weight:600;padding:7px 12px;border-radius:10px;border:1px solid #f0a50055;box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:nowrap;opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s;pointer-events:none;`;
-  bulle.textContent = '💬 Bouton de chat';
-  document.body.appendChild(bulle);
-  requestAnimationFrame(() => { bulle.style.opacity = '1'; bulle.style.transform = 'translateY(0)'; });
-  setTimeout(() => {
-    bulle.style.opacity = '0';
-    bulle.style.transform = 'translateY(6px)';
-    setTimeout(() => { if (bulle.parentNode) bulle.remove(); }, 350);
-  }, 3200);
 }
 
 // Pointer events (touch + souris unifiés) SEULEMENT pour détecter le déplacement (drag)
@@ -152,8 +130,6 @@ function _chatTogglePanel(forceOpen) {
   _chatOuvert = true;
   _chatNonLus = 0;
   _chatUpdateFabBadge();
-  const hint = document.getElementById('chatFabHint');
-  if (hint) hint.remove();
   _chatRenderPanel();
   if (!_chatLoaded) _chatCharger();
   else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); }
