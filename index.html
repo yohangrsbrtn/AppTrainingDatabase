@@ -690,7 +690,7 @@ async function _completerConnexionSupabase(session) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_paiement,jour_bilan,mode_simplifie`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_paiement,jour_bilan,mode_simplifie,steps_cible,seances_cible,cardio_consigne`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
@@ -736,7 +736,12 @@ async function _chargerHomeV2Extra() {
   const prog = progArr[0] || null;
   const blocs = (prog && prog.client_programme_blocs) || [];
   const blocActif = prog ? (blocs.find(b => b.id === prog.bloc_actif_id) || blocs[0] || null) : null;
-  const bilan = bilanCourant ? { envoye: !!bilanCourant.row.envoye_coach, jourBilanNom: bilanCourant.jourBilanNom } : null;
+  const bilan = bilanCourant ? {
+    envoye: !!bilanCourant.row.envoye_coach,
+    jourBilanNom: bilanCourant.jourBilanNom,
+    semaineLabel: bilanCourant.row.semaine_label,
+    deadline: _bilanDeadline(bilanCourant.jourBilanNom, new Date(bilanCourant.row.created_at)).toISOString(),
+  } : null;
   _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr, bilan };
 }
 
@@ -823,16 +828,21 @@ function _homeV2BilanHtml(d) {
     </div>`;
   }
   const now = new Date();
-  const label = _supaGetSemaineLabel(jourBilan, now);
-  const deadline = _bilanDeadline(jourBilan, now);
+  const bilan = d && d.bilan;
+  // Le libellé de semaine ET la deadline affichés DOIVENT venir du bilan RÉELLEMENT en
+  // cours (bilanCourant, _chargerHomeV2Extra) — jamais recalculés indépendamment depuis
+  // "now" : entre jour_bilan 00h00 et jour_bilan midi (fenêtre de grâce, voir
+  // _supaGetOrCreateBilanCourant/bilan.js), le bilan encore "en cours" est souvent celui
+  // de la semaine PRÉCÉDENTE, alors qu'un calcul depuis "now" affiche déjà la semaine qui
+  // vient de commencer. Sans ce garde-fou, la brique montrait "Du 5 Aoû au 11 Aoû ✅
+  // Envoyé" alors que le bilan réellement marqué envoyé couvrait encore le 29 Juil-4 Aoû
+  // (bug vécu, 2026-08-05) — le libellé et le statut "envoyé" ne décrivaient pas le même
+  // bilan.
+  const label = bilan ? bilan.semaineLabel : _supaGetSemaineLabel(jourBilan, now);
+  const deadline = bilan ? new Date(bilan.deadline) : _bilanDeadline(jourBilan, now);
   const joursRestants = Math.ceil((deadline - now) / 86400000);
   let statutTxt, statutColor;
-  // Le bilan de la semaine reste "en cours" (donc éditable) jusqu'à sa deadline même
-  // une fois envoyé — sans ce test le brique n'affichait qu'un compte à rebours et un
-  // bilan envoyé le matin même de son jour_bilan continuait de dire "Aujourd'hui" au
-  // lieu de refléter l'envoi (bilan.bilan.envoye vient de _chargerHomeV2Extra, qui lit
-  // le bilan courant réel — pas juste le jour_bilan/l'heure).
-  if (d && d.bilan && d.bilan.envoye) { statutTxt = 'Envoyé ✅'; statutColor = '#1D9E75'; }
+  if (bilan && bilan.envoye) { statutTxt = 'Envoyé ✅'; statutColor = '#1D9E75'; }
   else if (joursRestants > 1) { statutTxt = `Dans ${joursRestants} j`; statutColor = '#8892a4'; }
   else if (joursRestants === 1) { statutTxt = 'Demain'; statutColor = '#f59e0b'; }
   else if (joursRestants === 0) { statutTxt = "Aujourd'hui"; statutColor = '#f59e0b'; }
