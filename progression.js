@@ -48,9 +48,21 @@ async function chargerProgressionSupabase() {
   let seancesValidees = 0, pasTotalBilans = 0;
   const historiqueXP = [];
 
+  // Les bilans migrés depuis GAS gardent leur vraie date_validation d'origine, souvent
+  // bien antérieure à date_creation_compte (première connexion réelle sur cette app) —
+  // leurs pas ne doivent pas gonfler "Pas cumulés" ici, un stat propre à cette app.
+  // date_validation seule (jamais created_at, qui n'est que la date d'insertion
+  // technique de la migration) ; un bilan sans date_validation (le bilan en cours,
+  // jamais migré) est toujours compté.
+  const dateCreationCompte = profil.date_creation_compte ? new Date(profil.date_creation_compte) : null;
+
   bilans.forEach(b => {
     const jours = b.jours || [];
-    pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
+    const dateBilan = b.date_validation ? new Date(b.date_validation) : null;
+    const antérieurAuCompte = dateCreationCompte && dateBilan && !isNaN(dateBilan) && dateBilan < dateCreationCompte;
+    if (!antérieurAuCompte) {
+      pasTotalBilans += jours.reduce((s, j) => s + (j.steps || 0), 0);
+    }
     if (b.envoye_coach && b.date_validation) {
       seancesValidees += jours.filter(j => j.training).length;
       if (b.xp_credite > 0) {
