@@ -1,14 +1,174 @@
 // ── Chat commun (client) — un seul salon, tous les clients + le coach ──────
 // Temps réel via Supabase Realtime (sbAuth.channel, index.html). Pas de
 // messages privés : tout le monde voit tout, décision explicite du coach.
+//
+// Affichage : panneau latéral flottant (pas une page goTo/setPage) ouvert
+// par-dessus la page en cours, déclenché par un bouton flottant déplaçable
+// (drag) et masquable (appui long). Le bouton flottant est ré-injecté dans
+// le DOM à chaque changement de page par setPage() (index.html), comme les
+// bannières coachRetourBanner/coachConsoleBanner — nécessaire car la plupart
+// des pages remplacent entièrement document.body.innerHTML. S'il a été
+// masqué, seul le bouton "Chat" du header accueil (_chatOuvrirDepuisHeader,
+// appelé via goTo('chat')) le fait réapparaître.
 
 let _chatMessages = [];
 let _chatProfils = {};  // client_id -> { prenom, nom, pseudo, photo_url }
 let _chatChannel = null;
 let _chatLoaded = false;
+let _chatOuvert = false;
+let _chatNonLus = 0;
 
-async function loadChat() {
-  setPage('chat-loading');
+const _CHAT_FAB_POS_KEY    = 'at_chat_fab_pos';
+const _CHAT_FAB_HIDDEN_KEY = 'at_chat_fab_hidden';
+
+// ── Bouton flottant ──────────────────────────────────────────────────────
+
+function _chatEnsureFab() {
+  if (!S.client) return;
+  if (localStorage.getItem(_CHAT_FAB_HIDDEN_KEY) === '1') {
+    const ex = document.getElementById('chatFab');
+    if (ex) ex.remove();
+    return;
+  }
+  _chatSubscribe(); // badge de non-lus actif même bouton/panneau fermés
+  if (document.getElementById('chatFab')) { _chatUpdateFabBadge(); return; }
+
+  let pos = null;
+  try { pos = JSON.parse(localStorage.getItem(_CHAT_FAB_POS_KEY) || 'null'); } catch(e) {}
+
+  const fab = document.createElement('div');
+  fab.id = 'chatFab';
+  fab.style.cssText = `position:fixed;right:${pos ? pos.right + 'px' : '16px'};bottom:${pos ? pos.bottom + 'px' : 'calc(88px + env(safe-area-inset-bottom))'};width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#4f6ef7,#3b5ce0);box-shadow:0 6px 20px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:8500;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;`;
+  fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 17 17" fill="none"><path d="M1.5 8.2c0-3.4 3.1-6.2 7-6.2s7 2.8 7 6.2-3.1 6.2-7 6.2c-.9 0-1.8-.15-2.6-.44L2.2 15.2l.9-3C2 11.1 1.5 9.7 1.5 8.2z" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div id="chatFabBadge" style="display:none;position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;background:#e74c3c;border-radius:8px;color:#fff;font-size:10px;font-weight:700;align-items:center;justify-content:center;box-shadow:0 0 0 2px #0f1117;"></div>`;
+  document.body.appendChild(fab);
+  _chatBindFabDrag(fab);
+  _chatUpdateFabBadge();
+}
+
+// Pointer events (touch + souris unifiés) : un mouvement > 6px pendant le
+// drag = déplacement (position sauvegardée) ; sans mouvement = tap (ouvre le
+// panneau) ; appui maintenu 550ms sans mouvement = masquage du bouton.
+function _chatBindFabDrag(fab) {
+  let dragging = false, moved = false, startX = 0, startY = 0, startRight = 0, startBottom = 0, longPressTimer = null;
+
+  fab.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { fab.setPointerCapture(e.pointerId); } catch(err) {}
+    dragging = true; moved = false;
+    startX = e.clientX; startY = e.clientY;
+    const rect = fab.getBoundingClientRect();
+    startRight = window.innerWidth - rect.right;
+    startBottom = window.innerHeight - rect.bottom;
+    longPressTimer = setTimeout(() => { if (dragging && !moved) _chatMasquerFab(); }, 550);
+  });
+  fab.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (moved || Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+      moved = true;
+      clearTimeout(longPressTimer);
+      const right  = Math.max(4, Math.min(window.innerWidth  - 56, startRight  - dx));
+      const bottom = Math.max(4, Math.min(window.innerHeight - 56, startBottom - dy));
+      fab.style.right = right + 'px';
+      fab.style.bottom = bottom + 'px';
+    }
+  });
+  fab.addEventListener('pointerup', () => {
+    clearTimeout(longPressTimer);
+    if (dragging && !moved) {
+      _chatTogglePanel();
+    } else if (dragging && moved) {
+      localStorage.setItem(_CHAT_FAB_POS_KEY, JSON.stringify({ right: parseFloat(fab.style.right), bottom: parseFloat(fab.style.bottom) }));
+    }
+    dragging = false;
+  });
+  fab.addEventListener('pointercancel', () => { clearTimeout(longPressTimer); dragging = false; });
+}
+
+function _chatMasquerFab() {
+  localStorage.setItem(_CHAT_FAB_HIDDEN_KEY, '1');
+  const fab = document.getElementById('chatFab');
+  if (fab) fab.remove();
+  if (_chatOuvert) _chatFermerPanel();
+  if (typeof showToast === 'function') showToast('Chat masqué — réaffichable depuis le bouton 💬 de l\'accueil', '#2d3142');
+}
+
+// Appelé par goTo('chat') → bouton chat du header accueil : fait réapparaître
+// le bouton flottant s'il avait été masqué, ET ouvre directement le panneau.
+function _chatOuvrirDepuisHeader() {
+  localStorage.removeItem(_CHAT_FAB_HIDDEN_KEY);
+  _chatEnsureFab();
+  _chatTogglePanel(true);
+}
+
+function _chatUpdateFabBadge() {
+  const badge = document.getElementById('chatFabBadge');
+  if (!badge) return;
+  if (_chatNonLus > 0) { badge.style.display = 'flex'; badge.textContent = _chatNonLus > 9 ? '9+' : String(_chatNonLus); }
+  else badge.style.display = 'none';
+}
+
+// ── Panneau latéral ──────────────────────────────────────────────────────
+
+function _chatTogglePanel(forceOpen) {
+  if (_chatOuvert) { if (!forceOpen) _chatFermerPanel(); return; }
+  _chatOuvert = true;
+  _chatNonLus = 0;
+  _chatUpdateFabBadge();
+  _chatRenderPanel();
+  if (!_chatLoaded) _chatCharger();
+  else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); }
+}
+
+function _chatFermerPanel() {
+  _chatOuvert = false;
+  const overlay = document.getElementById('chatOverlay');
+  const panel = document.getElementById('chatPanel');
+  const fab = document.getElementById('chatFab');
+  if (panel) panel.style.transform = 'translateX(100%)';
+  if (overlay) overlay.style.opacity = '0';
+  if (fab) fab.style.display = 'flex';
+  setTimeout(() => { const el = document.getElementById('chatOverlay'); if (el) el.remove(); }, 250);
+}
+
+function _chatRenderPanel() {
+  const fab = document.getElementById('chatFab');
+  if (fab) fab.style.display = 'none';
+  if (document.getElementById('chatOverlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'chatOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;opacity:0;transition:opacity .25s;';
+  overlay.addEventListener('click', e => { if (e.target === overlay) _chatFermerPanel(); });
+  overlay.innerHTML = `<div id="chatPanel" style="position:absolute;top:0;right:0;height:100%;width:min(380px,88vw);background:#12141e;box-shadow:-8px 0 30px rgba(0,0,0,.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s ease;">
+    <div style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid #232838;">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#e8eaf0;">💬 Chat</div>
+        <div style="font-size:11px;color:#8892a4;">Tout le monde peut se parler ici</div>
+      </div>
+      <button onclick="_chatFermerPanel()" style="width:32px;height:32px;background:#1e2235;border:none;border-radius:9px;color:#8892a4;font-size:16px;cursor:pointer;">✕</button>
+    </div>
+    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:14px 16px;">
+      <div style="text-align:center;padding:40px 0;"><div class="spin" style="margin:0 auto;"></div></div>
+    </div>
+    <div style="flex-shrink:0;display:flex;gap:8px;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));border-top:1px solid #232838;background:#161923;">
+      <input id="chatInput" type="text" placeholder="Écris un message…" autocomplete="off"
+        style="flex:1;padding:11px 14px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:20px;font-size:16px;"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChat();}">
+      <button onclick="envoyerMessageChat()" style="width:42px;height:42px;flex-shrink:0;background:#4f6ef7;border:none;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;">➤</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => {
+    overlay.style.opacity = '1';
+    const panel = document.getElementById('chatPanel');
+    if (panel) panel.style.transform = 'translateX(0)';
+  });
+}
+
+// ── Chargement + données ─────────────────────────────────────────────────
+
+async function _chatCharger() {
   try {
     const [msgRes, profilRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/chat_messages?order=created_at.asc&limit=200&select=id,client_id,texte,created_at`, { headers: supaHeaders() }),
@@ -19,26 +179,29 @@ async function loadChat() {
     _chatProfils = {};
     profils.forEach(p => { _chatProfils[p.client_id] = p; });
     _chatLoaded = true;
-    setPage('chat');
-    _chatSubscribe();
+    _chatRenderMessages();
     setTimeout(_chatScrollBas, 50);
   } catch(e) {
-    _chatLoaded = false;
-    setPage('chat');
+    const el = document.getElementById('chatMessages');
+    if (el) el.innerHTML = `<div class="empty"><div class="empty-text">Erreur de chargement du chat</div></div>`;
   }
 }
 
-// Un seul canal réutilisé pour toute la session — removeChannel avant de
-// resouscrire évite d'empiler plusieurs abonnements (et donc des messages
-// dupliqués à l'affichage) si le client revisite la page plusieurs fois.
+// Un seul canal réutilisé pour toute la session (souscrit dès que le bouton
+// flottant existe, pas seulement à l'ouverture du panneau, pour que le badge
+// de non-lus fonctionne même chat fermé) — le check _chatChannel évite
+// d'empiler plusieurs abonnements (et donc des messages dupliqués).
 function _chatSubscribe() {
-  if (_chatChannel) { try { sbAuth.removeChannel(_chatChannel); } catch(e) {} }
+  if (_chatChannel) return;
   _chatChannel = sbAuth.channel('chat_messages_realtime')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, payload => {
       _chatMessages.push(payload.new);
-      if (document.getElementById('chatMessages')) {
+      if (_chatOuvert && document.getElementById('chatMessages')) {
         _chatAppendMessage(payload.new);
         _chatScrollBas();
+      } else if (payload.new.client_id !== S.client) {
+        _chatNonLus++;
+        _chatUpdateFabBadge();
       }
     })
     .subscribe();
@@ -74,6 +237,14 @@ function _chatBulleHtml(m) {
   </div>`;
 }
 
+function _chatRenderMessages() {
+  const el = document.getElementById('chatMessages');
+  if (!el) return;
+  el.innerHTML = _chatMessages.length
+    ? _chatMessages.map(_chatBulleHtml).join('')
+    : `<div class="empty"><div class="empty-icon">💬</div><div class="empty-text">Aucun message pour l'instant — lance la discussion !</div></div>`;
+}
+
 function _chatAppendMessage(m) {
   const el = document.getElementById('chatMessages');
   if (!el) return;
@@ -83,26 +254,6 @@ function _chatAppendMessage(m) {
 function _chatScrollBas() {
   const el = document.getElementById('chatMessages');
   if (el) el.scrollTop = el.scrollHeight;
-}
-
-function renderChatPage() {
-  if (S.page === 'chat-loading') {
-    return `<div id="app">${renderHeader('Chat','',false)}<div class="page" style="display:flex;align-items:center;justify-content:center;"><div class="spin"></div></div>${renderNavBar('chat')}</div>`;
-  }
-  const messagesHtml = _chatMessages.length
-    ? _chatMessages.map(_chatBulleHtml).join('')
-    : `<div class="empty"><div class="empty-icon">💬</div><div class="empty-text">Aucun message pour l'instant — lance la discussion !</div></div>`;
-  return `<div id="app" style="height:100dvh;">
-    ${renderHeader('Chat', 'Tout le monde peut se parler ici', false)}
-    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:14px 16px;">${messagesHtml}</div>
-    <div style="flex-shrink:0;display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);background:var(--bg2);margin-bottom:calc(64px + var(--safe-bottom));">
-      <input id="chatInput" type="text" placeholder="Écris un message…" autocomplete="off"
-        style="flex:1;padding:11px 14px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:20px;font-size:16px;"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChat();}">
-      <button onclick="envoyerMessageChat()" style="width:42px;height:42px;flex-shrink:0;background:#4f6ef7;border:none;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;">➤</button>
-    </div>
-    ${renderNavBar('chat')}
-  </div>`;
 }
 
 async function envoyerMessageChat() {

@@ -186,7 +186,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
-<script src="chat.js?v=1"></script>
+<script src="chat.js?v=2"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -263,6 +263,9 @@ function setPage(name) {
       document.body.appendChild(banner);
     }
   }
+  // Bouton flottant du chat commun, ré-injecté après chaque page (voir chat.js) —
+  // pas sur login/loading, ni tant qu'aucun client n'est identifié.
+  if (name !== 'loading' && name !== 'login' && S.client && typeof _chatEnsureFab === 'function') _chatEnsureFab();
 }
 
 // ── Vue client (coach simule un client) ───────────────────────────────
@@ -348,8 +351,6 @@ function render() {
     case 'recettes-loading': document.body.innerHTML = renderRecettesPage(); break;
     case 'roadmap':
     case 'roadmap-loading': document.body.innerHTML = renderRoadmapPage(); break;
-    case 'chat':
-    case 'chat-loading':  document.body.innerHTML = renderChatPage(); break;
     case 'classement':           app.innerHTML = renderClassement();           break;
     case 'progression':          document.body.innerHTML = renderProgressionPage();      break;
     case 'collection':           document.body.innerHTML = renderCollectionPage();       break;
@@ -723,10 +724,11 @@ function _homeV2Actif() { return S.client === 'yohanp'; }
 let _homeV2Data = null;
 async function _chargerHomeV2Extra() {
   const clientId = getClient();
-  const [progRes, roadmapRes, mensRes] = await Promise.all([
+  const [progRes, roadmapRes, mensRes, bilanCourant] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
+    _supaGetOrCreateBilanCourant(clientId).catch(() => null),
   ]);
   const progArr = progRes.ok ? await progRes.json() : [];
   const roadmapArr = roadmapRes.ok ? await roadmapRes.json() : [];
@@ -734,7 +736,8 @@ async function _chargerHomeV2Extra() {
   const prog = progArr[0] || null;
   const blocs = (prog && prog.client_programme_blocs) || [];
   const blocActif = prog ? (blocs.find(b => b.id === prog.bloc_actif_id) || blocs[0] || null) : null;
-  _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr };
+  const bilan = bilanCourant ? { envoye: !!bilanCourant.row.envoye_coach, jourBilanNom: bilanCourant.jourBilanNom } : null;
+  _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr, bilan };
 }
 
 function renderHomeSupabaseV2() {
@@ -754,7 +757,7 @@ function renderHomeSupabaseV2() {
       ${_homeV2RoadmapHtml(d)}
     </div>
 
-    ${_homeV2BilanHtml()}
+    ${_homeV2BilanHtml(d)}
 
     ${_homeV2MensurationsHtml(d)}
 
@@ -810,7 +813,7 @@ function _homeV2RoadmapHtml(d) {
     </div>`;
 }
 
-function _homeV2BilanHtml() {
+function _homeV2BilanHtml(d) {
   const p = S.data.profil || {};
   const jourBilan = p.jour_bilan;
   if (!jourBilan) {
@@ -824,7 +827,13 @@ function _homeV2BilanHtml() {
   const deadline = _bilanDeadline(jourBilan, now);
   const joursRestants = Math.ceil((deadline - now) / 86400000);
   let statutTxt, statutColor;
-  if (joursRestants > 1) { statutTxt = `Dans ${joursRestants} j`; statutColor = '#8892a4'; }
+  // Le bilan de la semaine reste "en cours" (donc éditable) jusqu'à sa deadline même
+  // une fois envoyé — sans ce test le brique n'affichait qu'un compte à rebours et un
+  // bilan envoyé le matin même de son jour_bilan continuait de dire "Aujourd'hui" au
+  // lieu de refléter l'envoi (bilan.bilan.envoye vient de _chargerHomeV2Extra, qui lit
+  // le bilan courant réel — pas juste le jour_bilan/l'heure).
+  if (d && d.bilan && d.bilan.envoye) { statutTxt = 'Envoyé ✅'; statutColor = '#1D9E75'; }
+  else if (joursRestants > 1) { statutTxt = `Dans ${joursRestants} j`; statutColor = '#8892a4'; }
   else if (joursRestants === 1) { statutTxt = 'Demain'; statutColor = '#f59e0b'; }
   else if (joursRestants === 0) { statutTxt = "Aujourd'hui"; statutColor = '#f59e0b'; }
   else { statutTxt = 'En retard'; statutColor = '#e74c3c'; }
@@ -2465,7 +2474,7 @@ function goTo(page) {
   else if (page === 'mensurations') loadMensurations();
   else if (page === 'recettes')    loadRecettes();
   else if (page === 'roadmap')     loadRoadmap();
-  else if (page === 'chat')        loadChat();
+  else if (page === 'chat')        _chatOuvrirDepuisHeader();
   else if (page === 'classement')  loadClassement();
   else if (page === 'progression') loadProgression();
   else if (page === 'collection')  loadCollection();
