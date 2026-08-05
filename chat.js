@@ -446,13 +446,15 @@ function _chatBulleHtml(m) {
   const p = _chatProfils[m.client_id] || {};
   const initiales = ((p.prenom ? p.prenom[0] : '') + (p.nom ? p.nom[0] : '')).toUpperCase() || '?';
   const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
-  const reactBar = `<div id="chatReact-${m.id}" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px;">${_chatReactionsBarHtml(m.id)}</div>`;
+  // À cheval sur le coin bas-droit de la bulle (position:absolute ancrée sur la bulle
+  // elle-même, pas dans le flux) — le padding de la bulle protège le texte, la pastille
+  // ne peut déborder que sous la ligne de base du texte, jamais par-dessus.
+  const reactBar = `<div id="chatReact-${m.id}" style="position:absolute;bottom:-9px;right:8px;display:flex;gap:3px;z-index:2;">${_chatReactionsBarHtml(m.id)}</div>`;
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:78%;">
-        <div style="background:linear-gradient(135deg,#4f6ef7,#3b5ce0);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
-        <div style="font-size:10px;color:#555e7a;text-align:right;margin-top:2px;">${heure}</div>
-        ${reactBar}
+        <div style="position:relative;background:linear-gradient(135deg,#4f6ef7,#3b5ce0);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+        <div style="font-size:10px;color:#555e7a;text-align:right;margin-top:8px;">${heure}</div>
       </div>
     </div>`;
   }
@@ -460,9 +462,8 @@ function _chatBulleHtml(m) {
     ${_avatarCircleHtml(p.photo_url, initiales, 26)}
     <div style="max-width:74%;">
       <div style="font-size:11px;color:#8892a4;margin-bottom:2px;">${esc(_chatNomAffiche(m.client_id))}</div>
-      <div style="background:#1e2235;color:#e8eaf0;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
-      <div style="font-size:10px;color:#555e7a;margin-top:2px;">${heure}</div>
-      ${reactBar}
+      <div style="position:relative;background:#1e2235;color:#e8eaf0;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+      <div style="font-size:10px;color:#555e7a;margin-top:8px;">${heure}</div>
     </div>
   </div>`;
 }
