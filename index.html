@@ -192,7 +192,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
-<script src="chat.js?v=2"></script>
+<script src="chat.js?v=4"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -1870,6 +1870,7 @@ const STG_ICONS = {
   lock:     '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 118 0v4"/>',
   refresh:  '<path d="M4 12a8 8 0 0114-5.3M20 12a8 8 0 01-14 5.3M4 4v5h5M20 20v-5h-5"/>',
   gauge:    '<path d="M2 12h4l3-9 6 18 3-9h4"/>',
+  chat:     '<path d="M21 11.5a8.38 8.38 0 01-3.9 7.1 8.5 8.5 0 01-9.7-.4L3 21l1.9-5.9a8.38 8.38 0 01-.4-9.7 8.5 8.5 0 0116.5 6.1z"/>',
 };
 const STG_COLORS = {
   blue:   { bg:'#4f6ef71f', c:'#7d95ff' },
@@ -2046,6 +2047,16 @@ function renderSettingsGeneral() {
     </div>
     <div class="stg-card">
       <div class="stg-row">
+        ${_stgIconChip('chat', 'orange')}
+        <div style="flex:1;min-width:0;">
+          <div class="stg-title">Bouton de chat</div>
+          <div class="stg-sub">Bouton flottant du chat commun sur l'accueil</div>
+        </div>
+        ${_stgSwitchHtml('stgChatFab', chatFabActif(), 'toggleChatFab()')}
+      </div>
+    </div>
+    <div class="stg-card">
+      <div class="stg-row">
         ${_stgIconChip('refresh', 'blue')}
         <div style="flex:1;min-width:0;">
           <div class="stg-title">Mise à jour</div>
@@ -2056,6 +2067,28 @@ function renderSettingsGeneral() {
         <button class="btn-primary" onclick="forcerMiseAJour()" style="width:100%;padding:10px;font-size:13px;">Vérifier les mises à jour</button>
       </div>
     </div>`;
+}
+
+// ── Bouton flottant du chat — activable/désactivable depuis Paramètres ────
+// Réutilise EXACTEMENT le même mécanisme que le masquage par appui long sur le
+// bouton lui-même (chat.js, _CHAT_FAB_HIDDEN_KEY) : "désactivé" et "masqué" sont
+// la même chose, une seule source de vérité localStorage.
+function chatFabActif() {
+  try { return localStorage.getItem(_CHAT_FAB_HIDDEN_KEY) !== '1'; } catch(e) { return true; }
+}
+function toggleChatFab() {
+  if (chatFabActif()) {
+    localStorage.setItem(_CHAT_FAB_HIDDEN_KEY, '1');
+    const fab = document.getElementById('chatFab');
+    if (fab) fab.remove();
+    const hint = document.getElementById('chatFabHint');
+    if (hint) hint.remove();
+  } else {
+    localStorage.removeItem(_CHAT_FAB_HIDDEN_KEY);
+    if (typeof _chatEnsureFab === 'function') _chatEnsureFab();
+  }
+  const el = document.getElementById('stgChatFab');
+  if (el) el.outerHTML = _stgSwitchHtml('stgChatFab', chatFabActif(), 'toggleChatFab()');
 }
 
 // ── Préférences de notifications automatiques ───────────────────────────

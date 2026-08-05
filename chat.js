@@ -48,46 +48,78 @@ function _chatEnsureFab() {
   document.body.appendChild(fab);
   _chatBindFabDrag(fab);
   _chatUpdateFabBadge();
+  _chatMontrerBulleIndication(fab);
 }
 
-// Pointer events (touch + souris unifiés) : un mouvement > 6px pendant le
-// drag = déplacement (position sauvegardée) ; sans mouvement = tap (ouvre le
-// panneau) ; appui maintenu 550ms sans mouvement = masquage du bouton.
+// Petite bulle "💬 Chat" à côté du bouton flottant, à chaque ouverture de l'app (chaque
+// fois que le bouton est (re)créé après un chargement de page — pas à chaque navigation
+// interne, puisque le bouton persiste déjà entre les pages, cf. _chatEnsureFab). Purement
+// indicative, disparaît seule après quelques secondes, ne bloque aucun clic en dessous.
+function _chatMontrerBulleIndication(fab) {
+  const existante = document.getElementById('chatFabHint');
+  if (existante) existante.remove();
+  const rect = fab.getBoundingClientRect();
+  const bulle = document.createElement('div');
+  bulle.id = 'chatFabHint';
+  bulle.style.cssText = `position:fixed;right:${window.innerWidth - rect.right}px;bottom:${window.innerHeight - rect.top + 10}px;z-index:8499;background:#1a1d29;color:#e8eaf0;font-size:12px;font-weight:600;padding:7px 12px;border-radius:10px;border:1px solid #f0a50055;box-shadow:0 6px 20px rgba(0,0,0,.35);white-space:nowrap;opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s;pointer-events:none;`;
+  bulle.textContent = '💬 Bouton de chat';
+  document.body.appendChild(bulle);
+  requestAnimationFrame(() => { bulle.style.opacity = '1'; bulle.style.transform = 'translateY(0)'; });
+  setTimeout(() => {
+    bulle.style.opacity = '0';
+    bulle.style.transform = 'translateY(6px)';
+    setTimeout(() => { if (bulle.parentNode) bulle.remove(); }, 350);
+  }, 3200);
+}
+
+// Pointer events (touch + souris unifiés) SEULEMENT pour détecter le déplacement (drag)
+// et l'appui long — l'ouverture du panneau, elle, passe par l'événement natif `click`
+// (voir plus bas), pas par notre propre déduction pointerdown/pointerup. Un tap rapide
+// pouvait auparavant échouer à ouvrir le panneau si le navigateur annulait la séquence
+// pointer (pointercancel) au profit du tap "natif" — ce qui arrive plus facilement quand
+// le bouton flottant chevauche une brique cliquable en dessous (bug vécu, 2026-08-05) —
+// puisque `dragging` retombait à false sans jamais appeler `_chatTogglePanel()`. `click`
+// est garanti par le navigateur pour tout tap sans déplacement significatif, quel que
+// soit le sort de la séquence pointer sous-jacente.
 function _chatBindFabDrag(fab) {
   let dragging = false, moved = false, startX = 0, startY = 0, startRight = 0, startBottom = 0, longPressTimer = null;
 
   fab.addEventListener('pointerdown', e => {
-    e.preventDefault();
     try { fab.setPointerCapture(e.pointerId); } catch(err) {}
     dragging = true; moved = false;
     startX = e.clientX; startY = e.clientY;
     const rect = fab.getBoundingClientRect();
     startRight = window.innerWidth - rect.right;
     startBottom = window.innerHeight - rect.bottom;
-    longPressTimer = setTimeout(() => { if (dragging && !moved) _chatMasquerFab(); }, 550);
+    longPressTimer = setTimeout(() => { if (dragging && !moved) { moved = true; _chatMasquerFab(); } }, 550);
   });
   fab.addEventListener('pointermove', e => {
     if (!dragging) return;
     const dx = e.clientX - startX, dy = e.clientY - startY;
-    if (moved || Math.abs(dx) > 6 || Math.abs(dy) > 6) {
-      moved = true;
-      clearTimeout(longPressTimer);
+    if (!moved && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) { moved = true; clearTimeout(longPressTimer); }
+    if (moved) {
       const right  = Math.max(4, Math.min(window.innerWidth  - 56, startRight  - dx));
       const bottom = Math.max(4, Math.min(window.innerHeight - 56, startBottom - dy));
       fab.style.right = right + 'px';
       fab.style.bottom = bottom + 'px';
     }
   });
-  fab.addEventListener('pointerup', () => {
+  const finirGeste = () => {
     clearTimeout(longPressTimer);
-    if (dragging && !moved) {
-      _chatTogglePanel();
-    } else if (dragging && moved) {
+    if (dragging && moved && fab.style.right) {
       localStorage.setItem(_CHAT_FAB_POS_KEY, JSON.stringify({ right: parseFloat(fab.style.right), bottom: parseFloat(fab.style.bottom) }));
     }
     dragging = false;
+  };
+  fab.addEventListener('pointerup', finirGeste);
+  fab.addEventListener('pointercancel', finirGeste);
+  fab.addEventListener('click', () => {
+    // `moved` vient d'être mis à jour par pointerup/pointercancel juste avant (même tick) :
+    // un drag ou un appui long (déjà traité par _chatMasquerFab) ne doit pas EN PLUS ouvrir
+    // le panneau au clic qui suit.
+    if (moved) return;
+    _chatTogglePanel();
   });
-  fab.addEventListener('pointercancel', () => { clearTimeout(longPressTimer); dragging = false; });
 }
 
 function _chatMasquerFab() {
@@ -120,6 +152,8 @@ function _chatTogglePanel(forceOpen) {
   _chatOuvert = true;
   _chatNonLus = 0;
   _chatUpdateFabBadge();
+  const hint = document.getElementById('chatFabHint');
+  if (hint) hint.remove();
   _chatRenderPanel();
   if (!_chatLoaded) _chatCharger();
   else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); }
