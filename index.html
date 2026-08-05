@@ -192,7 +192,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="programme-client.js?v=17"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
-<script src="chat.js?v=11"></script>
+<script src="chat.js?v=12"></script>
 <script>
 // ── État global ───────────────────────────────────────────────────────
 const S = {
@@ -1200,7 +1200,9 @@ let _notifsClientCount = 0;
 
 async function chargerNotificationsClient() {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?client_id=eq.${encodeURIComponent(S.client)}&order=created_at.desc&limit=50`, { headers: supaHeaders() });
+    // source=neq.chat : les messages du chat ont leur propre badge dédié (bouton flottant
+    // + header, cf. chat.js) — ils ne doivent pas polluer la cloche 🔔 de notifications.
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?client_id=eq.${encodeURIComponent(S.client)}&source=neq.chat&order=created_at.desc&limit=50`, { headers: supaHeaders() });
     _notifsClient = res.ok ? await res.json() : [];
     _notifsClientCount = _notifsClient.filter(n => !n.lu).length;
     _majCarteHeader();

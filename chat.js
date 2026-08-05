@@ -236,7 +236,7 @@ function _chatRenderPanel() {
   overlay.id = 'chatOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;opacity:0;transition:opacity .25s;';
   overlay.addEventListener('click', e => { if (e.target === overlay) _chatFermerPanel(); });
-  overlay.innerHTML = `<div id="chatPanel" style="position:absolute;top:0;right:0;height:100%;width:min(380px,88vw);background:#12141e;box-shadow:-8px 0 30px rgba(0,0,0,.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s ease;">
+  overlay.innerHTML = `<div id="chatPanel" class="sheet-body" style="position:absolute;top:0;right:0;height:100%;width:min(380px,88vw);background:#12141e;box-shadow:-8px 0 30px rgba(0,0,0,.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s ease;overscroll-behavior:contain;">
     <div style="flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid #232838;">
       <div>
         <div style="font-size:15px;font-weight:700;color:#e8eaf0;display:flex;align-items:center;gap:6px;"><svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M1.5 8.2c0-3.4 3.1-6.2 7-6.2s7 2.8 7 6.2-3.1 6.2-7 6.2c-.9 0-1.8-.15-2.6-.44L2.2 15.2l.9-3C2 11.1 1.5 9.7 1.5 8.2z" stroke="#e8eaf0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg> Chat</div>
@@ -244,7 +244,7 @@ function _chatRenderPanel() {
       </div>
       <button onclick="_chatFermerPanel()" style="width:32px;height:32px;background:#1e2235;border:none;border-radius:9px;color:#8892a4;font-size:16px;cursor:pointer;">✕</button>
     </div>
-    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:14px 16px;">
+    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:14px 16px;overscroll-behavior:contain;">
       <div style="text-align:center;padding:40px 0;"><div class="spin" style="margin:0 auto;"></div></div>
     </div>
     <div style="flex-shrink:0;display:flex;gap:8px;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));border-top:1px solid #232838;background:#161923;">
