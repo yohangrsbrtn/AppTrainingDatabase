@@ -13,6 +13,8 @@
 
 let _chatMessages = [];
 let _chatProfils = {};  // client_id -> { prenom, nom, pseudo, photo_url }
+let _chatReactions = {}; // message_id -> { emoji: Set(client_id) }
+const _CHAT_REACT_EMOJIS = ['👍','❤️','😂','😮','😢','🙏'];
 let _chatChannel = null;
 let _chatLoaded = false;
 let _chatOuvert = false;
@@ -266,14 +268,21 @@ function _chatRenderPanel() {
 
 async function _chatCharger() {
   try {
-    const [msgRes, profilRes] = await Promise.all([
+    const [msgRes, profilRes, reactRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/chat_messages?order=created_at.asc&limit=200&select=id,client_id,texte,created_at`, { headers: supaHeaders() }),
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?select=client_id,prenom,nom,pseudo,photo_url`, { headers: supaHeaders() }),
+      fetch(`${SUPABASE_URL}/rest/v1/chat_reactions?select=message_id,client_id,emoji`, { headers: supaHeaders() }),
     ]);
     _chatMessages = msgRes.ok ? await msgRes.json() : [];
     const profils = profilRes.ok ? await profilRes.json() : [];
     _chatProfils = {};
     profils.forEach(p => { _chatProfils[p.client_id] = p; });
+    _chatReactions = {};
+    const reactions = reactRes.ok ? await reactRes.json() : [];
+    reactions.forEach(r => {
+      const map = _chatReactions[r.message_id] = _chatReactions[r.message_id] || {};
+      (map[r.emoji] = map[r.emoji] || new Set()).add(r.client_id);
+    });
     _chatLoaded = true;
     _chatRenderMessages();
     setTimeout(_chatScrollBas, 50);
@@ -312,6 +321,19 @@ function _chatSubscribe() {
       const el = document.querySelector(`#chatMessages [data-msg-id="${id}"]`);
       if (el) el.remove();
     })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_reactions' }, payload => {
+      const r = payload.new;
+      const map = _chatReactions[r.message_id] = _chatReactions[r.message_id] || {};
+      (map[r.emoji] = map[r.emoji] || new Set()).add(r.client_id);
+      _chatUpdateReactionBar(r.message_id);
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_reactions' }, payload => {
+      const r = payload.old;
+      if (!r) return;
+      const map = _chatReactions[r.message_id];
+      if (map && map[r.emoji]) map[r.emoji].delete(r.client_id);
+      _chatUpdateReactionBar(r.message_id);
+    })
     .subscribe();
 }
 
@@ -330,16 +352,76 @@ function _chatNomAffiche(clientId) {
   return parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
 }
 
+// Contenu (pastilles de réactions + bouton "ajouter") pour le message donné — utilisé
+// au rendu initial de la bulle ET pour rafraîchir juste cette barre en direct (realtime,
+// toggle optimiste) sans re-render de tout le fil de discussion.
+function _chatReactionsBarHtml(messageId) {
+  const map = _chatReactions[messageId] || {};
+  const pills = Object.keys(map).filter(e => map[e].size > 0).map(e => {
+    const mine = map[e].has(S.client);
+    return `<span onclick="_chatToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:2px 7px;border-radius:10px;background:${mine ? '#4f6ef733' : '#1e223580'};border:1px solid ${mine ? '#4f6ef7' : '#2d3142'};cursor:pointer;">${e} ${map[e].size}</span>`;
+  }).join('');
+  return `${pills}<span onclick="_chatTogglePicker(${messageId})" style="font-size:12px;color:#555e7a;cursor:pointer;padding:2px 5px;">😀+</span>`;
+}
+
+function _chatUpdateReactionBar(messageId) {
+  const bar = document.getElementById('chatReact-' + messageId);
+  if (bar) bar.innerHTML = _chatReactionsBarHtml(messageId);
+}
+
+// Un seul picker ouvert à la fois — tap sur "😀+" bascule (ferme s'il était déjà ouvert
+// pour ce message, sinon ferme les autres et ouvre celui-ci juste après la barre).
+function _chatTogglePicker(messageId) {
+  const dejaOuvert = !!document.getElementById('chatPicker-' + messageId);
+  document.querySelectorAll('[id^="chatPicker-"]').forEach(el => el.remove());
+  if (dejaOuvert) return;
+  const bar = document.getElementById('chatReact-' + messageId);
+  if (!bar) return;
+  const picker = document.createElement('div');
+  picker.id = 'chatPicker-' + messageId;
+  picker.style.cssText = 'display:flex;gap:8px;margin-top:5px;background:#1a1f30;border:1px solid #2d3142;border-radius:10px;padding:6px 9px;width:fit-content;';
+  picker.innerHTML = _CHAT_REACT_EMOJIS.map(e =>
+    `<span onclick="_chatToggleReaction(${messageId},'${e}');document.getElementById('chatPicker-${messageId}')?.remove();" style="font-size:17px;cursor:pointer;">${e}</span>`
+  ).join('');
+  bar.insertAdjacentElement('afterend', picker);
+}
+
+// Toggle optimiste (mise à jour locale immédiate) + persistance Supabase — la mise à
+// jour Realtime qui revient ensuite (y compris pour sa propre action) est idempotente
+// sur un Set, donc pas de double-comptage.
+async function _chatToggleReaction(messageId, emoji) {
+  if (!S.client) return;
+  const map = _chatReactions[messageId] = _chatReactions[messageId] || {};
+  const set = map[emoji] = map[emoji] || new Set();
+  const mine = set.has(S.client);
+  if (mine) set.delete(S.client); else set.add(S.client);
+  _chatUpdateReactionBar(messageId);
+  try {
+    if (mine) {
+      await fetch(`${SUPABASE_URL}/rest/v1/chat_reactions?message_id=eq.${messageId}&client_id=eq.${encodeURIComponent(S.client)}&emoji=eq.${encodeURIComponent(emoji)}`, {
+        method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' })
+      });
+    } else {
+      await fetch(`${SUPABASE_URL}/rest/v1/chat_reactions`, {
+        method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+        body: JSON.stringify({ message_id: messageId, client_id: S.client, emoji })
+      });
+    }
+  } catch(e) {}
+}
+
 function _chatBulleHtml(m) {
   const moi = m.client_id === S.client;
   const p = _chatProfils[m.client_id] || {};
   const initiales = ((p.prenom ? p.prenom[0] : '') + (p.nom ? p.nom[0] : '')).toUpperCase() || '?';
   const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  const reactBar = `<div id="chatReact-${m.id}" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px;">${_chatReactionsBarHtml(m.id)}</div>`;
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:78%;">
         <div style="background:linear-gradient(135deg,#4f6ef7,#3b5ce0);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
         <div style="font-size:10px;color:#555e7a;text-align:right;margin-top:2px;">${heure}</div>
+        ${reactBar}
       </div>
     </div>`;
   }
@@ -349,6 +431,7 @@ function _chatBulleHtml(m) {
       <div style="font-size:11px;color:#8892a4;margin-bottom:2px;">${esc(_chatNomAffiche(m.client_id))}</div>
       <div style="background:#1e2235;color:#e8eaf0;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
       <div style="font-size:10px;color:#555e7a;margin-top:2px;">${heure}</div>
+      ${reactBar}
     </div>
   </div>`;
 }
