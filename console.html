@@ -1017,24 +1017,23 @@ async function chargerChatCoach() {
   _chatCoachLoaded = true;
 }
 
-// Même mécanique que chat.js côté client (toggle optimiste, picker inline, un seul
-// canal Realtime) — dupliqué ici car la console n'importe pas chat.js.
+// Même mécanique que chat.js côté client (toggle optimiste, picker par appui long, un
+// seul canal Realtime) — dupliqué ici car la console n'importe pas chat.js. Pas de
+// bouton "+" visible en permanence : discret, ouvert par appui long sur la bulle,
+// refermable sans réagir en cliquant ailleurs.
 function _chatCoachReactionsBarHtml(messageId) {
   const map = _chatCoachReactions[messageId] || {};
-  const pills = Object.keys(map).filter(e => map[e].size > 0).map(e => {
+  return Object.keys(map).filter(e => map[e].size > 0).map(e => {
     const mine = map[e].has(CHAT_COACH_ID);
     return `<span onclick="_chatCoachToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:2px 7px;border-radius:10px;background:${mine ? 'var(--accent-soft)' : 'var(--surface-2)'};border:1px solid ${mine ? 'var(--accent)' : 'var(--hairline)'};cursor:pointer;">${e} ${map[e].size}</span>`;
   }).join('');
-  return `${pills}<span onclick="_chatCoachTogglePicker(${messageId})" style="font-size:12px;color:var(--text-faint);cursor:pointer;padding:2px 5px;">😀+</span>`;
 }
 function _chatCoachUpdateReactionBar(messageId) {
   const bar = document.getElementById('chatCoachReact-' + messageId);
   if (bar) bar.innerHTML = _chatCoachReactionsBarHtml(messageId);
 }
-function _chatCoachTogglePicker(messageId) {
-  const dejaOuvert = !!document.getElementById('chatCoachPicker-' + messageId);
+function _chatCoachOuvrirPicker(messageId) {
   document.querySelectorAll('[id^="chatCoachPicker-"]').forEach(el => el.remove());
-  if (dejaOuvert) return;
   const bar = document.getElementById('chatCoachReact-' + messageId);
   if (!bar) return;
   const picker = document.createElement('div');
@@ -1043,7 +1042,29 @@ function _chatCoachTogglePicker(messageId) {
   picker.innerHTML = _CHAT_REACT_EMOJIS.map(e =>
     `<span onclick="_chatCoachToggleReaction(${messageId},'${e}');document.getElementById('chatCoachPicker-${messageId}')?.remove();" style="font-size:17px;cursor:pointer;">${e}</span>`
   ).join('');
+  picker.addEventListener('click', e => e.stopPropagation());
   bar.insertAdjacentElement('afterend', picker);
+}
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('[id^="chatCoachPicker-"]')) document.querySelectorAll('[id^="chatCoachPicker-"]').forEach(el => el.remove());
+});
+function _chatCoachBindLongPress(container) {
+  if (!container || container._longPressBound) return;
+  container._longPressBound = true;
+  let timer = null, startX = 0, startY = 0;
+  const annuler = () => { clearTimeout(timer); timer = null; };
+  container.addEventListener('pointerdown', e => {
+    const bulle = e.target.closest('[data-msg-id]');
+    if (!bulle) return;
+    const id = Number(bulle.dataset.msgId);
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(() => { timer = null; _chatCoachOuvrirPicker(id); }, 420);
+  });
+  container.addEventListener('pointermove', e => {
+    if (timer && (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8)) annuler();
+  });
+  container.addEventListener('pointerup', annuler);
+  container.addEventListener('pointercancel', annuler);
 }
 async function _chatCoachToggleReaction(messageId, emoji) {
   const map = _chatCoachReactions[messageId] = _chatCoachReactions[messageId] || {};
@@ -1132,7 +1153,7 @@ function _chatCoachBulle(m) {
   const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
   const reactBar = `<div id="chatCoachReact-${m.id}" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px;">${_chatCoachReactionsBarHtml(m.id)}</div>`;
   if (moi) {
-    return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+    return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:60%;">
         <div style="background:var(--accent);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:13px;line-height:1.4;word-break:break-word;">${esc(m.texte)}</div>
         <div style="font-size:10px;color:var(--text-faint);text-align:right;margin-top:2px;">${heure}</div>
@@ -1140,7 +1161,7 @@ function _chatCoachBulle(m) {
       </div>
     </div>`;
   }
-  return `<div style="display:flex;align-items:flex-end;gap:8px;margin-bottom:10px;">
+  return `<div style="display:flex;align-items:flex-end;gap:8px;margin-bottom:10px;" data-msg-id="${m.id}">
     ${_chatCoachAvatar(p, 26)}
     <div style="max-width:60%;">
       <div style="font-size:11px;color:var(--text-faint);margin-bottom:2px;">${esc(nom)}</div>
@@ -1180,6 +1201,7 @@ function renderChatCoachPage(el) {
       }
       _chatCoachSubscribe();
       _chatCoachMarquerLu();
+      _chatCoachBindLongPress(document.getElementById('chatCoachMessages'));
     });
   } else {
     const msgEl = document.getElementById('chatCoachMessages');
@@ -1191,6 +1213,7 @@ function renderChatCoachPage(el) {
     }
     _chatCoachSubscribe();
     _chatCoachMarquerLu();
+    _chatCoachBindLongPress(document.getElementById('chatCoachMessages'));
   }
 }
 
@@ -1276,8 +1299,8 @@ function toggleChatCoachFab() {
         el.scrollTop = el.scrollHeight;
       }
     };
-    if (!_chatCoachLoaded) chargerChatCoach().then(() => { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); });
-    else { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); }
+    if (!_chatCoachLoaded) chargerChatCoach().then(() => { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); _chatCoachBindLongPress(document.getElementById('chatCoachFabMessages')); });
+    else { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); _chatCoachBindLongPress(document.getElementById('chatCoachFabMessages')); }
     document.getElementById('chatCoachFabInput').focus();
   }
 }

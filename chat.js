@@ -257,6 +257,7 @@ function _chatRenderPanel() {
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  _chatBindLongPress(document.getElementById('chatMessages'));
   requestAnimationFrame(() => {
     overlay.style.opacity = '1';
     const panel = document.getElementById('chatPanel');
@@ -352,16 +353,17 @@ function _chatNomAffiche(clientId) {
   return parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
 }
 
-// Contenu (pastilles de réactions + bouton "ajouter") pour le message donné — utilisé
-// au rendu initial de la bulle ET pour rafraîchir juste cette barre en direct (realtime,
-// toggle optimiste) sans re-render de tout le fil de discussion.
+// Contenu (uniquement les pastilles de réactions déjà posées, s'il y en a) pour le
+// message donné — utilisé au rendu initial de la bulle ET pour rafraîchir juste cette
+// barre en direct (realtime, toggle optimiste) sans re-render de tout le fil. Pas de
+// bouton "+" visible en permanence — discret comme une vraie app, le picker s'ouvre par
+// appui long sur le message (voir _chatBindLongPress), refermable en touchant ailleurs.
 function _chatReactionsBarHtml(messageId) {
   const map = _chatReactions[messageId] || {};
-  const pills = Object.keys(map).filter(e => map[e].size > 0).map(e => {
+  return Object.keys(map).filter(e => map[e].size > 0).map(e => {
     const mine = map[e].has(S.client);
     return `<span onclick="_chatToggleReaction(${messageId},'${e}')" style="display:inline-flex;align-items:center;gap:3px;font-size:12px;padding:2px 7px;border-radius:10px;background:${mine ? '#4f6ef733' : '#1e223580'};border:1px solid ${mine ? '#4f6ef7' : '#2d3142'};cursor:pointer;">${e} ${map[e].size}</span>`;
   }).join('');
-  return `${pills}<span onclick="_chatTogglePicker(${messageId})" style="font-size:12px;color:#555e7a;cursor:pointer;padding:2px 5px;">😀+</span>`;
 }
 
 function _chatUpdateReactionBar(messageId) {
@@ -369,12 +371,11 @@ function _chatUpdateReactionBar(messageId) {
   if (bar) bar.innerHTML = _chatReactionsBarHtml(messageId);
 }
 
-// Un seul picker ouvert à la fois — tap sur "😀+" bascule (ferme s'il était déjà ouvert
-// pour ce message, sinon ferme les autres et ouvre celui-ci juste après la barre).
-function _chatTogglePicker(messageId) {
-  const dejaOuvert = !!document.getElementById('chatPicker-' + messageId);
+// Un seul picker ouvert à la fois — ouvert par appui long sur une bulle (voir
+// _chatBindLongPress), refermé sans réagir par un tap n'importe où ailleurs
+// (_chatCloseAllPickers, écouteur global posé une seule fois plus bas).
+function _chatOuvrirPicker(messageId) {
   document.querySelectorAll('[id^="chatPicker-"]').forEach(el => el.remove());
-  if (dejaOuvert) return;
   const bar = document.getElementById('chatReact-' + messageId);
   if (!bar) return;
   const picker = document.createElement('div');
@@ -383,7 +384,37 @@ function _chatTogglePicker(messageId) {
   picker.innerHTML = _CHAT_REACT_EMOJIS.map(e =>
     `<span onclick="_chatToggleReaction(${messageId},'${e}');document.getElementById('chatPicker-${messageId}')?.remove();" style="font-size:17px;cursor:pointer;">${e}</span>`
   ).join('');
+  picker.addEventListener('click', e => e.stopPropagation()); // évite que le tap sur un emoji remonte jusqu'à l'écouteur global de fermeture
   bar.insertAdjacentElement('afterend', picker);
+}
+function _chatCloseAllPickers() {
+  document.querySelectorAll('[id^="chatPicker-"]').forEach(el => el.remove());
+}
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('[id^="chatPicker-"]')) _chatCloseAllPickers();
+});
+
+// Appui long (souris ou tactile, unifié via pointer events) sur une bulle de message —
+// ouvre le picker de réaction. Un déplacement notable pendant l'appui annule (c'est un
+// scroll, pas une intention de réagir). Délégation sur le conteneur : les bulles sont
+// ajoutées/retirées dynamiquement, pas besoin de rebrancher un listener par message.
+function _chatBindLongPress(container) {
+  if (!container || container._longPressBound) return;
+  container._longPressBound = true;
+  let timer = null, startX = 0, startY = 0;
+  const annuler = () => { clearTimeout(timer); timer = null; };
+  container.addEventListener('pointerdown', e => {
+    const bulle = e.target.closest('[data-msg-id]');
+    if (!bulle) return;
+    const id = Number(bulle.dataset.msgId);
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(() => { timer = null; if (navigator.vibrate) navigator.vibrate(12); _chatOuvrirPicker(id); }, 420);
+  });
+  container.addEventListener('pointermove', e => {
+    if (timer && (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8)) annuler();
+  });
+  container.addEventListener('pointerup', annuler);
+  container.addEventListener('pointercancel', annuler);
 }
 
 // Toggle optimiste (mise à jour locale immédiate) + persistance Supabase — la mise à
