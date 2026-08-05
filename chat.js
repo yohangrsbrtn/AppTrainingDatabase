@@ -17,20 +17,63 @@ let _chatChannel = null;
 let _chatLoaded = false;
 let _chatOuvert = false;
 let _chatNonLus = 0;
+let _chatNonLusInitDone = false;
 
 const _CHAT_FAB_POS_KEY    = 'at_chat_fab_pos';
 const _CHAT_FAB_HIDDEN_KEY = 'at_chat_fab_hidden';
+
+// ── Non-lus — personnalisé par utilisateur (id du dernier message lu stocké
+// par client_id, localStorage) ─────────────────────────────────────────────
+function _chatLastReadKey() { return 'at_chat_dernier_lu_' + (S.client || ''); }
+
+// Calcule le nombre de messages non lus au démarrage (pas seulement ceux reçus
+// pendant que l'app est ouverte, cf. _chatSubscribe) : compare le dernier id lu
+// stocké pour CE client à ceux réellement en base, en excluant ses propres
+// messages. Premier lancement jamais pour ce client sur cet appareil : pas de
+// rattrapage rétroactif sur tout l'historique existant (marqué "à jour" direct),
+// sinon un client qui découvre le chat des semaines après son lancement se
+// prendrait un gros chiffre d'un coup pour de vieux messages qu'il n'a jamais eu
+// l'occasion de manquer.
+async function _chatInitNonLus() {
+  const key = _chatLastReadKey();
+  let dernierLu = localStorage.getItem(key);
+  try {
+    if (dernierLu === null) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages?order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+      const arr = res.ok ? await res.json() : [];
+      dernierLu = String((arr[0] && arr[0].id) || 0);
+      localStorage.setItem(key, dernierLu);
+      _chatNonLus = 0;
+    } else {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages?id=gt.${dernierLu}&client_id=neq.${encodeURIComponent(S.client)}&select=id`, { headers: supaHeaders() });
+      const arr = res.ok ? await res.json() : [];
+      _chatNonLus = arr.length;
+    }
+  } catch(e) { _chatNonLus = 0; }
+  _chatUpdateFabBadge();
+}
+
+// Marque tous les messages actuellement chargés comme lus pour CE client.
+function _chatMarquerToutLu() {
+  if (!_chatMessages.length) return;
+  const maxId = Math.max(..._chatMessages.map(m => m.id));
+  localStorage.setItem(_chatLastReadKey(), String(maxId));
+}
 
 // ── Bouton flottant ──────────────────────────────────────────────────────
 
 function _chatEnsureFab() {
   if (!S.client) return;
+  // Souscription + calcul initial des non-lus AVANT le check "masqué" : le badge du
+  // bouton chat du header doit fonctionner même si le bouton flottant est masqué/
+  // désactivé (Paramètres) — ce sont deux affichages distincts du même compteur.
+  _chatSubscribe();
+  if (!_chatNonLusInitDone) { _chatNonLusInitDone = true; _chatInitNonLus(); }
   if (localStorage.getItem(_CHAT_FAB_HIDDEN_KEY) === '1') {
     const ex = document.getElementById('chatFab');
     if (ex) ex.remove();
     return;
   }
-  _chatSubscribe(); // badge de non-lus actif même bouton/panneau fermés
   if (document.getElementById('chatFab')) { _chatUpdateFabBadge(); return; }
 
   let pos = null;
@@ -136,11 +179,16 @@ function _chatOuvrirDepuisHeader() {
   _chatTogglePanel(true);
 }
 
+// Met à jour les DEUX affichages du compteur de non-lus — bouton flottant ET bouton
+// du header accueil (renderCarteHeader/index.html) — toujours ensemble, jamais l'un
+// sans l'autre, pour qu'ils restent cohérents en toutes circonstances.
 function _chatUpdateFabBadge() {
   const badge = document.getElementById('chatFabBadge');
-  if (!badge) return;
-  if (_chatNonLus > 0) { badge.style.display = 'flex'; badge.textContent = _chatNonLus > 9 ? '9+' : String(_chatNonLus); }
-  else badge.style.display = 'none';
+  if (badge) {
+    if (_chatNonLus > 0) { badge.style.display = 'flex'; badge.textContent = _chatNonLus > 9 ? '9+' : String(_chatNonLus); }
+    else badge.style.display = 'none';
+  }
+  if (typeof _majCarteHeader === 'function') _majCarteHeader();
 }
 
 // ── Panneau latéral ──────────────────────────────────────────────────────
@@ -152,7 +200,7 @@ function _chatTogglePanel(forceOpen) {
   _chatUpdateFabBadge();
   _chatRenderPanel();
   if (!_chatLoaded) _chatCharger();
-  else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); }
+  else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); _chatMarquerToutLu(); }
 }
 
 function _chatFermerPanel() {
@@ -215,6 +263,7 @@ async function _chatCharger() {
     _chatLoaded = true;
     _chatRenderMessages();
     setTimeout(_chatScrollBas, 50);
+    _chatMarquerToutLu();
   } catch(e) {
     const el = document.getElementById('chatMessages');
     if (el) el.innerHTML = `<div class="empty"><div class="empty-text">Erreur de chargement du chat</div></div>`;
@@ -233,19 +282,38 @@ function _chatSubscribe() {
       if (_chatOuvert && document.getElementById('chatMessages')) {
         _chatAppendMessage(payload.new);
         _chatScrollBas();
+        _chatMarquerToutLu(); // panneau ouvert = lu immédiatement, en direct
       } else if (payload.new.client_id !== S.client) {
         _chatNonLus++;
         _chatUpdateFabBadge();
       }
     })
+    // Une suppression (coach modère un message, par ex.) doit disparaître en direct chez
+    // tout le monde, sans devoir fermer/rouvrir le panneau — sinon un message resterait
+    // affiché indéfiniment côté client tant qu'il ne recharge pas.
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages' }, payload => {
+      const id = payload.old && payload.old.id;
+      if (id == null) return;
+      _chatMessages = _chatMessages.filter(m => m.id !== id);
+      const el = document.querySelector(`#chatMessages [data-msg-id="${id}"]`);
+      if (el) el.remove();
+    })
     .subscribe();
 }
 
+// Même convention que le classement (renderTop5Home/renderClassement, index.html) :
+// pseudo + "(Prénom N.)" entre parenthèses s'il existe, sinon "Prénom N." abrégé —
+// le nom de famille complet ne doit JAMAIS apparaître nulle part dans l'app, y compris
+// ici (bug vécu : sans pseudo, _nomAffichage(p).principal seul renvoie "Prénom Nom" en
+// entier, jamais abrégé — cette fonction UNIQUEMENT n'appliquait pas l'abréviation
+// appliquée partout ailleurs).
 function _chatNomAffiche(clientId) {
   const p = _chatProfils[clientId];
   if (!p) return clientId;
-  const { principal } = _nomAffichage(p);
-  return principal;
+  const { principal, secondaire } = _nomAffichage(p);
+  if (secondaire) return `${principal} (${secondaire})`;
+  const parts = principal.trim().split(' ');
+  return parts[0] + (parts[1] ? ' ' + parts[1][0] + '.' : '');
 }
 
 function _chatBulleHtml(m) {
