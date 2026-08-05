@@ -215,9 +215,25 @@ function _chatTogglePanel(forceOpen) {
   _chatNonLus = 0;
   _chatUpdateFabBadge();
   _chatRenderPanel();
-  if (!_chatLoaded) _chatCharger();
-  else { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); _chatMarquerToutLu(); }
+  // Affiche tout de suite ce qu'on a déjà en mémoire (perçu instantané), PUIS
+  // resynchronise avec le serveur à CHAQUE ouverture (même pattern que le pense-bête
+  // console, chargerTodos()) — indispensable ici : Realtime ne rattrape jamais les
+  // événements manqués pendant une coupure de connexion (écran verrouillé, app en
+  // fond), donc se fier au seul cache en mémoire après la 1ère ouverture laissait un
+  // message reçu pendant que le téléphone était verrouillé invisible jusqu'à un
+  // rechargement complet de la page (bug vécu, 2026-08-05).
+  if (_chatLoaded) { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); _chatMarquerToutLu(); }
+  _chatCharger();
 }
+
+// Resynchronise quand l'app redevient visible après avoir été en fond/écran verrouillé
+// — même raison que ci-dessus (Realtime ne rattrape rien rétroactivement). Rafraîchit le
+// fil si le panneau est déjà ouvert, sinon juste le compteur de non-lus (discret).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !S.client) return;
+  if (_chatOuvert) _chatCharger();
+  else if (_chatNonLusInitDone) _chatInitNonLus();
+});
 
 function _chatFermerPanel() {
   _chatOuvert = false;
