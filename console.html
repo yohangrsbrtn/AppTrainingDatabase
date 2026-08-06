@@ -4883,14 +4883,26 @@ function renderFicheBilansTab(c){
     _ficheBilanPhotosSel = [];
   }
   if (_ficheBilanPhotosGallery === null) {
-    fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() })
-      .then(r => r.ok ? r.json() : [])
-      .then(rows => {
-        _ficheBilanPhotosGallery = Array.isArray(rows) ? rows : [];
-        const el = document.getElementById('ficheTabContent');
-        if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
-      })
-      .catch(() => { _ficheBilanPhotosGallery = []; });
+    // Galerie unifiée, toutes sources confondues (bilans + mensurations), triée par la
+    // vraie date représentée par la photo (date_validation du bilan / date de la
+    // mensuration) — PAS par date d'upload, pour une chronologie fidèle. _key
+    // (préfixe 'b'/'m' + id) évite toute collision entre les deux séquences d'id
+    // distinctes (bilan_photos.id et mensuration_photos.id ne sont pas liées).
+    Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,mensurations(date)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    ]).then(([bilanRows, mensRows]) => {
+      const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _date: (p.bilans && p.bilans.date_validation) || null, _key: 'b' + p.id }));
+      const b = (Array.isArray(mensRows) ? mensRows : []).map(p => ({ ...p, _source: 'mensuration', _date: (p.mensurations && p.mensurations.date) || null, _key: 'm' + p.id }));
+      _ficheBilanPhotosGallery = [...a, ...b].sort((x, y) => {
+        if (!x._date && !y._date) return 0;
+        if (!x._date) return -1; // pas de date connue (bilan en cours non validé) : en tête
+        if (!y._date) return 1;
+        return y._date.localeCompare(x._date);
+      });
+      const el = document.getElementById('ficheTabContent');
+      if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
+    }).catch(() => { _ficheBilanPhotosGallery = []; });
   }
   if (_ficheBilansVoirCorbeille) return _renderFicheBilansCorbeille(c);
   if (_ficheBilans === null) {
@@ -5159,8 +5171,8 @@ function _renderFicheBilanPhotosGallery(c){
   if (_ficheBilanPhotosGallery === null) return `<div class="fiche-card" style="margin-bottom:14px;"><div style="color:var(--text-faint);font-size:12px;">Chargement des photos…</div></div>`;
   if (!_ficheBilanPhotosGallery.length) return '';
   const sel = _ficheBilanPhotosSel;
-  const findPhoto = id => _ficheBilanPhotosGallery.find(p => p.id === id);
-  const dateOf = p => (p.bilans && p.bilans.date_validation) ? p.bilans.date_validation.split('-').reverse().join('/') : '—';
+  const findPhoto = key => _ficheBilanPhotosGallery.find(p => p._key === key);
+  const dateOf = p => p._date ? p._date.split('-').reverse().join('/') : '—';
   const compareHtml = sel.length === 2 ? `
     <div class="fiche-card" style="margin-bottom:14px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
@@ -5168,9 +5180,9 @@ function _renderFicheBilanPhotosGallery(c){
         <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="_ficheBilanPhotosSel=[];setFicheTab('bilans')">✕ Réinitialiser</button>
       </div>
       <div style="display:flex;gap:12px;">
-        ${sel.map(id => { const p = findPhoto(id); if (!p) return ''; return `
+        ${sel.map(key => { const p = findPhoto(key); if (!p) return ''; return `
           <div style="flex:1;text-align:center;min-width:0;max-width:280px;">
-            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,_ficheBilanPhotosGallery.findIndex(x=>x.id===${p.id}))">
+            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,_ficheBilanPhotosGallery.findIndex(x=>x._key==='${p._key}'))">
             <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)}</div>
           </div>`; }).join('')}
       </div>
@@ -5179,10 +5191,11 @@ function _renderFicheBilanPhotosGallery(c){
     <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Photos <span style="font-weight:400;color:var(--text-faint);font-size:11px;">— clique sur 2 photos pour les comparer côte à côte</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;">
       ${_ficheBilanPhotosGallery.map(p => {
-        const isSel = sel.includes(p.id);
-        return `<div style="width:84px;cursor:pointer;" onclick="toggleFicheBilanPhotoSel(${p.id})">
+        const isSel = sel.includes(p._key);
+        return `<div style="width:84px;cursor:pointer;" onclick="toggleFicheBilanPhotoSel('${p._key}')">
           <div style="position:relative;width:84px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isSel?'box-shadow:0 0 0 3px var(--accent);':''}">
             <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;">
+            ${p._source === 'mensuration' ? `<div style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;">📏</div>` : ''}
             ${isSel?`<div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;">✓</div>`:''}
           </div>
           <div style="font-size:10px;color:var(--text-faint);text-align:center;margin-top:3px;">${dateOf(p)}</div>
@@ -5192,11 +5205,11 @@ function _renderFicheBilanPhotosGallery(c){
   </div>`;
 }
 
-function toggleFicheBilanPhotoSel(id){
-  const i = _ficheBilanPhotosSel.indexOf(id);
+function toggleFicheBilanPhotoSel(key){
+  const i = _ficheBilanPhotosSel.indexOf(key);
   if (i >= 0) { _ficheBilanPhotosSel.splice(i,1); }
   else {
-    _ficheBilanPhotosSel.push(id);
+    _ficheBilanPhotosSel.push(key);
     if (_ficheBilanPhotosSel.length > 2) _ficheBilanPhotosSel.shift(); // ne garde que les 2 dernières cliquées
   }
   const c = (data.clients||[]).find(cl => cl.id === _ficheBilanPhotosClientId);
