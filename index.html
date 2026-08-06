@@ -665,11 +665,30 @@ async function _completerConnexionSupabase(session) {
     }
     estCoach = !!(lockRows[0] && lockRows[0].est_coach);
     // Date de première connexion — ancrée une seule fois, jamais réécrite
-    // ensuite (reconnexions normales, changement de mot de passe, etc.).
+    // ensuite (reconnexions normales, changement de mot de passe, etc.). Sert
+    // aussi de détection fiable de "toute première connexion réelle" pour
+    // déclencher le message de bienvenue ci-dessous — le PATCH n'est envoyé
+    // QUE si date_creation_compte était encore vide, donc ce bloc ne peut
+    // s'exécuter qu'une seule fois par client dans toute la vie du compte.
     if (lockRows[0] && !lockRows[0].date_creation_compte) {
       fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}`, {
         method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
         body: JSON.stringify({ date_creation_compte: _isoDateLocal(new Date()) })
+      }).then(res => {
+        // N'envoie le message de bienvenue que si le PATCH a réussi — si jamais
+        // il échoue, date_creation_compte reste vide et cette branche retentera
+        // proprement à la prochaine connexion, sans risque de double bienvenue.
+        if (!res.ok) return;
+        return fetch(`${SUPABASE_URL}/rest/v1/client_notifications`, {
+          method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+          body: JSON.stringify({
+            client_id: _loginClient,
+            title: '👋 Bienvenue sur ton application de suivi !',
+            body: "J'espère qu'elle te plaira ! N'hésite pas à faire un tour dans les Paramètres, tu y trouveras le fonctionnement global de l'app — et pense à activer les notifications, c'est important pour ne rien manquer. Si tu as des questions ou que tu repères un bug, n'hésite pas à en parler à ton coach 💪",
+            plein_ecran: true,
+            source: 'bienvenue',
+          })
+        });
       }).catch(() => {});
     }
   } catch(e) { /* échec de la vérif réseau : on laisse passer plutôt que de bloquer tout le monde par erreur */ }
