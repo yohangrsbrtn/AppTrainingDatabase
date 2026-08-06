@@ -894,7 +894,8 @@ const BONUS_DIETE_6SUR7        = 15;
 const BONUS_DIETE_7SUR7        = 30; // remplace le bonus 6/7, pas cumulatif
 const BONUS_SEANCES_100PCT     = 25; // 100% de l'objectif séances/semaine (client_profils.seances_cible)
 // Pas de constante fixe pour l'XP pas : voir xpPasExcedent plus bas — dépend du couple
-// (excédent, objectif du coach), pas d'une valeur unitaire fixe.
+// (excédent, objectif du coach), pas d'une valeur unitaire fixe. Plafonnée à :
+const XP_PAS_MAX_HEBDO = 15;
 const BONUS_PONCTUALITE        = 20; // bilan envoyé au plus tard le jour de bilan assigné, avant midi
 const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
 
@@ -955,8 +956,12 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
   // dépassé modestement, alors que le second demande objectivement plus d'effort pour le
   // même excédent — remplace l'ancien calcul (1 XP/500 pas sur la moyenne BRUTE, +
   // bonus fixe de 20 XP en atteignant l'objectif) qui ne tenait pas compte de ça.
+  // Plafonné à XP_PAS_MAX_HEBDO — reste valorisant sans pouvoir faire s'envoler quelqu'un
+  // au classement juste sur les pas (vélo compté comme des pas, écart naturel entre
+  // profils selon le mode de vie...), et évite d'inciter à sur-déclarer ses pas pour
+  // gratter toujours plus d'XP au-delà d'un certain point.
   const excedentPas      = profil.steps_cible ? Math.max(0, stepsMoy - profil.steps_cible) : 0;
-  const xpPasExcedent    = profil.steps_cible ? Math.round((excedentPas / 500) * (profil.steps_cible / 5000)) : 0;
+  const xpPasExcedent    = profil.steps_cible ? Math.min(XP_PAS_MAX_HEBDO, Math.round((excedentPas / 500) * (profil.steps_cible / 5000))) : 0;
   const ponctuel         = _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, profil.jour_bilan);
   const bonusPonctualite = ponctuel ? BONUS_PONCTUALITE : 0;
   const bonusStreak      = ponctuel ? (STREAK_BONUS[await _calculerStreakBilans(clientId, profil.jour_bilan)] || 0) : 0;
