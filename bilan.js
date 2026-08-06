@@ -81,6 +81,7 @@ async function _supaGetOrCreateBilanCourant(clientId) {
     const { debut: debutAujourdhui }  = _bilanWeekBounds(jourBilanNom, new Date());
     if (debutDernier.getTime() === debutAujourdhui.getTime()) {
       await _supaResyncSemaineLabel(arr[0], jourBilanNom);
+      if (!arr[0].envoye_coach) await _supaReconcilierNbRepas(arr[0], clientId);
       return { row: arr[0], jourBilanNom };
     }
     // Le dernier bilan couvre une semaine déjà terminée. On ne le quitte QUE s'il n'a pas
@@ -92,6 +93,7 @@ async function _supaGetOrCreateBilanCourant(clientId) {
       const limite = _bilanDeadline(jourBilanNom, new Date(arr[0].created_at));
       if (new Date() <= limite) {
         await _supaResyncSemaineLabel(arr[0], jourBilanNom);
+        await _supaReconcilierNbRepas(arr[0], clientId);
         return { row: arr[0], jourBilanNom };
       }
     }
@@ -255,18 +257,11 @@ function _normaliserBilanSupa(row) {
   };
 }
 
-async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
+// Nombre de repas à évaluer = nombre de repas (hors équivalences, variante_index 0) de la
+// PREMIÈRE diète active du client (ordre arbitraire s'il y en a plusieurs, ex: Jour On/Off).
+// Retombe sur 4 si le client n'a pas de diète active ou en cas d'erreur réseau.
+async function _supaCalculerNbRepas(clientId) {
   let nbRepas = 4;
-  if (jourBilanNom === undefined) {
-    jourBilanNom = null;
-    try {
-      const profil = await fetch(
-        `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${clientId}&select=jour_bilan`,
-        { headers: supaHeaders() }
-      ).then(r => r.json());
-      jourBilanNom = (profil && profil[0] && profil[0].jour_bilan) || null;
-    } catch(e) {}
-  }
   try {
     const dietes = await fetch(
       `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${clientId}&actif=eq.true&limit=1`,
@@ -284,6 +279,42 @@ async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
       }
     }
   } catch(e) {}
+  return nbRepas;
+}
+
+// Le bilan de la semaine en cours reste ouvert plusieurs jours (jusqu'à l'envoi) : si le coach
+// modifie la diète active entre-temps (ex: ajoute des repas), repas_eval — figé à la création
+// du bilan — ne suivait pas, laissant le client évaluer moins de repas qu'il n'en a réellement
+// (vécu : Paul Sustra, diète passée de 4 à 6 repas après création du bilan, seuls 4 visibles).
+// N'AGRANDIT que le tableau (ajoute les repas manquants) — ne retire jamais d'entrées déjà
+// évaluées si la diète a depuis perdu des repas, pour ne pas effacer une saisie du client.
+async function _supaReconcilierNbRepas(row, clientId) {
+  try {
+    const actuel = row.repas_eval || [];
+    const nbCible = await _supaCalculerNbRepas(clientId);
+    if (nbCible <= actuel.length) return row;
+    const repasEval = actuel.slice();
+    for (let i = actuel.length; i < nbCible; i++) repasEval.push({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 });
+    await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${row.id}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ repas_eval: repasEval }),
+    });
+    row.repas_eval = repasEval;
+  } catch(e) {}
+  return row;
+}
+
+async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
+  if (jourBilanNom === undefined) {
+    jourBilanNom = null;
+    try {
+      const profil = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${clientId}&select=jour_bilan`,
+        { headers: supaHeaders() }
+      ).then(r => r.json());
+      jourBilanNom = (profil && profil[0] && profil[0].jour_bilan) || null;
+    } catch(e) {}
+  }
+  const nbRepas = await _supaCalculerNbRepas(clientId);
 
   const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false, valide: false, seance_validee: false }));
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
