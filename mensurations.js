@@ -606,3 +606,4 @@ function miniGraphe(valeurs, couleur, unite) {
     <span>${pts[0].v}${unite}</span><span>${pts[pts.length-1].v}${unite}</span>
   </div>`;
 }
+
