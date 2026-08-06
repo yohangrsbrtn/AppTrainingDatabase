@@ -13,6 +13,8 @@ let _mEntrees  = [];
 let _mFormData = null;
 let _mDateDebut = '';
 let _mDateFin   = '';
+let _mPhotos = null;           // photos de la saisie affichée dans le formulaire, null = pas encore chargées
+let _mPhotosUploading = false;
 
 // ── Load ──────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ async function loadMensurationsSupabase() {
     );
     const data = res.ok ? await res.json() : [];
     _mReleves = data.map(r => ({
+      id:       r.id,
       date:     r.date,
       poids:    r.poids,
       taille:   r.mesure,
@@ -67,6 +70,7 @@ function creerSaisieMensurationSupabase() {
 function ouvrirSaisieMensurationSupabase(dateISO) {
   const e = _mReleves.find(r => r.date === dateISO);
   _mFormData = {
+    id:       e ? e.id       : null,
     date:     dateISO,
     poids:    e ? e.poids    : null,
     taille:   e ? e.taille   : null,
@@ -78,8 +82,10 @@ function ouvrirSaisieMensurationSupabase(dateISO) {
     bras:     e ? e.bras     : null,
     phase:    e ? e.phase    : ''
   };
+  _mPhotos = null;
   _mSubPage = 'saisie-form';
   setPage('mensurations');
+  if (_mFormData.id) _chargerMensPhotos(_mFormData.id);
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -251,6 +257,23 @@ function renderSaisieFormSupabase() {
         ${numInput('Épaules', 'epaules', 'cm')}
         ${numInput('Bras', 'bras', 'cm')}
       </div>
+      ${d.id ? `<div class="card">
+        <div class="field-label">📸 PHOTOS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;">
+          ${_mPhotos === null
+            ? `<div style="font-size:12px;color:var(--muted);">Chargement…</div>`
+            : (_mPhotos || []).map(p => `
+              <div style="position:relative;width:84px;aspect-ratio:9/16;flex-shrink:0;">
+                <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onclick="window.open('${esc(p.url)}','_blank')">
+                <button onclick="_supprimerMensPhotoClient(${p.id},'${esc(p.url)}')" title="Supprimer"
+                  style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);border:none;color:#fff;font-size:12px;line-height:1;cursor:pointer;">✕</button>
+              </div>`).join('')}
+        </div>
+        <label class="btn-secondary" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
+          ${_mPhotosUploading ? 'Envoi…' : '+ Ajouter une photo'}
+          <input type="file" accept="image/*" multiple style="display:none;" ${_mPhotosUploading ? 'disabled' : ''} onchange="_ajouterMensPhotoClient(event)">
+        </label>
+      </div>` : `<div class="card"><div style="font-size:12px;color:var(--muted);">Enregistre au moins une valeur ci-dessus pour pouvoir ajouter des photos à cette date.</div></div>`}
       <button class="btn-secondary" onclick="loadSaisieMensurationsSupabase()">← Toutes les saisies</button>
     </div>
     ${renderNavBar('mensurations')}
@@ -276,6 +299,7 @@ async function sauverMensurationSupa(field, value) {
   if (!_mFormData || !_mFormData.date) return;
   _mFormData[field] = value;
   const f = _mFormData;
+  const etaitNouveau = !f.id; // pas encore d'id = 1re valeur jamais saisie à cette date
   const nn = v => v !== null && v !== undefined ? v : null;
   const body = {
     client_id: S.client,
@@ -296,14 +320,77 @@ async function sauverMensurationSupa(field, value) {
       body: JSON.stringify(body)
     });
     if (!res.ok) return;
-    const updated = { ...body, taille: f.taille, phase: f.phase || '' };
+    const saved = (await res.json())[0];
+    f.id = saved.id;
+    const updated = { ...body, id: saved.id, taille: f.taille, phase: f.phase || '' };
     const idx = _mReleves.findIndex(r => r.date === f.date);
     if (idx >= 0) _mReleves[idx] = updated;
     else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
     // Le poids saisi ici est aussi reporté dans le bilan de la semaine en
     // cours, à la journée correspondant à cette date (voir bilan.js).
     if (field === 'poids' && value !== null) reporterMesureDansBilan(S.client, f.date, 'poids', value);
+    // 1re sauvegarde de cette saisie (id vient d'apparaître) : re-render pour révéler
+    // la section photos, jusque-là masquée (pas de mensuration_id à rattacher avant).
+    // Les sauvegardes suivantes ne re-render PAS (garde le focus sur le champ édité).
+    if (etaitNouveau) { _mPhotos = []; setPage('mensurations'); }
   } catch(e) {}
+}
+
+// ── Photos de mensuration (Supabase Storage, bucket "bilans-photos", préfixe
+// "mensurations/") — même pattern que les photos de bilan (bilan.js).
+async function _chargerMensPhotos(mensurationId) {
+  _mPhotos = null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?mensuration_id=eq.${mensurationId}&order=created_at.asc`, { headers: supaHeaders() });
+    _mPhotos = res.ok ? await res.json() : [];
+  } catch(e) { _mPhotos = []; }
+  if (_mFormData && _mFormData.id === mensurationId && S.page === 'mensurations') setPage('mensurations');
+}
+
+async function _ajouterMensPhotoClient(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length || !_mFormData || !_mFormData.id) return;
+  const mensurationId = _mFormData.id;
+  _mPhotosUploading = true; setPage('mensurations');
+  try {
+    for (const file of files) {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `mensurations/${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+        body: file
+      });
+      if (!upRes.ok) throw new Error('Erreur envoi photo.');
+      const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+      const insRes = await fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos`, {
+        method: 'POST',
+        headers: supaHeaders({ Prefer: 'return=representation' }),
+        body: JSON.stringify({ mensuration_id: mensurationId, client_id: S.client, url })
+      });
+      if (insRes.ok) { const row = (await insRes.json())[0]; _mPhotos = (_mPhotos || []).concat([row]); }
+    }
+  } catch(err) {
+    showToast('Erreur : ' + err.message, '#c0392b');
+  } finally {
+    _mPhotosUploading = false; setPage('mensurations');
+  }
+}
+
+async function _supprimerMensPhotoClient(photoId, url) {
+  if (!confirm('Supprimer cette photo ?')) return;
+  try {
+    const marker = '/object/public/bilans-photos/';
+    const idx = url.indexOf(marker);
+    if (idx >= 0) {
+      const path = url.slice(idx + marker.length);
+      await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, { method:'DELETE', headers: supaHeaders() }).catch(()=>{});
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?id=eq.${photoId}`, { method:'DELETE', headers: supaHeaders() });
+    _mPhotos = (_mPhotos || []).filter(p => p.id !== photoId);
+    setPage('mensurations');
+  } catch(err) { showToast('Erreur : ' + err.message, '#c0392b'); }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
