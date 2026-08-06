@@ -10929,6 +10929,7 @@ function _showShell() {
 // "sauvegarder" séparé).
 let _todos = null;
 let _todoPanelOuvert = false;
+let _todoEditingId = null;
 
 async function chargerTodos(){
   try {
@@ -10962,13 +10963,40 @@ function renderTodoList(){
   // boot (_showShell) n'avait pas encore fini au moment où on ouvre le panneau.
   if (_todos === null) { el.innerHTML = `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Chargement…</div>`; return; }
   const todos = _todos;
-  el.innerHTML = todos.length ? todos.map(t => `
+  el.innerHTML = todos.length ? todos.map(t => t.id === _todoEditingId ? `
+    <div style="padding:6px 2px;border-bottom:1px solid var(--hairline);">
+      <textarea id="todoEditArea-${t.id}" rows="3" style="font-size:13px;width:100%;padding:6px 7px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);resize:vertical;line-height:1.4;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sauverTodoTexte(${t.id});}if(event.key==='Escape'){_todoEditingId=null;renderTodoList();}">${esc(t.texte)}</textarea>
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:5px;">
+        <button class="btn" style="font-size:11.5px;padding:3px 9px;" onclick="_todoEditingId=null;renderTodoList();">Annuler</button>
+        <button class="btn primary" style="font-size:11.5px;padding:3px 9px;" onclick="sauverTodoTexte(${t.id})">Enregistrer</button>
+      </div>
+    </div>` : `
     <div style="display:flex;align-items:flex-start;gap:7px;padding:6px 2px;border-bottom:1px solid var(--hairline);">
       <input type="checkbox" ${t.fait?'checked':''} onchange="toggleTodo(${t.id},this.checked)" style="margin-top:2px;flex-shrink:0;">
-      <div style="flex:1;font-size:13px;line-height:1.4;word-break:break-word;${t.fait?'text-decoration:line-through;color:var(--text-faint);':''}">${esc(t.texte)}</div>
+      <div style="flex:1;font-size:13px;line-height:1.4;word-break:break-word;white-space:pre-wrap;cursor:text;${t.fait?'text-decoration:line-through;color:var(--text-faint);':''}" onclick="_todoEditingId=${t.id};renderTodoList();" title="Cliquer pour éditer">${esc(t.texte)}</div>
       <button class="icon-btn del" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerTodo(${t.id})" title="Supprimer">${iTrash()}</button>
     </div>`).join('')
     : `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Rien pour l'instant.</div>`;
+  if (_todoEditingId !== null) {
+    const ta = document.getElementById(`todoEditArea-${_todoEditingId}`);
+    if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
+  }
+}
+
+async function sauverTodoTexte(id){
+  const ta = document.getElementById(`todoEditArea-${id}`);
+  if (!ta) return;
+  const texte = ta.value.trim();
+  if (!texte) return;
+  const t = (_todos || []).find(x => x.id === id);
+  if (t) t.texte = texte;
+  _todoEditingId = null;
+  renderTodoList();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ texte })
+    });
+  } catch(e) {}
 }
 
 async function ajouterTodo(){
