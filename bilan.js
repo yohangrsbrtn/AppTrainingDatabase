@@ -893,8 +893,8 @@ const XP_BILAN_BASE            = 50;
 const BONUS_DIETE_6SUR7        = 15;
 const BONUS_DIETE_7SUR7        = 30; // remplace le bonus 6/7, pas cumulatif
 const BONUS_SEANCES_100PCT     = 25; // 100% de l'objectif séances/semaine (client_profils.seances_cible)
-const XP_PAR_500_PAS           = 1;  // moyenne de pas/jour de la semaine, arrondie
-const BONUS_PAS_HEBDO_OBJECTIF = 20; // moyenne semaine >= objectif du coach (client_profils.steps_cible)
+// Pas de constante fixe pour l'XP pas : voir xpPasExcedent plus bas — dépend du couple
+// (excédent, objectif du coach), pas d'une valeur unitaire fixe.
 const BONUS_PONCTUALITE        = 20; // bilan envoyé au plus tard le jour de bilan assigné, avant midi
 const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
 
@@ -947,13 +947,21 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
 
   const bonusDiete       = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
   const bonusSeances100  = (profil.seances_cible && joursTraining >= profil.seances_cible) ? BONUS_SEANCES_100PCT : 0;
-  const xpPasContinu     = Math.round(stepsMoy / 500) * XP_PAR_500_PAS;
-  const bonusPasHebdo    = (profil.steps_cible && stepsMoy >= profil.steps_cible) ? BONUS_PAS_HEBDO_OBJECTIF : 0;
+  // XP pas : uniquement sur le DÉPASSEMENT de l'objectif du coach (steps_cible), pondéré
+  // par la taille de cet objectif — le même excédent en pas doit rapporter plus à un
+  // client à qui on a demandé beaucoup (12-15k, effort déjà proche du maximum réaliste)
+  // qu'à un client à qui on a demandé peu (8k, marge de manœuvre confortable). Sans
+  // pondération, un objectif bas dépassé largement grattait plus d'XP qu'un objectif haut
+  // dépassé modestement, alors que le second demande objectivement plus d'effort pour le
+  // même excédent — remplace l'ancien calcul (1 XP/500 pas sur la moyenne BRUTE, +
+  // bonus fixe de 20 XP en atteignant l'objectif) qui ne tenait pas compte de ça.
+  const excedentPas      = profil.steps_cible ? Math.max(0, stepsMoy - profil.steps_cible) : 0;
+  const xpPasExcedent    = profil.steps_cible ? Math.round((excedentPas / 500) * (profil.steps_cible / 5000)) : 0;
   const ponctuel         = _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, profil.jour_bilan);
   const bonusPonctualite = ponctuel ? BONUS_PONCTUALITE : 0;
   const bonusStreak      = ponctuel ? (STREAK_BONUS[await _calculerStreakBilans(clientId, profil.jour_bilan)] || 0) : 0;
 
-  const xpSemaine = XP_BILAN_BASE + bonusDiete + bonusSeances100 + xpPasContinu + bonusPasHebdo + bonusPonctualite + bonusStreak;
+  const xpSemaine = XP_BILAN_BASE + bonusDiete + bonusSeances100 + xpPasExcedent + bonusPonctualite + bonusStreak;
 
   await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
     method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine })
