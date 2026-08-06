@@ -951,14 +951,27 @@ async function pcDemarrerChrono() {
   _pcEndTime = Date.now() + _pcTemps * 1000;
   _pcChronoDone = false;
 
-  // Planifier le push serveur (firewall si app fermée/écran verrouillé)
+  // Planifier le push serveur (filet de sécurité si app fermée/écran verrouillé) —
+  // appel direct à l'edge function avec delay_ms : elle attend elle-même exactement
+  // ce délai côté serveur (EdgeRuntime.waitUntil) avant d'envoyer, précision à la
+  // seconde. pg_cron sur cette instance n'exécute qu'à la minute près (le 6e champ
+  // "secondes" est silencieusement ignoré), trop imprécis pour un repos court — voir
+  // supabase/functions/send-push/index.ts. La fonction insère elle-même la ligne
+  // timer_jobs (utilisée ici seulement pour l'annulation, cf. pcStopChrono) et renvoie
+  // son id.
   _pcJobId = null;
   if (typeof S !== 'undefined' && S.client) {
-    fetch(`${SUPABASE_URL}/rest/v1/timer_jobs`, {
+    fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
       method: 'POST',
-      headers: supaHeaders({ Prefer: 'return=representation' }),
-      body: JSON.stringify({ client_id: S.client, fire_at: new Date(_pcEndTime).toISOString() })
-    }).then(r => r.ok ? r.json() : null).then(jobs => { if (jobs && jobs[0]) _pcJobId = jobs[0].id; }).catch(() => {});
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({
+        client_id: S.client,
+        title: '⏱ Repos terminé !',
+        body: 'C\'est reparti 💪',
+        urgent: true,
+        delay_ms: _pcTemps * 1000,
+      })
+    }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.job_id != null) _pcJobId = j.job_id; }).catch(() => {});
   }
 
   // Le bip n'est plus pré-programmé ici (voir _pcJouerBeepFin) — seulement
