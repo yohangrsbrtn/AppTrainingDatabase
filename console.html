@@ -2721,7 +2721,9 @@ async function supprimerBilanDetailPhoto(photoId, url){
 
 // ── Page Classement ───────────────────────────────────────────────────
 function renderClassementPage(el){
-  const list = data.clients.slice().sort((a,b)=> (b.niveau||0)-(a.niveau||0));
+  // Clients en pause ou anciens exclus du classement (demande explicite du coach) —
+  // même filtre que côté client (index.html renderClassement/renderTop5Home).
+  const list = data.clients.filter(c => (c.statut||'actif') === 'actif').sort((a,b)=> (b.niveau||0)-(a.niveau||0));
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Classement</h1></div>
