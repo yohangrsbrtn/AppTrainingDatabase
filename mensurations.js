@@ -249,13 +249,13 @@ function renderSaisieFormSupabase() {
       </div>
       <div class="card">
         <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted);">Mensurations (cm)</div>
-        ${numInput('Tour de taille', 'taille', 'cm')}
-        ${numInput('Fessiers', 'fessiers', 'cm')}
-        ${numInput('Cuisses', 'cuisses', 'cm')}
-        ${numInput('Mollets', 'mollets', 'cm')}
-        ${numInput('Poitrine', 'poitrine', 'cm')}
-        ${numInput('Épaules', 'epaules', 'cm')}
-        ${numInput('Bras', 'bras', 'cm')}
+        ${numInput('Tour de taille', 'taille', '5cm sous le nombril')}
+        ${numInput('Fessiers', 'fessiers', 'au plus gros, décontracté')}
+        ${numInput('Cuisses', 'cuisses', '20cm au-dessus de la rotule')}
+        ${numInput('Mollets', 'mollets', 'au plus gros, contracté')}
+        ${numInput('Poitrine', 'poitrine', 'au niveau des mamelons')}
+        ${numInput('Épaules', 'epaules', 'au plus gros, décontracté')}
+        ${numInput('Bras', 'bras', 'au plus gros, contracté')}
       </div>
       ${d.id ? `<div class="card">
         <div class="field-label">📸 PHOTOS</div>
