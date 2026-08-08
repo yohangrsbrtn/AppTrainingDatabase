@@ -11,6 +11,7 @@ let _bilanJourBilanNom = null; // Supabase only — client_profils.jour_bilan du
 let _bilanPhotos = null;         // photos du bilan actuellement affiché, null = pas encore chargées
 let _bilanPhotosBilanId = null;  // id du bilan pour lequel _bilanPhotos a été chargé
 let _bilanPhotosUploading = false;
+let _bilanAutresEnAttente = 0; // nb d'anciens bilans non-envoyés/non-archivés autres que le courant
 
 // ── Chargement ────────────────────────────────────────────────────────
 
@@ -143,6 +144,20 @@ async function _supaLoadBilan() {
     );
     const prevArr = await prevRes.json();
     _prevMeta = (prevArr && prevArr.length > 0) ? { id: prevArr[0].id, semaineLabel: prevArr[0].semaine_label } : null;
+    // D'anciens bilans non-envoyés (rollovers passés, cf. _supaGetOrCreateBilanCourant) restent
+    // en base sans que le client ne le voie nulle part sur cette page — vécu : un client se
+    // retrouve avec un bilan "en cours" flambant neuf et vide, ne sait pas qu'une semaine
+    // précédente traîne non envoyée, et RETAPE de mémoire toute la semaine dans le nouveau au
+    // lieu de simplement envoyer/compléter l'ancien (doublon de données, semaine mal étiquetée).
+    // Compté ici pour afficher un bandeau d'alerte impossible à manquer sur la page courante.
+    try {
+      const attenteRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${clientId}&envoye_coach=eq.false&archive=eq.false&id=neq.${row.id}&select=id`,
+        { headers: supaHeaders() }
+      );
+      const attenteArr = attenteRes.ok ? await attenteRes.json() : [];
+      _bilanAutresEnAttente = attenteArr.length;
+    } catch(e) { _bilanAutresEnAttente = 0; }
     _bilanMode = 'current';
     setPage('bilan');
   } catch(e) { setPage('home'); }
@@ -608,6 +623,11 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
   const subtitle = attenteMode ? 'Bilan en attente' : isSemainePrecedente ? 'Semaine précédente' : (data.semaineLabel || 'Semaine en cours');
   let html = '';
 
+  if (!modeHistorique && !attenteMode && !isSemainePrecedente && _bilanAutresEnAttente > 0) {
+    html += `<div class="bilan-banner" style="background:#3a1f14;color:#ffb17a;border:1px solid #a9642f88;cursor:pointer;font-weight:600;" onclick="chargerBilansEnAttente()">
+      ⚠️ ${_bilanAutresEnAttente > 1 ? `${_bilanAutresEnAttente} anciens bilans n'ont pas été envoyés` : "Un ancien bilan n'a pas été envoyé"} — vérifie avant de resaisir cette semaine →
+    </div>`;
+  }
   if (data.dejaEnvoye) {
     html += `<div class="bilan-banner">Bilan envoyé au coach — toujours modifiable</div>`;
   } else if (attenteMode) {
