@@ -215,6 +215,41 @@ function _protocoleCalculer(protocole, molecules) {
   return { molecules: molsCalc, semaines };
 }
 
+// ── Analyses de sang (marqueurs) — catégorisation partagée coach (console) +
+// client (protocole.js). Portage fidèle de l'ancien classement GAS (par mots-
+// clés, pas par nom exact — le libellé est saisi manuellement et peut varier).
+const CATEGORIES_ANALYSES = [
+  { nom: 'Hémogramme (NFS)', motsCles: ['hemat', 'hemoglob', 'leucocyte', 'polynucle', 'neutrophile', 'eosinophile', 'basophile', 'lymphocyte', 'monocyte', 'plaquette', 'vgm', 'tcmh', 'ccmh', 'idr'] },
+  { nom: 'Bilan hépatique', motsCles: ['transaminase', 'asat', 'alat', 'sgot', 'sgpt', 'gamma gt', 'ggt', 'phosphatase alcaline', 'bilirubine', 'fib4'] },
+  { nom: 'Bilan rénal', motsCles: ['creatinine', 'dfg', 'albuminurie', 'albumine urinaire', 'uree'] },
+  { nom: 'Ionogramme sanguin', motsCles: ['sodium', 'potassium', 'chlore', 'calcium'] },
+  { nom: 'Bilan glucido-lipidique', motsCles: ['glycemie', 'cholesterol', 'triglyceride', 'hba1c'] },
+  { nom: 'Bilan thyroïdien', motsCles: ['tsh', 'thyro'] },
+  { nom: 'Bilan hormonal', motsCles: ['testosterone', 'prolactine', 'psa', 'oestradiol', 'estradiol', ' lh', ' fsh', 'shbg', 'cortisol'] },
+  { nom: 'Inflammation', motsCles: ['crp', 'vitesse de sedimentation'] },
+  { nom: 'Bilan martial', motsCles: ['ferritine', 'fer serique', 'transferrine', 'coefficient de saturation'] },
+  { nom: 'Vitamines', motsCles: ['vitamine'] },
+];
+
+function _normaliserTexteAnalyse(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function categoriserMarqueur(nom) {
+  const n = _normaliserTexteAnalyse(nom);
+  for (const cat of CATEGORIES_ANALYSES) {
+    if (cat.motsCles.some(mc => n.includes(_normaliserTexteAnalyse(mc)))) return cat.nom;
+  }
+  return 'Autres';
+}
+
+// bas/haut si des bornes de référence existent pour ce marqueur, sinon toujours 'normal'.
+function statutAnalyse(valeur, refMin, refMax) {
+  if (refMin !== null && refMin !== undefined && valeur < refMin) return { code: 'bas', label: 'Bas', couleur: '#378ADD' };
+  if (refMax !== null && refMax !== undefined && valeur > refMax) return { code: 'haut', label: 'Haut', couleur: '#D85A30' };
+  return { code: 'normal', label: 'Normal', couleur: '#1D9E75' };
+}
+
 // ── Swipe-to-close pour les volets "bottom sheet" ───────────────────────
 // Glisser vers le bas depuis le haut du volet le ferme — comportement standard
 // sur mobile que l'utilisateur essaiera de toute façon en premier. Utilisé par

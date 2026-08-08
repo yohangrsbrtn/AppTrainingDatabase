@@ -463,7 +463,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=8"></script>
+<script src="api.js?v=9"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -619,6 +619,11 @@ let _ficheJournalOuverts = new Set(); // dates (YYYY-MM-DD) dépliées (fiche cl
 let _ficheProtocoleClientId = null;
 let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole, objet=chargé
 let _ficheProtocoleLoading = false;
+let _ficheProtocoleSubTab = 'cycle'; // 'cycle' | 'analyses'
+let _ficheAnalysesClientId = null;
+let _ficheAnalyses = undefined; // undefined=pas chargé, [] = vide, tableau de lignes brutes chargé
+let _ficheAnalysesLoading = false;
+let _analyseEnEdition = null; // { date, marqueurs:[{nom,valeur,unite,ref_min,ref_max}], estNouvelle }
 let _ficheMensChart2Keys = new Set(['fessiers']);
 let _pageMensChart2Keys  = new Set(['fessiers']);
 let _pageMensurationsRows = [];
@@ -4676,6 +4681,8 @@ async function openPanel(id){
   state.selected = id;
   ficheTab = 'profil';
   _ficheProgVoirArchives = false;
+  _ficheProtocoleSubTab = 'cycle';
+  _analyseEnEdition = null;
   ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, suivi:null, roadmap:null, xpData:null };
   state.nav = 'fiche-client';
   renderSidebar();
@@ -4802,8 +4809,22 @@ function setFicheTab(tab){
   if (tab === 'roadmap') rmAutoGrowAll();
 }
 
+function switchFicheProtocoleSubTab(tab){
+  _ficheProtocoleSubTab = tab;
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el) el.innerHTML = renderFicheProtocoleTab(c);
+}
+
 function renderFicheProtocoleTab(c){
   if (!c) return '';
+  const subTabsHtml = `
+    <div class="fiche-tabs" style="margin-bottom:14px;">
+      <button class="fiche-tab ${_ficheProtocoleSubTab==='cycle'?'active':''}" onclick="switchFicheProtocoleSubTab('cycle')">Cycle</button>
+      <button class="fiche-tab ${_ficheProtocoleSubTab==='analyses'?'active':''}" onclick="switchFicheProtocoleSubTab('analyses')">Analyses</button>
+    </div>`;
+  if (_ficheProtocoleSubTab === 'analyses') return subTabsHtml + renderFicheAnalysesSubTab(c);
+
   if (_ficheProtocoleClientId !== c.id) {
     _ficheProtocoleClientId = c.id;
     _ficheProtocole = undefined;
@@ -4822,13 +4843,13 @@ function renderFicheProtocoleTab(c){
         })
         .catch(() => { _ficheProtocole = null; _ficheProtocoleLoading = false; });
     }
-    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+    return subTabsHtml + `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
   }
 
   const nomEsc = esc(c.nom).replace(/'/g, "\\'");
 
   if (!_ficheProtocole) {
-    return `<div class="fiche-card">
+    return subTabsHtml + `<div class="fiche-card">
       <p style="color:var(--text-faint);margin-bottom:14px;">Aucun protocole enregistré pour ce client.</p>
       <button class="btn primary" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">+ Créer un protocole</button>
     </div>`;
@@ -4838,7 +4859,7 @@ function renderFicheProtocoleTab(c){
   const mols = (p.client_protocole_molecules || []).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
   const catColor = cat => cat==='Injectable' ? '#e05c5c' : cat==='Oral' ? '#4f8ef7' : '#a78bfa';
 
-  return `<div class="fiche-card">
+  return subTabsHtml + `<div class="fiche-card">
     <div class="field-grid" style="margin-bottom:14px;">
       <div class="field-row"><label>Date début</label><div>${p.date_debut ? new Date(p.date_debut+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</div></div>
       <div class="field-row"><label>Durée</label><div>${p.duree_semaines ? p.duree_semaines+' semaines' : '—'}</div></div>
@@ -4852,6 +4873,185 @@ function renderFicheProtocoleTab(c){
       </div>`).join('') : `<p style="color:var(--text-faint);margin-bottom:14px;">Aucune molécule.</p>`}
     <button class="btn primary" style="margin-top:14px;" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">✎ Éditer le protocole</button>
   </div>`;
+}
+
+// ── Analyses de sang (fiche client → Protocole → sous-onglet Analyses) ──
+function _chargerAnalyses(clientId){
+  if (_ficheAnalysesClientId !== clientId) {
+    _ficheAnalysesClientId = clientId;
+    _ficheAnalyses = undefined;
+  }
+  if (_ficheAnalyses !== undefined || _ficheAnalysesLoading) return;
+  _ficheAnalysesLoading = true;
+  fetch(`${SUPABASE_URL}/rest/v1/client_analyses_sante?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc,nom.asc&select=*`, { headers: supaHeaders() })
+    .then(r => r.json())
+    .then(rows => {
+      _ficheAnalyses = Array.isArray(rows) ? rows : [];
+      _ficheAnalysesLoading = false;
+      const el = document.getElementById('ficheTabContent');
+      const c = data.clients.find(x=>x.id===state.selected);
+      if (el && ficheTab === 'protocole' && _ficheProtocoleSubTab === 'analyses') el.innerHTML = renderFicheProtocoleTab(c);
+    })
+    .catch(() => { _ficheAnalyses = []; _ficheAnalysesLoading = false; });
+}
+
+function renderFicheAnalysesSubTab(c){
+  if (_analyseEnEdition) return renderFormAnalyseHtml(c);
+
+  _chargerAnalyses(c.id);
+  if (_ficheAnalyses === undefined) {
+    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  }
+
+  const parDate = new Map();
+  _ficheAnalyses.forEach(r => {
+    if (!parDate.has(r.date)) parDate.set(r.date, []);
+    parDate.get(r.date).push(r);
+  });
+  const dates = [...parDate.keys()].sort((a,b) => b.localeCompare(a));
+
+  const listeHtml = dates.length ? dates.map(date => {
+    const marqueurs = parDate.get(date);
+    return `<div class="fiche-card" style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong>${new Date(date+'T00:00:00').toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' })}</strong>
+        <div style="display:flex;gap:6px;">
+          <button class="btn" style="font-size:11.5px;padding:4px 10px;" onclick="ouvrirFormAnalyse('${c.id}','${date}')">✎ Éditer</button>
+          <button class="icon-btn del" style="width:24px;height:24px;" onclick="supprimerPriseDeSang('${c.id}','${date}')" title="Supprimer">${iTrash()}</button>
+        </div>
+      </div>
+      ${marqueurs.map(m => `
+        <div class="panel-row">
+          <span class="l">${esc(m.nom)}</span>
+          <span class="v">${m.valeur}${m.unite?' '+esc(m.unite):''}${(m.ref_min!==null&&m.ref_max!==null)?` <span style="color:var(--text-faint);">(réf. ${m.ref_min}–${m.ref_max})</span>`:''}</span>
+        </div>`).join('')}
+    </div>`;
+  }).join('') : `<p style="color:var(--text-faint);margin-bottom:14px;">Aucune prise de sang enregistrée.</p>`;
+
+  return `${listeHtml}<button class="btn primary" onclick="ouvrirFormAnalyse('${c.id}')">+ Nouvelle prise de sang</button>`;
+}
+
+function ouvrirFormAnalyse(clientId, date){
+  if (date) {
+    const marqueurs = (_ficheAnalyses||[]).filter(r => r.date === date).map(r => ({ nom:r.nom, valeur:r.valeur, unite:r.unite||'', ref_min:r.ref_min, ref_max:r.ref_max }));
+    _analyseEnEdition = { date, marqueurs, estNouvelle:false };
+  } else {
+    _analyseEnEdition = { date: new Date().toISOString().slice(0,10), marqueurs:[{nom:'',valeur:'',unite:'',ref_min:'',ref_max:''}], estNouvelle:true };
+  }
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el) el.innerHTML = renderFicheProtocoleTab(c);
+}
+
+function fermerFormAnalyse(){
+  _analyseEnEdition = null;
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el) el.innerHTML = renderFicheProtocoleTab(c);
+}
+
+function ajouterLigneMarqueur(){
+  _lireLignesMarqueursDom();
+  _analyseEnEdition.marqueurs.push({nom:'',valeur:'',unite:'',ref_min:'',ref_max:''});
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el) el.innerHTML = renderFicheProtocoleTab(c);
+}
+
+function supprimerLigneMarqueur(idx){
+  _lireLignesMarqueursDom();
+  _analyseEnEdition.marqueurs.splice(idx, 1);
+  if (!_analyseEnEdition.marqueurs.length) _analyseEnEdition.marqueurs.push({nom:'',valeur:'',unite:'',ref_min:'',ref_max:''});
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el) el.innerHTML = renderFicheProtocoleTab(c);
+}
+
+// Relit les valeurs actuellement tapées dans le DOM avant tout re-render structurel
+// (ajout/suppression de ligne) — les inputs ne sont pas contrôlés en React-style,
+// donc un re-render perdrait la saisie en cours sans ça.
+function _lireLignesMarqueursDom(){
+  if (!_analyseEnEdition) return;
+  _analyseEnEdition.marqueurs.forEach((m, i) => {
+    const nom = document.getElementById(`am-nom-${i}`);
+    const valeur = document.getElementById(`am-valeur-${i}`);
+    const unite = document.getElementById(`am-unite-${i}`);
+    const refMin = document.getElementById(`am-refmin-${i}`);
+    const refMax = document.getElementById(`am-refmax-${i}`);
+    if (nom) m.nom = nom.value;
+    if (valeur) m.valeur = valeur.value;
+    if (unite) m.unite = unite.value;
+    if (refMin) m.ref_min = refMin.value;
+    if (refMax) m.ref_max = refMax.value;
+  });
+  const dateEl = document.getElementById('am-date');
+  if (dateEl) _analyseEnEdition.date = dateEl.value;
+}
+
+function renderFormAnalyseHtml(c){
+  const a = _analyseEnEdition;
+  return `<div class="fiche-card">
+    <div class="field-row" style="margin-bottom:14px;">
+      <label>Date de la prise de sang</label>
+      ${a.estNouvelle
+        ? `<input type="date" id="am-date" value="${a.date}" style="font-size:16px;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">`
+        : `<div>${new Date(a.date+'T00:00:00').toLocaleDateString('fr-FR')}</div>`}
+    </div>
+    ${a.marqueurs.map((m,i) => `
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:8px;align-items:center;">
+        <input id="am-nom-${i}" type="text" placeholder="Marqueur (ex: Testostérone)" value="${esc(m.nom)}" style="font-size:13px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">
+        <input id="am-valeur-${i}" type="number" step="any" placeholder="Valeur" value="${m.valeur}" style="font-size:13px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">
+        <input id="am-unite-${i}" type="text" placeholder="Unité" value="${esc(m.unite)}" style="font-size:13px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">
+        <input id="am-refmin-${i}" type="number" step="any" placeholder="Réf. min" value="${m.ref_min===null||m.ref_min===undefined?'':m.ref_min}" style="font-size:13px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">
+        <input id="am-refmax-${i}" type="number" step="any" placeholder="Réf. max" value="${m.ref_max===null||m.ref_max===undefined?'':m.ref_max}" style="font-size:13px;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);">
+        <button class="icon-btn del" style="width:24px;height:24px;" onclick="supprimerLigneMarqueur(${i})" title="Retirer">${iTrash()}</button>
+      </div>`).join('')}
+    <button class="btn" style="font-size:12px;margin-bottom:14px;" onclick="ajouterLigneMarqueur()">+ Marqueur</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="fermerFormAnalyse()">Annuler</button>
+      <button class="btn primary" onclick="sauverAnalyse('${c.id}')">Enregistrer</button>
+    </div>
+  </div>`;
+}
+
+async function sauverAnalyse(clientId){
+  _lireLignesMarqueursDom();
+  const a = _analyseEnEdition;
+  const date = a.date;
+  if (!date) { alert('Merci de renseigner une date.'); return; }
+  const lignes = a.marqueurs
+    .map(m => ({
+      client_id: clientId, date,
+      nom: (m.nom||'').trim(),
+      valeur: parseFloat(m.valeur),
+      unite: (m.unite||'').trim() || null,
+      ref_min: m.ref_min === '' || m.ref_min === null || m.ref_min === undefined ? null : parseFloat(m.ref_min),
+      ref_max: m.ref_max === '' || m.ref_max === null || m.ref_max === undefined ? null : parseFloat(m.ref_max),
+    }))
+    .filter(m => m.nom && !isNaN(m.valeur));
+  if (!lignes.length) { alert('Merci de renseigner au moins un marqueur avec un nom et une valeur.'); return; }
+  try {
+    // Remplace toutes les lignes existantes pour ce (client, date) — même pattern
+    // delete-all/recreate que la diète et le protocole (pas de diff ligne par ligne).
+    await fetch(`${SUPABASE_URL}/rest/v1/client_analyses_sante?client_id=eq.${encodeURIComponent(clientId)}&date=eq.${date}`, { method:'DELETE', headers:supaHeaders() });
+    await fetch(`${SUPABASE_URL}/rest/v1/client_analyses_sante`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(lignes) });
+    _ficheAnalyses = undefined;
+    _analyseEnEdition = null;
+    const el = document.getElementById('ficheTabContent');
+    const c = data.clients.find(x=>x.id===state.selected);
+    if (el) el.innerHTML = renderFicheProtocoleTab(c);
+  } catch(e) { alert("Erreur : la prise de sang n'a pas pu être enregistrée."); }
+}
+
+async function supprimerPriseDeSang(clientId, date){
+  if (!confirm('Supprimer cette prise de sang et tous ses marqueurs ?')) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_analyses_sante?client_id=eq.${encodeURIComponent(clientId)}&date=eq.${date}`, { method:'DELETE', headers:supaHeaders() });
+    _ficheAnalyses = (_ficheAnalyses||[]).filter(r => r.date !== date);
+    const el = document.getElementById('ficheTabContent');
+    const c = data.clients.find(x=>x.id===state.selected);
+    if (el) el.innerHTML = renderFicheProtocoleTab(c);
+  } catch(e) { alert("Erreur : la suppression a échoué."); }
 }
 
 function renderFicheTabContent(c){
