@@ -440,11 +440,14 @@
 <button id="todoFab" onclick="toggleTodoPanel()" title="Pense-bête" style="position:fixed;bottom:22px;right:22px;width:46px;height:46px;border-radius:50%;background:var(--accent);color:#1a0e00;border:none;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:pointer;z-index:150;display:flex;align-items:center;justify-content:center;">📌</button>
 <div id="todoPanel" style="display:none;position:fixed;bottom:78px;right:22px;width:300px;max-height:60vh;background:var(--surface-3);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:var(--shadow-lg);z-index:150;flex-direction:column;overflow:hidden;">
   <div style="padding:10px 14px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-    <span style="font-size:13px;font-weight:700;">📌 Pense-bête</span>
-    <button class="icon-btn" style="width:22px;height:22px;" onclick="toggleTodoPanel()">✕</button>
+    <span id="todoPanelTitre" style="font-size:13px;font-weight:700;">📌 Pense-bête</span>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <button id="todoCorbeilleBtn" class="icon-btn" style="width:22px;height:22px;font-size:13px;" onclick="toggleTodoCorbeille()" title="Corbeille">🗑</button>
+      <button class="icon-btn" style="width:22px;height:22px;" onclick="toggleTodoPanel()">✕</button>
+    </div>
   </div>
   <div id="todoListEl" style="flex:1;overflow-y:auto;padding:8px 10px;"></div>
-  <div style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;">
+  <div id="todoInputRow" style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;">
     <input id="todoNewInput" type="text" placeholder="Ajouter une note…" style="font-size:14px;width:100%;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);" onkeydown="if(event.key==='Enter')ajouterTodo()">
   </div>
 </div>
@@ -11130,10 +11133,12 @@ function _showShell() {
 let _todos = null;
 let _todoPanelOuvert = false;
 let _todoEditingId = null;
+let _todoVue = 'liste'; // 'liste' | 'corbeille'
+let _todosCorbeille = null;
 
 async function chargerTodos(){
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?order=fait.asc,created_at.desc`, { headers: supaHeaders() });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?archive=eq.false&order=fait.asc,created_at.desc`, { headers: supaHeaders() });
     _todos = res.ok ? await res.json() : [];
   } catch(e) { _todos = []; }
   if (_todoPanelOuvert) renderTodoList();
@@ -11142,6 +11147,7 @@ async function chargerTodos(){
 function toggleTodoPanel(){
   _todoPanelOuvert = !_todoPanelOuvert;
   document.getElementById('todoPanel').style.display = _todoPanelOuvert ? 'flex' : 'none';
+  if (!_todoPanelOuvert) _todoVue = 'liste';
   if (_todoPanelOuvert) {
     renderTodoList(); // affiche tout de suite ce qu'on a déjà en mémoire
     chargerTodos();   // puis resynchronise avec la base à CHAQUE ouverture — le
@@ -11157,6 +11163,13 @@ function toggleTodoPanel(){
 function renderTodoList(){
   const el = document.getElementById('todoListEl');
   if (!el) return;
+  const titreEl = document.getElementById('todoPanelTitre');
+  const inputRow = document.getElementById('todoInputRow');
+  const corbeilleBtn = document.getElementById('todoCorbeilleBtn');
+  if (titreEl) titreEl.textContent = _todoVue === 'corbeille' ? '🗑 Corbeille' : '📌 Pense-bête';
+  if (inputRow) inputRow.style.display = _todoVue === 'corbeille' ? 'none' : '';
+  if (corbeilleBtn) corbeilleBtn.style.opacity = _todoVue === 'corbeille' ? '1' : '.6';
+  if (_todoVue === 'corbeille') { renderTodoCorbeilleListe(el); return; }
   // Distingue "pas encore chargé" de "chargé et vraiment vide" — sans ça les
   // deux affichaient le même texte "Rien pour l'instant.", donnant l'impression
   // que la note qu'on venait d'ajouter avait disparu si le premier fetch de
@@ -11230,8 +11243,55 @@ async function toggleTodo(id, fait){
   } catch(e) {}
 }
 
+// "Supprimer" archive (réversible, via la corbeille) au lieu d'un DELETE définitif —
+// suite à une note supprimée par erreur sans aucun moyen de la retrouver.
 async function supprimerTodo(id){
   _todos = (_todos || []).filter(x => x.id !== id);
+  renderTodoList();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ archive: true }) });
+  } catch(e) {}
+}
+
+function toggleTodoCorbeille(){
+  _todoVue = _todoVue === 'corbeille' ? 'liste' : 'corbeille';
+  if (_todoVue === 'corbeille') chargerTodosCorbeille();
+  renderTodoList();
+}
+
+async function chargerTodosCorbeille(){
+  const el = document.getElementById('todoListEl');
+  if (el && _todosCorbeille === null) el.innerHTML = `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Chargement…</div>`;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?archive=eq.true&order=created_at.desc`, { headers: supaHeaders() });
+    _todosCorbeille = res.ok ? await res.json() : [];
+  } catch(e) { _todosCorbeille = []; }
+  if (_todoVue === 'corbeille') renderTodoList();
+}
+
+function renderTodoCorbeilleListe(el){
+  if (_todosCorbeille === null) { el.innerHTML = `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Chargement…</div>`; return; }
+  el.innerHTML = _todosCorbeille.length ? _todosCorbeille.map(t => `
+    <div style="display:flex;align-items:flex-start;gap:7px;padding:6px 2px;border-bottom:1px solid var(--hairline);">
+      <div style="flex:1;font-size:13px;line-height:1.4;word-break:break-word;white-space:pre-wrap;color:var(--text-faint);">${esc(t.texte)}</div>
+      <button class="btn" style="font-size:11px;padding:3px 8px;flex-shrink:0;" onclick="restaurerTodo(${t.id})" title="Restaurer">↺</button>
+      <button class="icon-btn del" style="width:20px;height:20px;flex-shrink:0;" onclick="supprimerTodoDefinitivement(${t.id})" title="Supprimer définitivement">${iTrash()}</button>
+    </div>`).join('')
+    : `<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:20px 6px;">Corbeille vide.</div>`;
+}
+
+async function restaurerTodo(id){
+  _todosCorbeille = (_todosCorbeille || []).filter(x => x.id !== id);
+  renderTodoList();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ archive: false }) });
+  } catch(e) {}
+  _todos = null; // force la resynchronisation de la liste principale à la prochaine ouverture
+}
+
+async function supprimerTodoDefinitivement(id){
+  if (!confirm('Supprimer définitivement cette note ? Action irréversible.')) return;
+  _todosCorbeille = (_todosCorbeille || []).filter(x => x.id !== id);
   renderTodoList();
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/coach_todos?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
