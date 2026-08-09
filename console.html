@@ -526,6 +526,7 @@ function iTrash(){return svgIcon('<path d="M4 7h16M9 7V4h6v3M6 7l1 13a2 2 0 002 
 function iCopy(){return svgIcon('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>');}
 function iBell(){return svgIcon('<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/>');}
 function iChat(){return svgIcon('<path d="M3 12c0-4.4 4-8 9-8s9 3.6 9 8-4 8-9 8c-1.1 0-2.2-.18-3.2-.53L4 21l1.1-3.6C3.8 16.1 3 14.1 3 12z"/>');}
+function iEuro(){return svgIcon('<path d="M18 6.5A6.5 6.5 0 1018 17.5"/><path d="M3 10h11M3 14h9"/>');}
 function svgIcon(paths){ return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`; }
 
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
@@ -572,6 +573,7 @@ const NAV = [
     { id:"bilans", label:"Bilans", icon:iClipboard() },
     { id:"mensurations", label:"Mensurations", icon:iRuler() },
     { id:"classement", label:"Classement", icon:iTrophy() },
+    { id:"facturation", label:"Facturation", icon:iEuro() },
     { id:"notifications", label:"Notifications", icon:iBell() },
     { id:"chat", label:"Chat", icon:iChat() },
   ]},
@@ -1525,7 +1527,7 @@ function _saveNavState() {
     localStorage.setItem('at_console_lastnav_v1', JSON.stringify(payload));
   } catch(e) {}
 }
-const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration','parametres','notifications']);
+const NAV_RESTORE_SIMPLE = new Set(['dashboard','clients','bilans','classement','base','protocole','programmes','dietes','migration','parametres','notifications','facturation']);
 
 function renderMain(){
   if (NAV_RESTORE_SIMPLE.has(state.nav) || state.nav === 'fiche-client' || state.nav === 'mensurations') _saveNavState();
@@ -1543,6 +1545,7 @@ function renderMain(){
   if (state.nav === 'bilans') { renderBilansPage(el); return; }
   if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
+  if (state.nav === 'facturation') { renderFacturationPage(el); return; }
   if (state.nav === 'notifications') { renderNotificationsPage(el); return; }
   if (state.nav === 'chat') { renderChatCoachPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
@@ -1680,7 +1683,7 @@ async function _majStatutPush(){
 }
 
 // ── Envoyer une notification push à un client (ou tous) ────────────────
-function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps, presetPage){
+function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps, presetPage, presetSource){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
@@ -1702,7 +1705,7 @@ function ouvrirModalNotifier(clientId, clientNom, presetTitre, presetCorps, pres
       <div id="ntf-err" style="color:var(--critical);font-size:12px;display:none;margin-bottom:6px;"></div>
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
-        <button class="btn primary" id="ntf-btn" onclick="envoyerNotification('${clientId}', ${presetPage ? `'${presetPage}'` : 'null'})">Envoyer</button>
+        <button class="btn primary" id="ntf-btn" onclick="envoyerNotification('${clientId}', ${presetPage ? `'${presetPage}'` : 'null'}, ${presetSource ? `'${presetSource}'` : 'null'})">Envoyer</button>
       </div>
     </div>`;
   overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
@@ -1759,7 +1762,7 @@ async function _envoyerNotifCore(clientIdOuIds, titre, corps, pleinEcran, source
   return { sent };
 }
 
-async function envoyerNotification(clientId, page){
+async function envoyerNotification(clientId, page, source){
   const titre = document.getElementById('ntf-titre').value.trim();
   const corps = document.getElementById('ntf-corps').value.trim();
   const pleinEcran = document.getElementById('ntf-plein-ecran')?.checked || false;
@@ -1778,10 +1781,11 @@ async function envoyerNotification(clientId, page){
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    const j = await _envoyerNotifCore(clientId, titre, corps, pleinEcran, 'manuel', page);
+    const j = await _envoyerNotifCore(clientId, titre, corps, pleinEcran, source || 'manuel', page);
     document.querySelector('.modal-overlay')?.remove();
     alert(j.sent > 0 ? `Notification envoyée (${j.sent} appareil${j.sent>1?'s':''}).` : "Enregistrée dans l'app — aucun appareil abonné au push pour l'instant.");
     if (state.nav === 'notifications') { await chargerHistoriqueNotifs(); renderMain(); }
+    if (state.nav === 'facturation') { _facturationRelances = null; renderMain(); }
   } catch(e) {
     err.textContent = 'Erreur : ' + e.message; err.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Envoyer';
@@ -6159,7 +6163,175 @@ async function toggleMoisPaye(clientId, dejaPaye){
     if (c) c.dernier_mois_paye = nouveauMois;
     if (state.nav==='fiche-client') renderMain();
     else if (state.nav==='clients') renderTable();
+    else if (state.nav==='facturation') renderMain();
   } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+// ── Facturation ───────────────────────────────────────────────────────
+// Vue dédiée demandée par le coach (2026-08-09) : jusque-là le statut de paiement n'était
+// visible qu'éparpillé (colonne dans "Clients", section dans la fiche de CHAQUE client) — pas
+// moyen de voir d'un coup d'œil qui est en retard ni de relancer plusieurs clients à la fois.
+// Réutilise entièrement les mécanismes déjà en place (toggleMoisPaye, _envoyerNotifCore, preset
+// "rappel_paiement") plutôt que d'en recréer une variante — une seule source de vérité pour le
+// statut payé/pas payé (client_profils.dernier_mois_paye), pour ne jamais désynchroniser cette
+// page avec la fiche client ou la liste Clients.
+let _facturationFiltre = 'tous'; // 'tous' | 'retard' | 'attente' | 'paye' | 'gocardless' | 'sans_config'
+let _facturationSel = new Set();
+let _facturationRelances = null; // null=non chargé — Map client_id -> dernière relance {created_at}
+
+async function _chargerRelancesPaiement(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_notifications?source=eq.rappel_paiement&order=created_at.desc&select=client_id,created_at`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    const map = {};
+    rows.forEach(r => { if (!map[r.client_id]) map[r.client_id] = r.created_at; }); // le premier vu = le plus récent (tri desc)
+    _facturationRelances = map;
+  } catch(e) { _facturationRelances = {}; }
+  if (state.nav === 'facturation') renderMain();
+}
+
+// Statut de facturation d'un client pour le mois en cours — même distinction que demandée par
+// le coach : payé / en attente (pas encore dû) / en retard (jour de facturation dépassé, pas
+// encore marqué payé) / gocardless (prélèvement auto, jamais de relance) / sans config (aucun
+// jour de facturation renseigné, cf. audit fait plus tôt).
+function _facturationStatut(c){
+  if (c.mode_paiement === 'gocardless') return 'gocardless';
+  const moisKey = _ficheMoisCourantKey();
+  if (c.dernier_mois_paye === moisKey) return 'paye';
+  if (!c.jour_paiement) return 'sans_config';
+  const jourDuMois = new Date().getDate();
+  return jourDuMois >= c.jour_paiement ? 'retard' : 'attente';
+}
+
+const _FACTURATION_STATUT_INFO = {
+  paye:        { label: '✓ Payé',        chip: 'ok' },
+  attente:     { label: '⏳ À venir',     chip: 'off' },
+  retard:      { label: '🔴 En retard',   chip: 'late' },
+  gocardless:  { label: '🔄 GoCardless',  chip: 'ok' },
+  sans_config: { label: '⚪ Non configuré', chip: 'off' },
+};
+
+function _facturationClientsListe(){
+  return data.clients.filter(c => c.id !== COACH_CLIENT_ID && c.statut !== 'ancien');
+}
+
+function renderFacturationPage(el){
+  const clients = _facturationClientsListe().map(c => ({ ...c, _statut: _facturationStatut(c) }));
+  const counts = { tous: clients.length };
+  ['retard','attente','paye','gocardless','sans_config'].forEach(k => { counts[k] = clients.filter(c=>c._statut===k).length; });
+  const filtered = _facturationFiltre === 'tous' ? clients : clients.filter(c => c._statut === _facturationFiltre);
+  filtered.sort((a,b) => a.nom.localeCompare(b.nom, 'fr'));
+
+  const moisKey = _ficheMoisCourantKey();
+  const [y, m] = moisKey.split('-');
+  const moisLabel = `${_MOIS_FR[+m-1]} ${y}`;
+
+  const tabs = [
+    { id:'tous', label:'Tous' },
+    { id:'retard', label:'En retard' },
+    { id:'attente', label:'À venir' },
+    { id:'paye', label:'Payés' },
+    { id:'gocardless', label:'GoCardless' },
+    { id:'sans_config', label:'Non configuré' },
+  ];
+
+  const relancables = filtered.filter(c => c._statut === 'retard' || c._statut === 'attente');
+  const selCount = _facturationSel.size;
+
+  el.innerHTML = `
+    <div class="page-head">
+      <div><div class="eyebrow">Console coach</div><h1>Facturation</h1></div>
+      <div class="meta">${moisLabel}${counts.retard ? ` · <span style="color:var(--critical);">${counts.retard} en retard</span>` : ''}</div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      ${statCardFact('En retard', counts.retard, 'var(--critical)')}
+      ${statCardFact('À venir', counts.attente, 'var(--warning)')}
+      ${statCardFact('Payés ce mois', counts.paye, 'var(--success)')}
+      ${statCardFact('GoCardless', counts.gocardless, 'var(--text)')}
+      ${statCardFact('Non configuré', counts.sans_config, 'var(--text-faint)')}
+    </div>
+
+    <div class="fiche-tabs" style="margin-bottom:12px;">
+      ${tabs.map(t=>`<button class="fiche-tab ${_facturationFiltre===t.id?'active':''}" onclick="setFacturationFiltre('${t.id}')">${esc(t.label)} <span style="font-size:10px;opacity:.7;">${counts[t.id]}</span></button>`).join('')}
+    </div>
+
+    <div class="table-card">
+      <div class="table-toolbar" style="flex-wrap:wrap;gap:8px;">
+        <div class="title">${filtered.length} client${filtered.length>1?'s':''}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" style="font-size:11.5px;" onclick="_facturationToggleTous()">${filtered.length && filtered.every(c=>_facturationSel.has(c.id)) ? 'Tout désélectionner' : 'Tout sélectionner'}</button>
+          <button class="btn primary" style="font-size:11.5px;" ${selCount?'':'disabled'} onclick="_facturationRelancerSelection()">🔔 Relancer la sélection (${selCount})</button>
+          ${relancables.length ? `<button class="btn" style="font-size:11.5px;" onclick="_facturationRelancerTous()">🔔 Relancer tous les non-payés (${relancables.length})</button>` : ''}
+        </div>
+      </div>
+      ${filtered.length ? `<div class="table-scroll"><table class="clients">
+        <thead><tr><th style="width:32px;"></th><th>Client</th><th>Jour</th><th>Mode</th><th>Statut</th><th>Dernière relance</th><th></th></tr></thead>
+        <tbody>${filtered.map(c => `
+          <tr>
+            <td onclick="event.stopPropagation();"><input type="checkbox" ${_facturationSel.has(c.id)?'checked':''} onchange="_facturationToggleSel('${c.id}')"></td>
+            <td style="cursor:pointer;" onclick="openPanel('${c.id}')"><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
+            <td class="mono" style="color:var(--text-faint);">${c.jour_paiement ? `le ${c.jour_paiement}` : '—'}</td>
+            <td style="font-size:12px;color:var(--text-faint);">${c.mode_paiement ? {virement:'Virement',espece:'Espèces',gocardless:'GoCardless'}[c.mode_paiement] || c.mode_paiement : '—'}</td>
+            <td><span class="chip ${_FACTURATION_STATUT_INFO[c._statut].chip}"><span class="dot"></span>${_FACTURATION_STATUT_INFO[c._statut].label}</span></td>
+            <td style="font-size:11px;color:var(--text-faint);">${_facturationRelances === null ? '…' : (_facturationRelances[c.id] ? _fmtNotifDate(_facturationRelances[c.id]) : '—')}</td>
+            <td class="row-actions" onclick="event.stopPropagation();" style="white-space:nowrap;">
+              ${c.mode_paiement !== 'gocardless' ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="toggleMoisPaye('${c.id}',${c._statut==='paye'})">${c._statut==='paye'?'Annuler':'Marquer payé'}</button>` : ''}
+              ${c.mode_paiement !== 'gocardless' ? `<button class="btn" style="font-size:11px;padding:4px 8px;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g,"\\'")}','💳 Petit rappel',"N'oublie pas de faire le virement à ton coach pour qu'il puisse acheter sa créatine 💪",null,'rappel_paiement')" title="Relancer">🔔</button>` : ''}
+            </td>
+          </tr>`).join('')}</tbody>
+      </table></div>` : `<div style="padding:24px;text-align:center;color:var(--text-faint);">Aucun client dans ce filtre.</div>`}
+    </div>`;
+
+  if (_facturationRelances === null) _chargerRelancesPaiement();
+}
+
+function statCardFact(label, val, color){
+  return `<div class="table-card" style="flex:1;min-width:110px;padding:12px 16px;">
+    <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">${label}</div>
+    <div style="font-size:20px;font-weight:700;color:${color};">${val}</div>
+  </div>`;
+}
+
+function setFacturationFiltre(f){ _facturationFiltre = f; renderMain(); }
+
+function _facturationToggleSel(id){
+  if (_facturationSel.has(id)) _facturationSel.delete(id); else _facturationSel.add(id);
+  renderMain();
+}
+
+function _facturationToggleTous(){
+  const clients = _facturationClientsListe().map(c => ({ ...c, _statut: _facturationStatut(c) }));
+  const filtered = _facturationFiltre === 'tous' ? clients : clients.filter(c => c._statut === _facturationFiltre);
+  const toutesCoches = filtered.length > 0 && filtered.every(c => _facturationSel.has(c.id));
+  filtered.forEach(c => { if (toutesCoches) _facturationSel.delete(c.id); else _facturationSel.add(c.id); });
+  renderMain();
+}
+
+// Rappel de paiement — même texte que le préréglage de la page Notifications (source
+// 'rappel_paiement', pour continuer à apparaître dans "Dernière relance" et dans l'historique
+// automatique). Confirmation groupée avant tout envoi réel (même garde-fou que le reste de
+// l'app pour les envois en masse).
+async function _facturationEnvoyerRappel(clientIds){
+  if (!clientIds.length) return;
+  const titre = '💳 Petit rappel';
+  const corps = "N'oublie pas de faire le virement à ton coach pour qu'il puisse acheter sa créatine 💪";
+  if (!confirm(`Envoyer le rappel de paiement à ${clientIds.length} client${clientIds.length>1?'s':''} maintenant ?`)) return;
+  try {
+    await _envoyerNotifCore(clientIds, titre, corps, false, 'rappel_paiement');
+    _facturationSel = new Set();
+    _facturationRelances = null;
+    alert('Rappel envoyé.');
+    renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+function _facturationRelancerSelection(){ _facturationEnvoyerRappel(Array.from(_facturationSel)); }
+function _facturationRelancerTous(){
+  const clients = _facturationClientsListe().map(c => ({ ...c, _statut: _facturationStatut(c) }));
+  const filtered = _facturationFiltre === 'tous' ? clients : clients.filter(c => c._statut === _facturationFiltre);
+  const ids = filtered.filter(c => c._statut === 'retard' || c._statut === 'attente').map(c => c.id);
+  _facturationEnvoyerRappel(ids);
 }
 
 let _ficheProgVoirArchives = false;
