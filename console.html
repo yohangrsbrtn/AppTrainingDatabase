@@ -6192,6 +6192,30 @@ async function toggleMoisPaye(clientId, dejaPaye){
 let _facturationFiltre = 'tous'; // 'tous' | 'retard' | 'attente' | 'paye' | 'gocardless' | 'sans_config'
 let _facturationSel = new Set();
 let _facturationRelances = null; // null=non chargé — Map client_id -> dernière relance {created_at}
+let _facturationSortKey = 'nom';
+let _facturationSortDir = 1;
+
+function setFacturationSort(key){
+  if (_facturationSortKey === key) _facturationSortDir *= -1; else { _facturationSortKey = key; _facturationSortDir = 1; }
+  renderMain();
+}
+function _facturationArrow(key){ return _facturationSortKey===key ? (_facturationSortDir===1?'▲':'▼') : ''; }
+
+// Ordre de priorité pour le tri par statut — un simple tri alphabétique des clés internes
+// ('attente'/'gocardless'/'paye'/'retard'/'sans_config') n'aurait aucun sens pour le coach ;
+// avec ceci, trier "par statut" range du plus urgent (en retard) au moins urgent (payé).
+const _FACTURATION_STATUT_PRIORITE = { retard: 0, attente: 1, sans_config: 2, gocardless: 3, paye: 4 };
+
+function _facturationTrier(list){
+  const key = _facturationSortKey, dir = _facturationSortDir;
+  return list.slice().sort((a, b) => {
+    let av, bv;
+    if (key === '_statut') { av = _FACTURATION_STATUT_PRIORITE[a._statut]; bv = _FACTURATION_STATUT_PRIORITE[b._statut]; }
+    else { av = a[key]; bv = b[key]; }
+    if (typeof av === 'string' || typeof bv === 'string') return (av||'').localeCompare(bv||'', 'fr') * dir;
+    return ((av||0) - (bv||0)) * dir;
+  });
+}
 
 async function _chargerRelancesPaiement(){
   try {
@@ -6256,8 +6280,7 @@ function renderFacturationPage(el){
   const clients = _facturationClientsListe().map(c => ({ ...c, _statut: _facturationStatut(c) }));
   const counts = { tous: clients.length };
   ['retard','attente','paye','gocardless','sans_config'].forEach(k => { counts[k] = clients.filter(c=>c._statut===k).length; });
-  const filtered = _facturationFiltre === 'tous' ? clients : clients.filter(c => c._statut === _facturationFiltre);
-  filtered.sort((a,b) => a.nom.localeCompare(b.nom, 'fr'));
+  const filtered = _facturationTrier(_facturationFiltre === 'tous' ? clients : clients.filter(c => c._statut === _facturationFiltre));
 
   const moisKey = _ficheMoisCourantKey();
   const [y, m] = moisKey.split('-');
@@ -6303,7 +6326,16 @@ function renderFacturationPage(el){
         </div>
       </div>
       ${filtered.length ? `<div class="table-scroll"><table class="clients">
-        <thead><tr><th style="width:32px;"></th><th>Client</th><th>Jour</th><th>Mode</th><th>Banque</th><th>Statut</th><th>Dernière relance</th><th></th></tr></thead>
+        <thead><tr>
+          <th style="width:32px;"></th>
+          <th style="cursor:pointer;" onclick="setFacturationSort('nom')">Client <span class="sort-arrow">${_facturationArrow('nom')}</span></th>
+          <th style="cursor:pointer;" onclick="setFacturationSort('jour_paiement')">Jour <span class="sort-arrow">${_facturationArrow('jour_paiement')}</span></th>
+          <th style="cursor:pointer;" onclick="setFacturationSort('mode_paiement')">Mode <span class="sort-arrow">${_facturationArrow('mode_paiement')}</span></th>
+          <th style="cursor:pointer;" onclick="setFacturationSort('banque_paiement')">Banque <span class="sort-arrow">${_facturationArrow('banque_paiement')}</span></th>
+          <th style="cursor:pointer;" onclick="setFacturationSort('_statut')">Statut <span class="sort-arrow">${_facturationArrow('_statut')}</span></th>
+          <th>Dernière relance</th>
+          <th></th>
+        </tr></thead>
         <tbody>${filtered.map(c => `
           <tr>
             <td onclick="event.stopPropagation();"><input type="checkbox" ${_facturationSel.has(c.id)?'checked':''} onchange="_facturationToggleSel('${c.id}')"></td>
