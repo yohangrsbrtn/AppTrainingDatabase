@@ -2247,6 +2247,7 @@ function openBilanDetailSupabase(bilan) {
     dateIso,
     photos: null,
     mensurations: null,
+    objectifs: null,
   };
   state.nav = 'bilan-detail';
   renderSidebar();
@@ -2260,6 +2261,12 @@ function openBilanDetailSupabase(bilan) {
     .then(r => r.ok ? r.json() : [])
     .then(rows => { bilanDetailState.mensurations = rows; if (state.nav==='bilan-detail') renderMain(); })
     .catch(() => { bilanDetailState.mensurations = []; if (state.nav==='bilan-detail') renderMain(); });
+  // Objectifs assignés par le coach (pas/jour, séances/semaine) — pour ne pas avoir à aller
+  // les revérifier dans l'onglet Programme à chaque bilan.
+  fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(bilan.client_id)}&select=steps_cible,seances_cible`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : [])
+    .then(rows => { bilanDetailState.objectifs = rows[0] || {}; if (state.nav==='bilan-detail') renderMain(); })
+    .catch(() => { bilanDetailState.objectifs = {}; if (state.nav==='bilan-detail') renderMain(); });
 }
 
 function openFicheBilanDetail(idx) {
@@ -2603,6 +2610,10 @@ function renderBilanDetailPage(el) {
         <div class="fiche-hero-meta">
           <span class="chip off">${weekRange || _semaineFromDate(dateValidation)}</span>
           ${bilanDetailState.coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:bilanDetailState.enAttente?`<span class="chip off"><span class="dot"></span>En attente</span>`:`<span class="chip late"><span class="dot"></span>À traiter</span>`}
+          ${bilanDetailState.objectifs && (bilanDetailState.objectifs.steps_cible || bilanDetailState.objectifs.seances_cible) ? `<span class="chip off" title="Objectifs assignés par le coach">🎯 ${[
+            bilanDetailState.objectifs.steps_cible ? bilanDetailState.objectifs.steps_cible.toLocaleString('fr-FR')+' pas/j' : null,
+            bilanDetailState.objectifs.seances_cible ? bilanDetailState.objectifs.seances_cible+' séances/sem' : null,
+          ].filter(Boolean).join(' · ')}</span>` : ''}
         </div>
         ${dateValidation?`<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Validé le ${esc(dateValidation)}</div>`:''}
         ${bilanDetailState.ts?`<div style="font-size:11px;color:var(--text-faint);">Envoyé le ${esc(bilanDetailState.ts)}</div>`:''}
