@@ -115,9 +115,17 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
       }
       tmplId = templates[0].id;
     }
+    // Commentaire coach sur la diète entière (diete_templates.description, resté interne
+    // jusqu'ici — rendu visible ici pour la première fois, cf. demande coach 2026-08-09).
+    let dieteCommentaire = '';
+    try {
+      const tplDescRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?id=eq.${tmplId}&select=description`, { headers: supaHeaders() });
+      const tplDescArr = tplDescRes.ok ? await tplDescRes.json() : [];
+      dieteCommentaire = (tplDescArr[0] && tplDescArr[0].description) || '';
+    } catch(e) {}
     const repasRes = await fetch(
       `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tmplId}&order=ordre.asc,variante_index.asc` +
-      `&select=id,nom,ordre,variante_index,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g,modifie)`,
+      `&select=id,nom,ordre,variante_index,commentaire,repas_aliments(quantite_g,nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g,modifie)`,
       { headers: supaHeaders() }
     );
     const repasRaw = repasRes.ok ? await repasRes.json() : [];
@@ -155,13 +163,15 @@ async function ouvrirDieteSupabase(templateNom, clientDieteId) {
 
     _dDetail = {
       nom: templateNom,
+      commentaire: dieteCommentaire,
       repas: Object.keys(grouped).map(Number).sort((a,b)=>a-b).map(ordre => {
         const variants = grouped[ordre];
         const main = variants[0];
         return {
           nom: main.nom,
+          commentaire: main.commentaire || '',
           aliments: toAliments(main),
-          equivalences: variants.slice(1).map(v => ({ nom: v.nom, aliments: toAliments(v) }))
+          equivalences: variants.slice(1).map(v => ({ nom: v.nom, commentaire: v.commentaire || '', aliments: toAliments(v) }))
         };
       })
     };
@@ -530,10 +540,11 @@ function renderDieteDetail() {
     _dCurrentOpt[idx] = 0;
 
     repasHtml += `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${r.commentaire?'2px':'10px'};gap:8px;">
         <div style="font-size:15px;font-weight:600;">${esc(r.nom)}</div>
         ${hasOpts ? `<div id="dDots_${idx}" style="font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;">1 / ${options.length}</div>` : ''}
-      </div>`;
+      </div>
+      ${r.commentaire ? `<div id="dCommentaire_${idx}" style="font-size:12.5px;color:var(--accent);background:rgba(79,110,247,.12);border-radius:10px;padding:6px 10px;margin-bottom:10px;">💬 ${esc(r.commentaire)}</div>` : ''}`;
 
     if (hasOpts) {
       repasHtml += `<div id="dSlider_${idx}" style="display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;">`;
@@ -586,6 +597,7 @@ function renderDieteDetail() {
     </div>
     <div class="page">
       <button class="btn-secondary" onclick="_dSubPage='list';setPage('diete')" style="margin-bottom:12px;">← Retour</button>
+      ${data.commentaire ? `<div class="card" style="background:rgba(79,110,247,.12);margin-bottom:12px;"><div style="font-size:13px;color:var(--accent);">💬 ${esc(data.commentaire)}</div></div>` : ''}
       ${repasHtml}
     </div>
     ${renderNavBar('diete')}

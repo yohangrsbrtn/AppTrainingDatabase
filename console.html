@@ -8594,7 +8594,7 @@ async function ouvrirEditeurDiete(id){
     const repasRaw = res.ok ? await res.json() : tpl.repas||[];
     dieteTplEnEdition = {
       id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
+      repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, commentaire:r.commentaire||'', aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
     };
     if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   } else {
@@ -8707,6 +8707,9 @@ function _renderDieteBlocsHtml(slot){
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="dupliquerRepas(${ri}${slotArg})" title="Dupliquer en équivalence (garde les mêmes aliments)">${iCopy()}</button>
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
         </div>
+        <div style="padding:2px 14px 6px;">
+          <input type="text" value="${esc(r.commentaire||'')}" placeholder="💬 Commentaire pour le client (ex: ajouter de la levure)" oninput="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].commentaire=this.value" style="width:100%;background:transparent;border:1px dashed var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-muted);font-size:12px;font-family:inherit;box-sizing:border-box;">
+        </div>
         <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
         <div style="padding:8px 14px;">
           <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri}${slotArg})">+ Ajouter des aliments</button>
@@ -8743,7 +8746,7 @@ function renderEditeurDietePage(el) {
     </div>
     <div style="max-width:720px;padding:20px 24px;">
       <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
-      <div class="field-row"><label>Description (optionnelle)</label><input id="dDesc" type="text" value="${esc(tpl.description||'')}" placeholder="Contexte, objectifs…"></div>
+      <div class="field-row"><label>Commentaire (visible par le client)</label><input id="dDesc" type="text" value="${esc(tpl.description||'')}" placeholder="ex: à suivre pendant la sèche, bien s'hydrater…"></div>
       ${isClient ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" ${!_ficheCreateClientId?'':'checked'}> Enregistrer comme template réutilisable</label>` : ''}
       <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;position:sticky;z-index:9;box-shadow:0 8px 12px -6px rgba(0,0,0,.35);${totalM.kcal?'':'display:none;'}">
         ${totalM.kcal ? `
@@ -9136,7 +9139,7 @@ async function sauvegarderDieteTemplate(){
     }
     for (let ri=0; ri<dieteTplEnEdition.repas.length; ri++){
       const r = dieteTplEnEdition.repas[ri];
-      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tplId, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0 }) });
+      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tplId, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0, commentaire:r.commentaire||null }) });
       if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
       const savedR = (await rRes.json())[0];
       if (r.aliments.length){
@@ -9242,7 +9245,7 @@ async function _chargerDieteTplPourCompare(clientDieteId){
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   const obj = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, commentaire:r.commentaire||'', aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
   };
   if (!obj.repas.length) obj.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   return obj;
@@ -9327,7 +9330,7 @@ async function _sauvegarderUneDieteComparee(tpl){
   await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}`, { method:'DELETE', headers:supaHeaders() });
   for (let ri=0; ri<tpl.repas.length; ri++){
     const r = tpl.repas[ri];
-    const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tpl.id, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0 }) });
+    const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:tpl.id, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0, commentaire:r.commentaire||null }) });
     if (!rRes.ok) throw new Error('supabase_repas_'+rRes.status);
     const savedR = (await rRes.json())[0];
     if (r.aliments.length){
@@ -9467,7 +9470,7 @@ async function _dupliquerTemplateDiete(sourceTemplateId, nom){
   for (const r of repasArr) {
     const newRepasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, {
       method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
-      body: JSON.stringify({ template_id: newTpl.id, nom: r.nom, ordre: r.ordre || 0, variante_index: r.variante_index || 0 })
+      body: JSON.stringify({ template_id: newTpl.id, nom: r.nom, ordre: r.ordre || 0, variante_index: r.variante_index || 0, commentaire: r.commentaire || null })
     });
     if (!newRepasRes.ok) continue;
     const newRepas = (await newRepasRes.json())[0];
@@ -11604,7 +11607,7 @@ async function editerDieteClient(nomDiete, clientId, clientDieteId) {
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   dieteTplEnEdition = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
-    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
+    repas: repasRaw.map(r=>({ id:r.id, nom:r.nom, ordre:r.ordre||0, variante_index:r.variante_index||0, commentaire:r.commentaire||'', aliments:(r.repas_aliments||[]).map(a=>({id:a.id,nom:a.nom,unite:a.unite||'g',quantite_g:a.quantite_g,kcal_par_100g:a.kcal_par_100g,prot_par_100g:a.prot_par_100g,glu_par_100g:a.glu_par_100g,lip_par_100g:a.lip_par_100g,modifie:!!a.modifie})) }))
   };
   if (!dieteTplEnEdition.repas.length) dieteTplEnEdition.repas = [{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }];
   setNav('editeur-diete');
