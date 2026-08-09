@@ -804,6 +804,27 @@ async function uploaderBilanPhoto(bilanId, clientId, file){
   if (!insRes.ok) throw new Error('supabase_' + insRes.status);
   return (await insRes.json())[0];
 }
+// Ajout manuel d'une photo par le coach depuis l'onglet Photos — pas liée à un bilan précis,
+// juste une date choisie (ex: rattraper une ancienne photo jamais uploadée). Même bucket/table
+// que les photos de bilan (bilan_id NULL, date portée directement par la colonne `date`).
+async function uploaderPhotoManuelle(clientId, file, dateStr){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (!res.ok) throw new Error('storage_' + res.status + ' — ' + await res.text().catch(()=>''));
+  const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+  const insRes = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ bilan_id: null, client_id: clientId, url, date: dateStr })
+  });
+  if (!insRes.ok) throw new Error('supabase_' + insRes.status);
+  return (await insRes.json())[0];
+}
+
 async function supprimerBilanPhotoApi(photoId, url){
   const marker = '/object/public/bilans-photos/';
   const idx = url.indexOf(marker);
@@ -5271,7 +5292,7 @@ function _assurerGaleriePhotos(c){
     fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,mensurations(date)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
     fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(c.id)}&order=date.asc&select=id,date,poids,mesure,fessiers,cuisses,mollets,poitrine,epaules,bras`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
   ]).then(([bilanRows, mensRows, mensurations]) => {
-    const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _date: (p.bilans && p.bilans.date_validation) || null, _key: 'b' + p.id }));
+    const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _manuelle: !p.bilan_id, _date: (p.bilans && p.bilans.date_validation) || p.date || null, _key: 'b' + p.id }));
     const b = (Array.isArray(mensRows) ? mensRows : []).map(p => ({ ...p, _source: 'mensuration', _date: (p.mensurations && p.mensurations.date) || null, _key: 'm' + p.id }));
     _ficheBilanPhotosGallery = [...a, ...b].sort((x, y) => {
       if (!x._date && !y._date) return 0;
@@ -5314,7 +5335,7 @@ function renderFichePhotosTab(c){
         ${cmpSel.map(key => { const p = findPhoto(key); if (!p) return ''; return `
           <div style="flex:1;text-align:center;min-width:0;max-width:320px;">
             <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
-            <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)} · ${p._source==='bilan'?'📋 Bilan':'📏 Mensuration'}</div>
+            <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)} · ${p._manuelle?'🖼️ Ajoutée':(p._source==='bilan'?'📋 Bilan':'📏 Mensuration')}</div>
           </div>`; }).join('')}
       </div>
     </div>` : `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px;">Clique sur 2 photos pour les comparer côte à côte — reclique sur l'une des deux (ou une 3e) pour la changer.</div>`;
@@ -5324,6 +5345,7 @@ function renderFichePhotosTab(c){
     <div class="table-toolbar" style="padding:0 0 12px;flex-wrap:wrap;gap:8px;">
       <div class="title">${_ficheBilanPhotosGallery.length} photo${_ficheBilanPhotosGallery.length>1?'s':''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn primary" style="font-size:11.5px;" onclick="ouvrirModalAjoutPhotoManuelle('${c.id}')">+ Ajouter une photo</button>
         <button class="btn" style="font-size:11.5px;" onclick="_fichePhotosToggleTous()">${toutesCoches ? 'Tout désélectionner' : 'Tout sélectionner'}</button>
         <button class="btn primary" style="font-size:11.5px;background:var(--critical);border-color:var(--critical);" ${delCount?'':'disabled'} onclick="_fichePhotosSupprimerSelection('${c.id}')">🗑 Supprimer la sélection (${delCount})</button>
       </div>
@@ -5335,7 +5357,7 @@ function renderFichePhotosTab(c){
         return `<div style="width:130px;">
           <div style="position:relative;width:130px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isCmp?'box-shadow:0 0 0 3px var(--accent);':''}">
             <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="toggleFicheBilanPhotoSel('${p._key}');_reRenderFichePhotosTab()">
-            <span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 6px;border-radius:999px;">${p._source==='bilan'?'📋 Bilan':'📏 Mensuration'}</span>
+            <span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 6px;border-radius:999px;">${p._manuelle?'🖼️ Ajoutée':(p._source==='bilan'?'📋 Bilan':'📏 Mensuration')}</span>
             <label style="position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.55);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="event.stopPropagation();">
               <input type="checkbox" ${isDel?'checked':''} onchange="_fichePhotosToggleDelSel('${p._key}')" style="width:15px;height:15px;margin:0;">
             </label>
@@ -5386,6 +5408,50 @@ async function _fichePhotosSupprimerSelection(clientId){
   const c = (data.clients||[]).find(cl => cl.id === clientId);
   _assurerGaleriePhotos(c);
   _reRenderFichePhotosTab();
+}
+
+// Modale "+ Ajouter une photo" (onglet Photos) — une date choisie par le coach, plusieurs
+// fichiers possibles d'un coup (tous rattachés à la même date).
+function ouvrirModalAjoutPhotoManuelle(clientId){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-ajout-photo-manuelle';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:380px;">
+      <h3 style="margin:0 0 16px;">+ Ajouter une photo</h3>
+      <div class="fiche-field"><label>Date de la photo</label><input id="apmDate" type="date" value="${today}" style="font-size:16px;"></div>
+      <div class="fiche-field"><label>Photo(s)</label><input id="apmFiles" type="file" accept="image/*" multiple style="font-size:14px;"></div>
+      <div id="apmErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:6px;"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
+        <button class="btn primary" id="apmBtn" onclick="confirmerAjoutPhotoManuelle('${clientId}')">Ajouter</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function confirmerAjoutPhotoManuelle(clientId){
+  const dateStr = document.getElementById('apmDate').value;
+  const files = Array.from(document.getElementById('apmFiles').files || []);
+  const err = document.getElementById('apmErr');
+  const btn = document.getElementById('apmBtn');
+  if (!dateStr) { err.textContent = 'Choisis une date.'; err.style.display = 'block'; return; }
+  if (!files.length) { err.textContent = 'Choisis au moins une photo.'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Envoi…';
+  try {
+    for (const file of files) await uploaderPhotoManuelle(clientId, file, dateStr);
+    document.getElementById('modal-ajout-photo-manuelle')?.remove();
+    _ficheBilanPhotosGallery = null;
+    const c = (data.clients||[]).find(cl => cl.id === clientId);
+    _assurerGaleriePhotos(c);
+    _reRenderFichePhotosTab();
+  } catch(e) {
+    err.textContent = 'Erreur : ' + e.message; err.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Ajouter';
+  }
 }
 
 // Série actuelle de bilans consécutifs envoyés ET ponctuels (badge 🔥, demande coach 2026-08-09
