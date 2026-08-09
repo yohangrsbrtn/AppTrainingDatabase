@@ -929,10 +929,10 @@ async function _validerEtEnvoyerSupa() {
     const today = now.toISOString().split('T')[0];
     await _supaUpdateBilan({ envoye_coach: true, date_validation: today, envoye_at: now.toISOString() });
     if (_bilanData) { _bilanData.dejaEnvoye = true; _bilanData.dateValidation = today; }
-    const xpGagne = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, now.toISOString());
+    const { xpSemaine: xpGagne, xpDetail } = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, now.toISOString());
     // Afficher overlay XP simplifié
     await loadBilan();
-    _afficherXPValidationSupa(xpGagne);
+    _afficherXPValidationSupa(xpGagne, xpDetail);
     if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
   } catch(e) {
     showToast('Erreur : ' + e.message, '#c0392b');
@@ -965,45 +965,22 @@ const BONUS_SEANCES_100PCT     = 25; // 100% de l'objectif séances/semaine (cli
 // (excédent, objectif du coach), pas d'une valeur unitaire fixe. Plafonnée à :
 const XP_PAS_MAX_HEBDO = 15;
 const BONUS_PONCTUALITE        = 20; // bilan envoyé au plus tard le jour de bilan assigné, avant midi
-const STREAK_BONUS             = { 3: 30, 6: 50, 10: 100 }; // bilans consécutifs envoyés ET ponctuels
 
-// _JOURS_IDX_FR, _bilanWeekBounds, _bilanEstPonctuel sont partagés avec le
-// coach (console.html) — définis une seule fois dans api.js.
-
-// Compte les bilans envoyés consécutifs (les plus récents d'abord) tant
-// qu'ils sont ponctuels ET que les semaines se suivent sans trou — une
-// semaine sautée (vacances, etc.) casse la série même si les bilans
-// avant/après sont eux-mêmes ponctuels.
-async function _calculerStreakBilans(clientId, jourBilanNom) {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc&limit=15&select=created_at,date_validation,envoye_at`,
-    { headers: supaHeaders() }
-  );
-  const arr = res.ok ? await res.json() : [];
-  let streak = 0;
-  let semaineAttendue = null;
-  for (const b of arr) {
-    if (!b.date_validation) break;
-    const envoyeAt = b.envoye_at || (b.date_validation + 'T12:00:00');
-    if (!_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom)) break;
-    const { fin } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
-    if (semaineAttendue && fin.getTime() !== semaineAttendue.getTime()) break; // semaine manquée
-    streak++;
-    semaineAttendue = new Date(fin);
-    semaineAttendue.setDate(semaineAttendue.getDate() - 7);
-  }
-  return streak;
-}
+// _JOURS_IDX_FR, _bilanWeekBounds, _bilanEstPonctuel, STREAK_BONUS et _calculerStreakBilans
+// sont partagés avec le coach (console.html) — définis une seule fois dans api.js (le badge
+// 🔥 affiché en fiche client doit utiliser exactement le même calcul que le crédit XP ici).
 
 // Crédite l'XP d'un bilan envoyé — une seule fois par bilan (dédoublonné
 // côté serveur via bilans.xp_credite, jamais via un flag localStorage).
 // Appeler cette fonction plusieurs fois sur le même bilan est sans danger :
 // le crédit n'est accordé qu'à la première fois où xp_credite vaut 0.
 async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, dateValidationStr) {
-  if (!bilanId) return 0;
-  const chkRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&select=xp_credite`, { headers: supaHeaders() });
+  if (!bilanId) return { xpSemaine: 0, xpDetail: null };
+  const chkRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&select=xp_credite,xp_detail`, { headers: supaHeaders() });
   const chkArr = chkRes.ok ? await chkRes.json() : [];
-  if (chkArr[0] && chkArr[0].xp_credite > 0) return 0; // déjà crédité, on ne recrédite jamais
+  // déjà crédité : on ne recrédite jamais, mais on renvoie le détail déjà stocké (utile si
+  // l'écran de validation est rouvert après un rechargement de la page en cours de route).
+  if (chkArr[0] && chkArr[0].xp_credite > 0) return { xpSemaine: chkArr[0].xp_credite, xpDetail: chkArr[0].xp_detail || null };
 
   const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=steps_cible,seances_cible,jour_bilan`, { headers: supaHeaders() });
   const profilArr = profilRes.ok ? await profilRes.json() : [];
@@ -1032,26 +1009,43 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
   const xpPasExcedent    = profil.steps_cible ? Math.min(XP_PAS_MAX_HEBDO, Math.round((excedentPas / 500) * (profil.steps_cible / 5000))) : 0;
   const ponctuel         = _bilanEstPonctuel(bilanCreatedAt, dateValidationStr, profil.jour_bilan);
   const bonusPonctualite = ponctuel ? BONUS_PONCTUALITE : 0;
-  const bonusStreak      = ponctuel ? (STREAK_BONUS[await _calculerStreakBilans(clientId, profil.jour_bilan)] || 0) : 0;
+  // streakCount inclut CE bilan (déjà marqué envoye_coach=true avant l'appel à cette fonction,
+  // cf. _doEnvoyerBilanSupa) — c'est bien la série "après validation" que le bonus récompense.
+  const streakCount      = ponctuel ? await _calculerStreakBilans(clientId, profil.jour_bilan) : 0;
+  const bonusStreak      = ponctuel ? (STREAK_BONUS[streakCount] || 0) : 0;
 
   const xpSemaine = XP_BILAN_BASE + bonusDiete + bonusSeances100 + xpPasExcedent + bonusPonctualite + bonusStreak;
+  // Détail conservé pour affichage (écran client à l'envoi + détail bilan console) — recalculer
+  // rétroactivement serait faux : le streak dépend de l'état des bilans à CE moment précis.
+  const xpDetail = {
+    base: XP_BILAN_BASE, bonusDiete, bonusSeances100, xpPasExcedent,
+    bonusPonctualite, bonusStreak, streakCount, ponctuel,
+  };
 
   await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
-    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine })
+    method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ xp_credite: xpSemaine, xp_detail: xpDetail })
   });
   await _supaIncrementerXpTotal(clientId, xpSemaine);
-  return xpSemaine;
+  return { xpSemaine, xpDetail };
 }
 
-function _afficherXPValidationSupa(xpGagne) {
+function _afficherXPValidationSupa(xpGagne, xpDetail) {
   const afficherXp = xpGagne && !(typeof modeSimplifieActif === 'function' && modeSimplifieActif());
+  const lignes = afficherXp ? _lignesDetailXp(xpDetail) : [];
+  const detailHtml = lignes.length ? `<div style="text-align:left;background:#12141c;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;">
+      ${lignes.map(([label,val]) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0;color:#a8b0c8;"><span>${label}</span><span style="color:#1D9E75;font-weight:700;flex-shrink:0;">+${val}</span></div>`).join('')}
+    </div>` : '';
+  const retardHtml = (afficherXp && xpDetail && xpDetail.ponctuel === false)
+    ? `<div style="font-size:11px;color:#e8a33d;margin-bottom:14px;">⏰ Envoyé après la deadline — bonus ponctualité et série non obtenus cette semaine.</div>` : '';
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;transition:opacity 0.3s;';
   overlay.innerHTML = `<div style="background:#1a1d29;border-radius:20px;padding:36px 28px;text-align:center;max-width:300px;width:85%;box-shadow:0 20px 60px rgba(0,0,0,0.5);transform:scale(0.85);transition:transform 0.3s;">
     <div style="font-size:52px;margin-bottom:10px;">🏆</div>
     <div style="font-size:22px;font-weight:700;color:#e8eaf0;margin-bottom:4px;">Bilan envoyé !</div>
     <div style="font-size:13px;color:#8892a4;margin-bottom:${afficherXp ? '4px' : '24px'};">Bravo pour cette semaine !</div>
-    ${afficherXp ? `<div style="font-size:15px;font-weight:700;color:#1D9E75;margin-bottom:24px;">🎉 +${xpGagne} XP</div>` : ''}
+    ${afficherXp ? `<div style="font-size:15px;font-weight:700;color:#1D9E75;margin-bottom:14px;">🎉 +${xpGagne} XP</div>` : ''}
+    ${detailHtml}
+    ${retardHtml}
     <button id="_xpOverlayBtn" style="background:linear-gradient(135deg,#1D9E75,#167a5a);width:100%;margin:0;padding:14px;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Retour à l'accueil</button>
   </div>`;
   document.body.appendChild(overlay);

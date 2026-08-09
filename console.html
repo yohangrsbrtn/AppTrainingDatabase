@@ -466,7 +466,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=10"></script>
+<script src="api.js?v=11"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -603,6 +603,8 @@ let _ficheBilanPhotosClientId = null;
 let _ficheBilanPhotosGallery = null; // null=non chargé — toutes les photos de tous les bilans du client, avec bilans(date_validation)
 let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2)
 let _ficheBilansMensurations = null; // null=non chargé — toutes les mensurations du client (rapprochement par plage de dates)
+let _ficheStreakClientId = null;
+let _ficheStreak = null; // null=non chargé — nb de bilans consécutifs envoyés ET ponctuels (série actuelle, _calculerStreakBilans)
 let _bilanNavList = null;   // liste Supabase bilans pour nav prev/next
 let _bilanNavIdx  = -1;
 let _bilanNavSource = null; // 'fiche' | 'bilans'
@@ -2253,6 +2255,8 @@ function openBilanDetailSupabase(bilan) {
       createdAt: bilan.created_at || null,
       envoyeCoach: !!bilan.envoye_coach,
       envoyeAt: bilan.envoye_at || null,
+      xpCredite: bilan.xp_credite || 0,
+      xpDetail: bilan.xp_detail || null,
       semaineLabel: bilan.semaine_label || '',
       jours: bilan.jours || [],
       repas: bilan.repas_eval || [],
@@ -2686,6 +2690,17 @@ function renderBilanDetailPage(el) {
       ${statCard('Cardio', joursOkCardio, '/7j')}
       ${avgSteps>0?statCard('Pas moy./j',avgSteps.toLocaleString('fr-FR'),''):''}
     </div>
+
+    ${d.xpCredite > 0 ? (() => {
+      const lignes = _lignesDetailXp(d.xpDetail);
+      return `<div class="table-card" style="margin-bottom:16px;">
+        <div class="table-toolbar"><div class="title">XP gagné — ${d.xpCredite}</div></div>
+        ${lignes.length ? `<div style="padding:6px 20px 14px;display:flex;flex-direction:column;gap:2px;">
+          ${lignes.map(([label,val]) => `<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;"><span style="color:var(--text-muted);">${label}</span><span style="font-weight:700;color:var(--success);">+${val}</span></div>`).join('')}
+        </div>` : `<div style="padding:10px 20px 14px;font-size:11.5px;color:var(--text-faint);">Détail non disponible (bilan crédité avant l'ajout de ce suivi).</div>`}
+        ${d.xpDetail && d.xpDetail.ponctuel === false ? `<div style="padding:0 20px 14px;font-size:11.5px;color:var(--warning);">⏰ Envoyé après la deadline — bonus ponctualité et série non obtenus cette semaine-là.</div>` : ''}
+      </div>`;
+    })() : ''}
 
     <div class="table-card" style="margin-bottom:16px;">
       <div class="table-toolbar"><div class="title">Suivi journalier</div></div>
@@ -5255,6 +5270,31 @@ function renderFichePhotosTab(c){
   </div>`;
 }
 
+// Série actuelle de bilans consécutifs envoyés ET ponctuels (badge 🔥, demande coach 2026-08-09
+// suite à une question sur la visibilité du bonus d'assiduité) — même calcul EXACT que le
+// crédit XP (_calculerStreakBilans, api.js), pour que le badge affiché corresponde toujours au
+// bonus qui serait réellement obtenu au prochain bilan ponctuel.
+function _assurerStreakBilans(c){
+  if (!c) return;
+  if (_ficheStreakClientId !== c.id) { _ficheStreakClientId = c.id; _ficheStreak = null; }
+  if (_ficheStreak !== null) return;
+  _calculerStreakBilans(c.id, c.jour_bilan).then(n => {
+    _ficheStreak = n;
+    const el = document.getElementById('ficheTabContent');
+    if (el && ficheTab === 'bilans') el.innerHTML = renderFicheTabContent(c);
+  }).catch(() => { _ficheStreak = 0; });
+}
+
+function _streakChipHtml(){
+  if (_ficheStreak === null) return '';
+  if (!_ficheStreak) return `<div style="margin-bottom:10px;font-size:11.5px;color:var(--text-faint);">Aucune série de bilans ponctuels en cours.</div>`;
+  const prochain = STREAK_BONUS[3] && _ficheStreak < 3 ? 3 : _ficheStreak < 6 ? 6 : _ficheStreak < 10 ? 10 : null;
+  return `<div style="margin-bottom:10px;font-size:12px;display:flex;align-items:center;gap:6px;">
+    <span class="chip off" title="Bilans consécutifs envoyés ET ponctuels — même série que le bonus XP">🔥 ${_ficheStreak} bilan${_ficheStreak>1?'s':''} d'affilée à l'heure</span>
+    ${prochain ? `<span style="color:var(--text-faint);">encore ${prochain-_ficheStreak} pour le palier ${prochain} (+${STREAK_BONUS[prochain]} XP)</span>` : ''}
+  </div>`;
+}
+
 function renderFicheBilansTab(c){
   if (!c) return '';
   if (_ficheBilansClientId !== c.id) {
@@ -5267,6 +5307,7 @@ function renderFicheBilansTab(c){
     _ficheBilansCorbeilleSel = new Set();
   }
   _assurerGaleriePhotos(c);
+  _assurerStreakBilans(c);
   if (_ficheBilansVoirCorbeille) return _renderFicheBilansCorbeille(c);
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
@@ -5285,7 +5326,7 @@ function renderFicheBilansTab(c){
   }
   const corbeilleLinkHtml = `<div style="margin-bottom:10px;"><button class="btn" style="font-size:11px;padding:4px 10px;" onclick="_ficheBilansVoirCorbeille=true;setFicheTab('bilans')">🗑 Voir la corbeille</button></div>`;
   if (_ficheBilans.length === 0) {
-    return `${_renderFicheBilanPhotosGallery(c)}${corbeilleLinkHtml}<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
+    return `${_renderFicheBilanPhotosGallery(c)}${_streakChipHtml()}${corbeilleLinkHtml}<div class="fiche-card"><p style="color:var(--text-faint);">Aucun bilan enregistré dans Supabase.</p></div>`;
   }
   const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
   const selCount = _ficheBilansSel.size;
@@ -5332,7 +5373,7 @@ function renderFicheBilansTab(c){
       <td style="font-size:11px;color:var(--text-faint);" title="${mensLiees.map(m=>m.date).join(', ')}">${mensLiees.length ? `📏 ${mensLiees.length}` : ''}</td>
     </tr>`;
   }).join('');
-  return `${_renderFicheBilanPhotosGallery(c)}${corbeilleLinkHtml}<div class="fiche-card" style="overflow-x:auto;">
+  return `${_renderFicheBilanPhotosGallery(c)}${_streakChipHtml()}${corbeilleLinkHtml}<div class="fiche-card" style="overflow-x:auto;">
     <div class="table-toolbar" style="padding:10px 8px;">
       <label style="font-size:12px;color:var(--text-faint);cursor:pointer;display:flex;align-items:center;gap:5px;">
         <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleAllFicheBilanSel(this.checked)">

@@ -113,6 +113,50 @@ function _bilanEnvoiEnRetard(b, jourBilanNom) {
   return !_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom);
 }
 
+// Détail du calcul XP d'un bilan → lignes {label, valeur} — partagé entre l'écran de
+// validation client (bilan.js) et le détail bilan côté console (console.html), pour ne jamais
+// désynchroniser les libellés des deux affichages.
+function _lignesDetailXp(xpDetail) {
+  if (!xpDetail) return [];
+  const lignes = [['Bilan envoyé', xpDetail.base]];
+  if (xpDetail.bonusPonctualite) lignes.push(['⏱ Ponctualité', xpDetail.bonusPonctualite]);
+  if (xpDetail.bonusStreak) lignes.push([`🔥 Série de ${xpDetail.streakCount} bilans à l'heure`, xpDetail.bonusStreak]);
+  if (xpDetail.bonusDiete) lignes.push(['🥗 Diète respectée', xpDetail.bonusDiete]);
+  if (xpDetail.bonusSeances100) lignes.push(['💪 Objectif séances atteint', xpDetail.bonusSeances100]);
+  if (xpDetail.xpPasExcedent) lignes.push(["🦶 Pas au-delà de l'objectif", xpDetail.xpPasExcedent]);
+  return lignes;
+}
+
+// Bonus XP "série de bilans consécutifs envoyés ET ponctuels" — partagé entre le crédit XP
+// (bilan.js, _crediterXpBilanEnvoye) et l'affichage de la série actuelle côté console (fiche
+// client) : les deux doivent utiliser EXACTEMENT le même calcul, sinon le badge 🔥 affiché au
+// coach pourrait ne pas correspondre au bonus réellement crédité au prochain bilan.
+const STREAK_BONUS = { 3: 30, 6: 50, 10: 100 };
+
+// Compte les bilans envoyés consécutifs (les plus récents d'abord) tant qu'ils sont ponctuels
+// ET que les semaines se suivent sans trou — une semaine sautée (vacances, etc.) casse la
+// série même si les bilans avant/après sont eux-mêmes ponctuels.
+async function _calculerStreakBilans(clientId, jourBilanNom) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&order=date_validation.desc&limit=15&select=created_at,date_validation,envoye_at`,
+    { headers: supaHeaders() }
+  );
+  const arr = res.ok ? await res.json() : [];
+  let streak = 0;
+  let semaineAttendue = null;
+  for (const b of arr) {
+    if (!b.date_validation) break;
+    const envoyeAt = b.envoye_at || (b.date_validation + 'T12:00:00');
+    if (!_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom)) break;
+    const { fin } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
+    if (semaineAttendue && fin.getTime() !== semaineAttendue.getTime()) break; // semaine manquée
+    streak++;
+    semaineAttendue = new Date(fin);
+    semaineAttendue.setDate(semaineAttendue.getDate() - 7);
+  }
+  return streak;
+}
+
 // ── Protocole chimie — moteur de calcul partagé coach (console.html) +
 // client (protocole.js), même logique que le générateur Google Sheets
 // (genererProtocole/genererPlanning) : totaux du cycle par molécule +
