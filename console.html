@@ -2254,6 +2254,7 @@ function openBilanDetailSupabase(bilan) {
     _supabaseBilanId: bilan.id,
     dateIso,
     photos: null,
+    mensPhotos: null,
     mensurations: null,
     objectifs: null,
   };
@@ -2269,6 +2270,13 @@ function openBilanDetailSupabase(bilan) {
     .then(r => r.ok ? r.json() : [])
     .then(rows => { bilanDetailState.mensurations = rows; if (state.nav==='bilan-detail') renderMain(); })
     .catch(() => { bilanDetailState.mensurations = []; if (state.nav==='bilan-detail') renderMain(); });
+  // Photos prises depuis l'onglet Mensurations (pas depuis ce bilan) — remontées ici si leur
+  // mensuration tombe dans la semaine de CE bilan (même rapprochement par plage de dates que
+  // le tableau de comparaison ci-dessus), pour ne plus avoir à aller les chercher ailleurs.
+  fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(bilan.client_id)}&select=*,mensurations(date)&order=created_at.asc`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : [])
+    .then(rows => { bilanDetailState.mensPhotos = rows; if (state.nav==='bilan-detail') renderMain(); })
+    .catch(() => { bilanDetailState.mensPhotos = []; if (state.nav==='bilan-detail') renderMain(); });
   // Objectifs assignés par le coach (pas/jour, séances/semaine) — pour ne pas avoir à aller
   // les revérifier dans l'onglet Programme à chaque bilan.
   fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(bilan.client_id)}&select=steps_cible,seances_cible`, { headers: supaHeaders() })
@@ -2733,6 +2741,17 @@ function renderBilanDetailPage(el) {
 
     ${bilanDetailState._supabaseBilanId ? (() => {
       const mProche = _mensurationLaPlusProche(bilanDetailState.dateIso, bilanDetailState.mensurations);
+      // Photos prises depuis une mensuration mais tombant dans la semaine de CE bilan (bornes,
+      // calculées plus haut) — remontées ici en plus des photos propres au bilan, avec un badge
+      // pour distinguer la source (pas de suppression possible d'ici, ça se gère depuis Mensurations).
+      const mensPhotosSemaine = (bornes && bilanDetailState.mensPhotos) ? bilanDetailState.mensPhotos.filter(p => {
+        const d = p.mensurations && p.mensurations.date;
+        if (!d) return false;
+        const t = new Date(d+'T12:00:00').getTime();
+        return t >= bornes.debut.getTime() && t <= bornes.fin.getTime();
+      }).map(p => ({ ...p, _source:'mensuration', _date: p.mensurations.date })) : [];
+      const bilanPhotosArr = (bilanDetailState.photos||[]).map(p => ({ ...p, _source:'bilan' }));
+      const allPhotos = [...bilanPhotosArr, ...mensPhotosSemaine];
       return `<div class="table-card" style="margin-bottom:16px;">
         <div class="table-toolbar">
           <div class="title">Photos</div>
@@ -2743,13 +2762,15 @@ function renderBilanDetailPage(el) {
         </div>
         <div style="padding:14px 20px;">
           ${bilanDetailState.photos === null ? `<div style="color:var(--text-faint);font-size:12px;">Chargement…</div>`
-            : bilanDetailState.photos.length === 0 ? `<div style="color:var(--text-faint);font-size:12px;">Aucune photo.</div>`
+            : allPhotos.length === 0 ? `<div style="color:var(--text-faint);font-size:12px;">Aucune photo.</div>`
             : `<div style="display:flex;flex-wrap:wrap;gap:14px;">
-                ${bilanDetailState.photos.map((p, idx) => `
+                ${allPhotos.map((p, idx) => `
                   <div style="width:100px;">
                     <div style="position:relative;width:100px;aspect-ratio:9/16;">
-                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(bilanDetailState.photos,${idx})">
-                      <button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>
+                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(allPhotos,${idx})">
+                      ${p._source==='mensuration'
+                        ? `<span style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.65);color:#fff;font-size:8.5px;padding:2px 5px;border-radius:999px;">📏 ${esc((p._date||'').split('-').reverse().join('/'))}</span>`
+                        : `<button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>`}
                     </div>
                     ${_renderMensurationSousPhoto(mProche)}
                   </div>`).join('')}
