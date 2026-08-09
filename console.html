@@ -604,6 +604,7 @@ let _ficheBilansSel = new Set(); // ids bilans sélectionnés (fiche client → 
 let _ficheBilanPhotosClientId = null;
 let _ficheBilanPhotosGallery = null; // null=non chargé — toutes les photos de tous les bilans du client, avec bilans(date_validation)
 let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2)
+let _fichePhotosDelSel = new Set(); // clés (_key, "b"+id/"m"+id) sélectionnées pour suppression — onglet Photos
 let _ficheBilansMensurations = null; // null=non chargé — toutes les mensurations du client (rapprochement par plage de dates)
 let _ficheStreakClientId = null;
 let _ficheStreak = null; // null=non chargé — nb de bilans consécutifs envoyés ET ponctuels (série actuelle, _calculerStreakBilans)
@@ -811,6 +812,20 @@ async function supprimerBilanPhotoApi(photoId, url){
     await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, { method:'DELETE', headers: supaHeaders() }).catch(()=>{});
   }
   const res = await fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?id=eq.${photoId}`, { method:'DELETE', headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+}
+
+// Même bucket Storage partagé ("bilans-photos") que les photos de bilan, table différente
+// (mensuration_photos) — miroir de _supprimerMensPhotoClient (mensurations.js, côté client),
+// jusqu'ici jamais exposé côté console.
+async function supprimerMensurationPhotoApi(photoId, url){
+  const marker = '/object/public/bilans-photos/';
+  const idx = url.indexOf(marker);
+  if (idx >= 0) {
+    const path = url.slice(idx + marker.length);
+    await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, { method:'DELETE', headers: supaHeaders() }).catch(()=>{});
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?id=eq.${photoId}`, { method:'DELETE', headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
 }
 
@@ -5240,6 +5255,7 @@ function _assurerGaleriePhotos(c){
     _ficheBilanPhotosClientId = c.id;
     _ficheBilanPhotosGallery = null;
     _ficheBilanPhotosSel = [];
+    _fichePhotosDelSel = new Set();
     _ficheBilansMensurations = null;
   }
   if (_ficheBilanPhotosGallery !== null) return;
@@ -5271,7 +5287,11 @@ function _assurerGaleriePhotos(c){
 
 // Onglet dédié "Photos" — même galerie unifiée que celle affichée en tête de l'onglet Bilans
 // (bilans + mensurations, triée par date réelle), présentée ici en grand format plein écran
-// plutôt qu'en bandeau compact — demandé en plus de la galerie déjà en place dans Bilans.
+// plutôt qu'en bandeau compact. Deux sélections indépendantes coexistent sur la même grille :
+// - clic sur la PHOTO elle-même → comparaison côte à côte (jusqu'à 2, même mécanisme/état que
+//   _renderFicheBilanPhotosGallery dans l'onglet Bilans — cliquer une 3e photo remplace la plus
+//   ancienne des deux, donc "changer la photo d'un des deux côtés" se fait en cliquant dessus) ;
+// - la CASE À COCHER (coin, stopPropagation) → sélection multiple pour suppression groupée.
 function renderFichePhotosTab(c){
   if (!c) return '';
   _assurerGaleriePhotos(c);
@@ -5281,18 +5301,91 @@ function renderFichePhotosTab(c){
   if (!_ficheBilanPhotosGallery.length) {
     return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune photo enregistrée (bilans ou mensurations) pour ce client.</p></div>`;
   }
-  return `<div class="fiche-card">
+  const dateOf = p => p._date ? new Date(p._date+'T00:00:00').toLocaleDateString('fr-FR') : '—';
+  const cmpSel = _ficheBilanPhotosSel;
+  const findPhoto = key => _ficheBilanPhotosGallery.find(p => p._key === key);
+  const compareHtml = cmpSel.length === 2 ? `
+    <div class="fiche-card" style="margin-bottom:14px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        Comparaison
+        <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="_ficheBilanPhotosSel=[];_reRenderFichePhotosTab()">✕ Réinitialiser</button>
+      </div>
+      <div style="display:flex;gap:12px;">
+        ${cmpSel.map(key => { const p = findPhoto(key); if (!p) return ''; return `
+          <div style="flex:1;text-align:center;min-width:0;max-width:320px;">
+            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
+            <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)} · ${p._source==='bilan'?'📋 Bilan':'📏 Mensuration'}</div>
+          </div>`; }).join('')}
+      </div>
+    </div>` : `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px;">Clique sur 2 photos pour les comparer côte à côte — reclique sur l'une des deux (ou une 3e) pour la changer.</div>`;
+  const delCount = _fichePhotosDelSel.size;
+  const toutesCoches = _ficheBilanPhotosGallery.length > 0 && _ficheBilanPhotosGallery.every(p => _fichePhotosDelSel.has(p._key));
+  return `${compareHtml}<div class="fiche-card">
+    <div class="table-toolbar" style="padding:0 0 12px;flex-wrap:wrap;gap:8px;">
+      <div class="title">${_ficheBilanPhotosGallery.length} photo${_ficheBilanPhotosGallery.length>1?'s':''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" style="font-size:11.5px;" onclick="_fichePhotosToggleTous()">${toutesCoches ? 'Tout désélectionner' : 'Tout sélectionner'}</button>
+        <button class="btn primary" style="font-size:11.5px;background:var(--critical);border-color:var(--critical);" ${delCount?'':'disabled'} onclick="_fichePhotosSupprimerSelection('${c.id}')">🗑 Supprimer la sélection (${delCount})</button>
+      </div>
+    </div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;">
-      ${_ficheBilanPhotosGallery.map((p, idx) => `
-        <div style="width:130px;">
-          <div style="position:relative;width:130px;aspect-ratio:9/16;">
-            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,${idx})">
+      ${_ficheBilanPhotosGallery.map((p, idx) => {
+        const isCmp = cmpSel.includes(p._key);
+        const isDel = _fichePhotosDelSel.has(p._key);
+        return `<div style="width:130px;">
+          <div style="position:relative;width:130px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isCmp?'box-shadow:0 0 0 3px var(--accent);':''}">
+            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="toggleFicheBilanPhotoSel('${p._key}');_reRenderFichePhotosTab()">
             <span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 6px;border-radius:999px;">${p._source==='bilan'?'📋 Bilan':'📏 Mensuration'}</span>
+            <label style="position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.55);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="event.stopPropagation();">
+              <input type="checkbox" ${isDel?'checked':''} onchange="_fichePhotosToggleDelSel('${p._key}')" style="width:15px;height:15px;margin:0;">
+            </label>
           </div>
-          <div style="font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:4px;">${p._date ? new Date(p._date+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</div>
-        </div>`).join('')}
+          <div style="font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:4px;">${dateOf(p)}</div>
+        </div>`;
+      }).join('')}
     </div>
   </div>`;
+}
+
+function _reRenderFichePhotosTab(){
+  const c = (data.clients||[]).find(cl => cl.id === _ficheBilanPhotosClientId);
+  const el = document.getElementById('ficheTabContent');
+  if (el && ficheTab === 'photos') el.innerHTML = renderFichePhotosTab(c);
+}
+
+function _fichePhotosToggleDelSel(key){
+  if (_fichePhotosDelSel.has(key)) _fichePhotosDelSel.delete(key); else _fichePhotosDelSel.add(key);
+  _reRenderFichePhotosTab();
+}
+
+function _fichePhotosToggleTous(){
+  const toutesCoches = _ficheBilanPhotosGallery.length > 0 && _ficheBilanPhotosGallery.every(p => _fichePhotosDelSel.has(p._key));
+  _fichePhotosDelSel = toutesCoches ? new Set() : new Set(_ficheBilanPhotosGallery.map(p => p._key));
+  _reRenderFichePhotosTab();
+}
+
+// Supprime chaque photo sélectionnée depuis sa vraie table d'origine (bilan_photos ou
+// mensuration_photos, selon _source/_key) — la galerie mélange les deux, jamais de suppression
+// en masse par une seule requête possible ici.
+async function _fichePhotosSupprimerSelection(clientId){
+  const keys = [..._fichePhotosDelSel];
+  if (!keys.length) return;
+  if (!confirm(`Supprimer définitivement ${keys.length} photo${keys.length>1?'s':''} ?`)) return;
+  const photos = keys.map(k => _ficheBilanPhotosGallery.find(p => p._key === k)).filter(Boolean);
+  let erreurs = 0;
+  for (const p of photos) {
+    try {
+      if (p._source === 'bilan') await supprimerBilanPhotoApi(p.id, p.url);
+      else await supprimerMensurationPhotoApi(p.id, p.url);
+    } catch(e) { erreurs++; }
+  }
+  _fichePhotosDelSel = new Set();
+  _ficheBilanPhotosSel = _ficheBilanPhotosSel.filter(k => !keys.includes(k));
+  _ficheBilanPhotosGallery = null; // force un rechargement propre de la galerie
+  if (erreurs) alert(`${erreurs} photo(s) n'ont pas pu être supprimées.`);
+  const c = (data.clients||[]).find(cl => cl.id === clientId);
+  _assurerGaleriePhotos(c);
+  _reRenderFichePhotosTab();
 }
 
 // Série actuelle de bilans consécutifs envoyés ET ponctuels (badge 🔥, demande coach 2026-08-09
