@@ -35,9 +35,10 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 
 ### Clients et profils
 
-- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, mode_simplifie, jour_paiement, mode_paiement, dernier_mois_paye, date_creation_compte, updated_at }` — Upsert via `on_conflict=client_id`.
+- **`client_profils`** : `{ client_id PK, prenom, nom, date_naissance, email, supabase_only, date_debut, jour_bilan, taille_cm, objectif, mode_simplifie, jour_paiement, mode_paiement, banque_paiement, dernier_mois_paye, date_creation_compte, updated_at }` — Upsert via `on_conflict=client_id`.
   - `mode_simplifie` (BOOLEAN, `sql/2026-08-01_mode_simplifie.sql`) : cache XP/niveau/classement côté client (l'XP continue de tourner en fond), source de vérité pour exclure ces clients du classement — le cache local `localStorage.modeSimplifie` est resynchronisé depuis cette colonne à chaque chargement de l'accueil.
   - `mode_paiement` (TEXT `virement`/`espece`/`gocardless`, `sql/2026-08-01_rappel_paiement_v2.sql`) : en `gocardless`, jamais de rappel de paiement (prélèvement automatique).
+  - `banque_paiement` (TEXT, liste fermée `Qonto`/`Revolut`/`Crédit Agricole`/`Sumeria` — `BANQUES_PAIEMENT` dans console.html, `sql/2026-08-09_banque_paiement.sql`) : pertinent seulement si `mode_paiement='virement'` — champ masqué/désactivé sinon, effacé automatiquement si le mode change vers autre chose que virement (fiche client onglet Profil ET espace Facturation, éditable dans les deux).
   - `dernier_mois_paye` (TEXT `'YYYY-MM'`) : marqué manuellement par le coach (bouton "Marquer payé" dans la fiche client, Facturation) — le rappel de paiement (in-app uniquement, plus de push, plus de toggle client depuis cette refonte) ne part que si le mois courant n'est pas déjà marqué payé.
   - `date_creation_compte` : renommé "Date de première connexion" côté console — auto-enregistrée une seule fois à la toute première connexion (`_completerConnexionSupabase` dans index.html), jamais réécrite ensuite. Pour les clients migrés, reporter manuellement la date depuis le fichier Excel GAS.
 
@@ -99,6 +100,10 @@ Prévisualisation + import depuis GAS prod. 5 onglets : infos | mensurations | d
 ### Mensurations (`state.nav='mensurations'`) ✅
 
 Dropdown client → charge Supabase. Bouton "⬇ Migrer depuis GAS".
+
+### Facturation (`state.nav='facturation'`) ✅
+
+Vue dédiée (sidebar → Suivi), tous clients confondus (exclut le compte coach `yohanp` et les clients `statut='ancien'`). Statuts calculés à la volée (`_facturationStatut`, jamais stockés) : `paye`/`attente`/`retard`/`gocardless`/`sans_config` — `retard` = jour de facturation dépassé ce mois-ci ET pas encore marqué payé. Filtres par statut, édition inline (jour/mode/banque, PATCH direct `client_profils`), "Marquer payé"/"Annuler" (réutilise `toggleMoisPaye`, même bouton qu'en fiche client), relance individuelle ou groupée via `_envoyerNotifCore` (source `rappel_paiement`, même texte que le préréglage de la page Notifications) avec historique "dernière relance" (`client_notifications?source=eq.rappel_paiement`).
 
 ### Fiche client (`state.nav='fiche-client'`) ✅
 

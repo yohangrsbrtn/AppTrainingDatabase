@@ -1402,6 +1402,7 @@ async function chargerDonnees(){
       dernier_mois_paye: p.dernier_mois_paye || null,
       mode_paiement: p.mode_paiement || null,
       jour_paiement: p.jour_paiement || null,
+      banque_paiement: p.banque_paiement || null,
       date_fin_coaching: p.date_fin_coaching || null,
       jour_bilan: p.jour_bilan || null,
       pushActif: clientsAvecPush.has(p.client_id),
@@ -6112,17 +6113,23 @@ function renderFicheProfilTab(c){
 
       <div class="fiche-card" style="margin-bottom:0;">
         <h3>Facturation</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
           <div class="fiche-field"><label>Jour de facturation (jour du mois)</label>
             <input id="fJourPaiement" type="number" min="1" max="31" placeholder="ex: 5 ou 15" value="${esc(p.jour_paiement||'')}" list="jours-paiement-suggestions">
             <datalist id="jours-paiement-suggestions"><option value="1"><option value="5"><option value="10"><option value="15"><option value="20"><option value="25"></datalist>
           </div>
           <div class="fiche-field"><label>Mode de paiement</label>
-            <select id="fModePaiement">
+            <select id="fModePaiement" onchange="_toggleFicheBanquePaiement(this.value)">
               <option value="">—</option>
               <option value="virement" ${p.mode_paiement==='virement'?'selected':''}>Virement</option>
               <option value="espece" ${p.mode_paiement==='espece'?'selected':''}>Espèces</option>
               <option value="gocardless" ${p.mode_paiement==='gocardless'?'selected':''}>GoCardless</option>
+            </select>
+          </div>
+          <div class="fiche-field" id="fBanquePaiementWrap" style="${p.mode_paiement==='virement'?'':'display:none;'}"><label>Banque (virement)</label>
+            <select id="fBanquePaiement">
+              <option value="">—</option>
+              ${BANQUES_PAIEMENT.map(b => `<option value="${esc(b)}" ${p.banque_paiement===b?'selected':''}>${esc(b)}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -6134,6 +6141,13 @@ function renderFicheProfilTab(c){
 }
 
 const _MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+// Banques utilisées par les clients pour leurs virements — liste fermée demandée par le coach
+// (pas de saisie libre), partagée entre la fiche client et l'espace Facturation.
+const BANQUES_PAIEMENT = ['Qonto','Revolut','Crédit Agricole','Sumeria'];
+function _toggleFicheBanquePaiement(mode){
+  const wrap = document.getElementById('fBanquePaiementWrap');
+  if (wrap) wrap.style.display = mode === 'virement' ? '' : 'none';
+}
 function _ficheMoisCourantKey(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -6188,6 +6202,29 @@ async function _chargerRelancesPaiement(){
     _facturationRelances = map;
   } catch(e) { _facturationRelances = {}; }
   if (state.nav === 'facturation') renderMain();
+}
+
+// Édition directe jour/mode/banque depuis le tableau Facturation — même PATCH que le reste
+// de l'app (client_profils?client_id=eq.), single source of truth : met à jour data.clients
+// ET ficheData.profil si la fiche de ce client est déjà en mémoire, pour ne jamais désynchroniser
+// l'espace Facturation et la fiche client.
+async function _facturationSauverChamp(clientId, champ, valeur){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, {
+      method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ [champ]: valeur })
+    });
+    const c = data.clients && data.clients.find(x => x.id === clientId);
+    if (c) c[champ] = valeur;
+    if (ficheData.profil && state.selected === clientId) ficheData.profil[champ] = valeur;
+    if (state.nav === 'facturation') renderMain();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// Changer le mode de paiement peut rendre la banque non pertinente (ex: passage à espèces) —
+// on l'efface alors pour ne pas laisser une banque affichée sur un mode qui n'en a pas besoin.
+async function _facturationChangerMode(clientId, mode){
+  await _facturationSauverChamp(clientId, 'mode_paiement', mode || null);
+  if (mode !== 'virement') await _facturationSauverChamp(clientId, 'banque_paiement', null);
 }
 
 // Statut de facturation d'un client pour le mois en cours — même distinction que demandée par
@@ -6266,13 +6303,28 @@ function renderFacturationPage(el){
         </div>
       </div>
       ${filtered.length ? `<div class="table-scroll"><table class="clients">
-        <thead><tr><th style="width:32px;"></th><th>Client</th><th>Jour</th><th>Mode</th><th>Statut</th><th>Dernière relance</th><th></th></tr></thead>
+        <thead><tr><th style="width:32px;"></th><th>Client</th><th>Jour</th><th>Mode</th><th>Banque</th><th>Statut</th><th>Dernière relance</th><th></th></tr></thead>
         <tbody>${filtered.map(c => `
           <tr>
             <td onclick="event.stopPropagation();"><input type="checkbox" ${_facturationSel.has(c.id)?'checked':''} onchange="_facturationToggleSel('${c.id}')"></td>
             <td style="cursor:pointer;" onclick="openPanel('${c.id}')"><div class="cell-name"><div class="mini-avatar">${initials(c.nom)}</div>${esc(c.nom)}</div></td>
-            <td class="mono" style="color:var(--text-faint);">${c.jour_paiement ? `le ${c.jour_paiement}` : '—'}</td>
-            <td style="font-size:12px;color:var(--text-faint);">${c.mode_paiement ? {virement:'Virement',espece:'Espèces',gocardless:'GoCardless'}[c.mode_paiement] || c.mode_paiement : '—'}</td>
+            <td onclick="event.stopPropagation();">
+              <input type="number" min="1" max="31" value="${c.jour_paiement||''}" placeholder="—" style="width:52px;font-size:12px;padding:4px 6px;" onchange="_facturationSauverChamp('${c.id}','jour_paiement', this.value?parseInt(this.value):null)">
+            </td>
+            <td onclick="event.stopPropagation();">
+              <select style="font-size:12px;padding:4px 6px;" onchange="_facturationChangerMode('${c.id}', this.value)">
+                <option value="">—</option>
+                <option value="virement" ${c.mode_paiement==='virement'?'selected':''}>Virement</option>
+                <option value="espece" ${c.mode_paiement==='espece'?'selected':''}>Espèces</option>
+                <option value="gocardless" ${c.mode_paiement==='gocardless'?'selected':''}>GoCardless</option>
+              </select>
+            </td>
+            <td onclick="event.stopPropagation();">
+              <select style="font-size:12px;padding:4px 6px;" ${c.mode_paiement!=='virement'?'disabled':''} onchange="_facturationSauverChamp('${c.id}','banque_paiement', this.value||null)">
+                <option value="">—</option>
+                ${BANQUES_PAIEMENT.map(b => `<option value="${esc(b)}" ${c.banque_paiement===b?'selected':''}>${esc(b)}</option>`).join('')}
+              </select>
+            </td>
             <td><span class="chip ${_FACTURATION_STATUT_INFO[c._statut].chip}"><span class="dot"></span>${_FACTURATION_STATUT_INFO[c._statut].label}</span></td>
             <td style="font-size:11px;color:var(--text-faint);">${_facturationRelances === null ? '…' : (_facturationRelances[c.id] ? _fmtNotifDate(_facturationRelances[c.id]) : '—')}</td>
             <td class="row-actions" onclick="event.stopPropagation();" style="white-space:nowrap;">
@@ -7873,6 +7925,7 @@ async function sauvegarderFicheSandbox(clientId){
     cardio_consigne: document.getElementById('fCardioConsigne').value.trim() || null,
     jour_paiement: parseInt(document.getElementById('fJourPaiement').value) || null,
     mode_paiement: document.getElementById('fModePaiement').value || null,
+    banque_paiement: document.getElementById('fBanquePaiement')?.value || null,
     updated_at: new Date().toISOString(),
   };
   try {
@@ -7884,6 +7937,14 @@ async function sauvegarderFicheSandbox(clientId){
       throw new Error('supabase_'+res.status+(errBody?' — '+errBody.slice(0,300):''));
     }
     ficheData.profil = (await res.json())[0];
+    // Synchronise les champs facturation dans data.clients (pas de rechargement complet) —
+    // sinon l'espace Facturation resterait périmé tant que la console n'est pas rafraîchie.
+    const cSync = data.clients && data.clients.find(x => x.id === clientId);
+    if (cSync) {
+      cSync.jour_paiement = ficheData.profil.jour_paiement || null;
+      cSync.mode_paiement = ficheData.profil.mode_paiement || null;
+      cSync.banque_paiement = ficheData.profil.banque_paiement || null;
+    }
     if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
   } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
 }
