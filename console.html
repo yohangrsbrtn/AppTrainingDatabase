@@ -2384,7 +2384,9 @@ function _renderBilansTabContent() {
 // (jour_bilan à midi) — ne pas confondre avec le statut "En retard" des clients dans la liste
 // Clients, qui lui désigne un bilan jamais envoyé du tout (_supaCalculerRetard).
 function _badgeEnvoiRetard(b, jourBilanNom) {
-  return _bilanEnvoiEnRetard(b, jourBilanNom) ? `<span class="chip off" style="color:var(--critical);border-color:var(--critical);" title="Envoyé après la deadline (jour de bilan à midi)">⏰ Envoyé en retard</span>` : '';
+  let enRetard = false;
+  try { enRetard = _bilanEnvoiEnRetard(b, jourBilanNom); } catch(e) { console.error('_badgeEnvoiRetard:', e); }
+  return enRetard ? `<span class="chip off" style="color:var(--critical);border-color:var(--critical);" title="Envoyé après la deadline (jour de bilan à midi)">⏰ Envoyé en retard</span>` : '';
 }
 
 function _renderBilansEnAttente() {
@@ -2602,6 +2604,11 @@ function renderBilanDetailPage(el) {
     return;
   }
 
+  // Toute la construction du détail est protégée : si quoi que ce soit lève ici (donnée
+  // inattendue sur un vieux bilan/orphelin), on affiche un message d'erreur récupérable plutôt
+  // que de laisser el.innerHTML intact (symptôme vécu : clic sans effet visible, state.nav déjà
+  // basculé sur 'bilan-detail' en coulisses, page qui semble "figée" jusqu'au rechargement).
+  try {
   const d = bilanDetailState.data || {};
   const repas = d.repas || [];
   const dateValidation = d.dateValidation || '';
@@ -2699,7 +2706,7 @@ function renderBilanDetailPage(el) {
             <td style="font-size:12px;">${avgPoids} kg</td>
             <td style="font-size:12px;">${avgEau?avgEau+' L':'—'}</td>
             <td style="font-size:12px;">${joursOkDiete}/7</td>
-            <td style="font-size:12px;">${totalSteps>0?totalSteps.toLocaleString('fr-FR')+' total':'—'}</td>
+            <td style="font-size:12px;">${avgSteps>0?avgSteps.toLocaleString('fr-FR')+' moy.':'—'}</td>
             <td style="font-size:12px;">${joursOkTraining}/7</td>
             <td style="font-size:12px;">${joursOkCardio}/7</td>
           </tr>`:''}
@@ -2743,7 +2750,7 @@ function renderBilanDetailPage(el) {
       </div>
     </div>`:''}
 
-    ${bilanDetailState._supabaseBilanId && bornes ? (() => {
+    ${bilanDetailState._supabaseBilanId && bornes ? (() => { try {
       if (bilanDetailState.mensurations === null) return `<div class="table-card" style="margin-bottom:16px;"><div class="table-toolbar"><div class="title">Mensurations</div></div><div style="padding:14px 20px;color:var(--text-faint);font-size:12px;">Chargement…</div></div>`;
       // Semaine du bilan + 4 semaines précédentes (comparaison directe demandée par le coach) —
       // bornes de la fenêtre étendue calculées à partir de bornes.debut, jamais date_validation
@@ -2765,9 +2772,9 @@ function renderBilanDetailPage(el) {
           </tr>`).join('')}</tbody>
         </table></div>
       </div>`;
-    })() : ''}
+    } catch(e) { console.error('Erreur rendu mensurations bilan-detail:', e); return ''; } })() : ''}
 
-    ${bilanDetailState._supabaseBilanId ? (() => {
+    ${bilanDetailState._supabaseBilanId ? (() => { try {
       const mProche = _mensurationLaPlusProche(bilanDetailState.dateIso, bilanDetailState.mensurations);
       // Photos prises depuis une mensuration mais tombant dans la semaine de CE bilan (bornes,
       // calculées plus haut) — remontées ici en plus des photos propres au bilan, avec un badge
@@ -2806,7 +2813,11 @@ function renderBilanDetailPage(el) {
               </div>`}
         </div>
       </div>`;
-    })() : ''}`;
+    } catch(e) { console.error('Erreur rendu photos bilan-detail:', e); return ''; } })() : ''}`;
+  } catch(e) {
+    console.error('Erreur rendu détail bilan:', e);
+    el.innerHTML = `${backHtml}${quickNavHtml}<div style="color:var(--critical);padding:24px;">Erreur d'affichage de ce bilan : ${esc(e.message)}<br><small>Détails dans la console navigateur (F12).</small></div>`;
+  }
 }
 
 let _bilanDetailPhotosUploading = false;
@@ -5279,29 +5290,37 @@ function renderFicheBilansTab(c){
   const allSelected = _ficheBilans.length > 0 && _ficheBilans.every(b => _ficheBilansSel.has(b.id));
   const selCount = _ficheBilansSel.size;
   const _periodeLabels = _bilanPeriodeLabelsList(_ficheBilans, c.jour_bilan);
+  // Une ligne dont le calcul (bornes/mensurations/photos liées) échoue ne doit JAMAIS faire
+  // planter tout le tableau — sinon aucun bilan de ce client (même ceux avant la ligne fautive)
+  // ne serait cliquable puisque .map() lève avant que `rows` soit construit. Chaque ligne est
+  // donc calculée indépendamment ; en cas d'erreur elle reste affichée et cliquable, juste sans
+  // les colonnes enrichies (📷/mensurations/badge retard).
   const rows = _ficheBilans.map((b, idx) => {
     const dateRaw = b.date_validation || '';
     const dateFr = dateRaw ? dateRaw.split('-').reverse().join('/') : '—';
     const periode = _periodeLabels[idx];
-    const traite = b.coach_traite;
-    // Un bilan non-envoyé n'est le bilan "En cours" que si sa propre semaine n'est pas
-    // encore terminée (cf. _supaGetOrCreateBilanCourant, bilan.js) — sinon c'est un ancien
-    // bilan resté non rempli/non envoyé, orphelin, remplacé depuis par un nouveau "en cours" :
-    // l'afficher comme "En cours" était trompeur (deux bilans "En cours" en même temps).
-    const stillCurrent = b.created_at && new Date() <= _bilanDeadline(c.jour_bilan, new Date(b.created_at));
-    const chip = (b.envoye_coach
-      ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
-      : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`))
-      + ' ' + _badgeEnvoiRetard(b, c.jour_bilan);
+    let chip = '', aPhoto = false, mensLiees = [];
+    try {
+      const traite = b.coach_traite;
+      // Un bilan non-envoyé n'est le bilan "En cours" que si sa propre semaine n'est pas
+      // encore terminée (cf. _supaGetOrCreateBilanCourant, bilan.js) — sinon c'est un ancien
+      // bilan resté non rempli/non envoyé, orphelin, remplacé depuis par un nouveau "en cours" :
+      // l'afficher comme "En cours" était trompeur (deux bilans "En cours" en même temps).
+      const stillCurrent = b.created_at && new Date() <= _bilanDeadline(c.jour_bilan, new Date(b.created_at));
+      chip = (b.envoye_coach
+        ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
+        : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`))
+        + ' ' + _badgeEnvoiRetard(b, c.jour_bilan);
+      const bornesLigne = _bilanDetailBornes(b.date_validation, b.created_at, c.jour_bilan, b.envoye_coach);
+      const bornesLigneGrace = _bilanBornesAvecGraceMens(bornesLigne);
+      mensLiees = _mensurationsDansPeriode(bornesLigneGrace, _ficheBilansMensurations || []);
+      // 📷 : photo propre au bilan OU photo d'une mensuration liée (même fenêtre avec grâce
+      // jour_bilan+1, cf. _bilanBornesAvecGraceMens) — cohérent avec la carte Photos du détail.
+      aPhoto = (_ficheBilanPhotosGallery || []).some(p =>
+        (p._source === 'bilan' && p.bilan_id === b.id) ||
+        (p._source === 'mensuration' && mensLiees.some(m => m.id === p.mensuration_id)));
+    } catch(e) { console.error('Erreur ligne bilan', b.id, e); }
     const checked = _ficheBilansSel.has(b.id);
-    const bornesLigne = _bilanDetailBornes(b.date_validation, b.created_at, c.jour_bilan, b.envoye_coach);
-    const bornesLigneGrace = _bilanBornesAvecGraceMens(bornesLigne);
-    const mensLiees = _mensurationsDansPeriode(bornesLigneGrace, _ficheBilansMensurations || []);
-    // 📷 : photo propre au bilan OU photo d'une mensuration liée (même fenêtre avec grâce
-    // jour_bilan+1, cf. _bilanBornesAvecGraceMens) — cohérent avec la carte Photos du détail.
-    const aPhoto = (_ficheBilanPhotosGallery || []).some(p =>
-      (p._source === 'bilan' && p.bilan_id === b.id) ||
-      (p._source === 'mensuration' && mensLiees.some(m => m.id === p.mensuration_id)));
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td style="width:32px;text-align:center;" onclick="event.stopPropagation();">
         <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanSel(${b.id}, this.checked)">
