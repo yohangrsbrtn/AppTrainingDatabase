@@ -466,7 +466,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=9"></script>
+<script src="api.js?v=10"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -2252,6 +2252,7 @@ function openBilanDetailSupabase(bilan) {
       dateValidation: dateFr,
       createdAt: bilan.created_at || null,
       envoyeCoach: !!bilan.envoye_coach,
+      envoyeAt: bilan.envoye_at || null,
       semaineLabel: bilan.semaine_label || '',
       jours: bilan.jours || [],
       repas: bilan.repas_eval || [],
@@ -2379,6 +2380,13 @@ function _renderBilansTabContent() {
   return bilansTab === 'recents' ? _renderBilansRecents() : bilansTab === 'attente' ? _renderBilansEnAttente() : _renderBilansHistorique();
 }
 
+// Badge distinct de "À traiter"/"Traité" pour un bilan qui A ÉTÉ envoyé mais après sa deadline
+// (jour_bilan à midi) — ne pas confondre avec le statut "En retard" des clients dans la liste
+// Clients, qui lui désigne un bilan jamais envoyé du tout (_supaCalculerRetard).
+function _badgeEnvoiRetard(b, jourBilanNom) {
+  return _bilanEnvoiEnRetard(b, jourBilanNom) ? `<span class="chip off" style="color:var(--critical);border-color:var(--critical);" title="Envoyé après la deadline (jour de bilan à midi)">⏰ Envoyé en retard</span>` : '';
+}
+
 function _renderBilansEnAttente() {
   const list = _bilansEnAttenteListe();
   const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
@@ -2416,6 +2424,7 @@ function _renderBilansRecents() {
   }).sort((a,b) => ((b.coach_traite_at||b.date_validation||b.created_at||'')).localeCompare(a.coach_traite_at||a.date_validation||a.created_at||''));
 
   const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
+  const jbOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.jour_bilan : null; };
   const dateFrOf = b => {
     const iso = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : '');
     return iso ? iso.split('-').reverse().join('/') : '—';
@@ -2426,7 +2435,7 @@ function _renderBilansRecents() {
       <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
       <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine_label||'')}</td>
       <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
-      <td>${b.coach_traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`}</td>
+      <td>${b.coach_traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`} ${_badgeEnvoiRetard(b, jbOf(b.client_id))}</td>
       <td class="row-actions" onclick="event.stopPropagation();">${showBtn ? `<button class="btn" onclick="marquerBilanSupaTraite(${b.id})">Marquer traité</button>` : ''}</td>
     </tr>`;
   // Pas de colonne "Statut" ici : tout ce qui apparaît dans cette table est par
@@ -2435,7 +2444,7 @@ function _renderBilansRecents() {
   const rowHtmlTraite = b => `
     <tr style="cursor:pointer;" onclick="openBilanByIdFromRecents(${b.id})">
       <td><div class="cell-name"><div class="mini-avatar">${initials(nomOf(b.client_id))}</div>${esc(nomOf(b.client_id))}</div></td>
-      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine_label||'')}</td>
+      <td style="color:var(--text-faint);font-size:12px;">${esc(b.semaine_label||'')} ${_badgeEnvoiRetard(b, jbOf(b.client_id))}</td>
       <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateFrOf(b)}</td>
       <td class="mono" style="color:var(--text-faint);font-size:12px;">${dateHeureFrOf(b.coach_traite_at)}</td>
     </tr>`;
@@ -2503,7 +2512,7 @@ function _renderBilansHistorique() {
     return `<tr style="cursor:pointer;" onclick="openBilanFromHistorique(${idx})">
       <td class="mono" style="font-size:12px;">${esc(_histoLabels[idx]||dateFr)}</td>
       <td class="mono" style="font-size:12px;color:var(--text-faint);">${dateFr}</td>
-      <td>${h.coach_traite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(h.envoye_coach?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)}</td>
+      <td>${h.coach_traite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:(h.envoye_coach?`<span class="chip late"><span class="dot"></span>À traiter</span>`:`<span class="chip off">Non envoyé</span>`)} ${_badgeEnvoiRetard(h, c ? c.jour_bilan : null)}</td>
       <td style="color:var(--text-faint);font-size:18px;text-align:right;padding-right:16px;">›</td>
     </tr>`;
   }).join('');
@@ -2643,6 +2652,7 @@ function renderBilanDetailPage(el) {
         <div class="fiche-hero-meta">
           <span class="chip off">${weekRange || _semaineFromDate(dateValidation)}</span>
           ${bilanDetailState.coachTraite?`<span class="chip ok"><span class="dot"></span>Traité</span>`:bilanDetailState.enAttente?`<span class="chip off"><span class="dot"></span>En attente</span>`:`<span class="chip late"><span class="dot"></span>À traiter</span>`}
+          ${_badgeEnvoiRetard({ envoye_coach: d.envoyeCoach, created_at: d.createdAt, envoye_at: d.envoyeAt, date_validation: bilanDetailState.dateIso }, c ? c.jour_bilan : null)}
           ${bilanDetailState.objectifs && (bilanDetailState.objectifs.steps_cible || bilanDetailState.objectifs.seances_cible) ? `<span class="chip off" title="Objectifs assignés par le coach">🎯 ${[
             bilanDetailState.objectifs.steps_cible ? bilanDetailState.objectifs.steps_cible.toLocaleString('fr-FR')+' pas/j' : null,
             bilanDetailState.objectifs.seances_cible ? bilanDetailState.objectifs.seances_cible+' séances/sem' : null,
@@ -4407,7 +4417,7 @@ function renderDashboard(el){
     // "envoyé avant le jour_bilan" que l'ancienne version dv-6j ratait — ex: Hugo Saubusse,
     // jour_bilan=Dimanche, envoyé le samedi : "26 Juil→1 Août" au lieu de "27 Juil→2 Août").
     const labelFrais = _bilanPeriodeLabel(b, c ? c.jour_bilan : null);
-    return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id, semaine_label: labelFrais || b.semaine_label };
+    return { ...b, _supa:true, clientNom: c ? c.nom : b.client_id, semaine_label: labelFrais || b.semaine_label, _envoiRetard: _bilanEnvoiEnRetard(b, c ? c.jour_bilan : null) };
   });
   const bilansEnRetard = data.clients.filter(c=>c.enRetard);
 
@@ -4448,7 +4458,7 @@ function renderDashboard(el){
           ${bilansSupaATrait.map(b => `
             <div class="card-list-row" onclick="ouvrirBilanDashboard(${b.id})">
               <div class="mini-avatar">${initials(b.clientNom)}</div>
-              <div><div class="t">${esc(b.clientNom)}</div><div class="s">${esc(b.semaine_label||'Supabase')} · clic pour voir le bilan</div></div>
+              <div><div class="t">${esc(b.clientNom)}${b._envoiRetard?' <span style="color:var(--critical);font-size:10px;font-weight:700;" title="Envoyé après la deadline (jour de bilan à midi)">⏰ retard</span>':''}</div><div class="s">${esc(b.semaine_label||'Supabase')} · clic pour voir le bilan</div></div>
               <button class="btn" style="font-size:10px;padding:3px 8px;" onclick="event.stopPropagation();marquerBilanSupaTraite(${b.id})">✓ Traité</button>
             </div>`).join('')}
           ${bilansATraiter.map(b => `
@@ -5279,9 +5289,10 @@ function renderFicheBilansTab(c){
     // bilan resté non rempli/non envoyé, orphelin, remplacé depuis par un nouveau "en cours" :
     // l'afficher comme "En cours" était trompeur (deux bilans "En cours" en même temps).
     const stillCurrent = b.created_at && new Date() <= _bilanDeadline(c.jour_bilan, new Date(b.created_at));
-    const chip = b.envoye_coach
+    const chip = (b.envoye_coach
       ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
-      : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`);
+      : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`))
+      + ' ' + _badgeEnvoiRetard(b, c.jour_bilan);
     const checked = _ficheBilansSel.has(b.id);
     const bornesLigne = _bilanDetailBornes(b.date_validation, b.created_at, c.jour_bilan, b.envoye_coach);
     const bornesLigneGrace = _bilanBornesAvecGraceMens(bornesLigne);

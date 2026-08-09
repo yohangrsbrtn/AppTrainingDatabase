@@ -103,6 +103,16 @@ function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
   return new Date(envoyeAtStr) <= limite;
 }
 
+// Un bilan ENVOYÉ (envoye_coach=true) mais envoyé après sa propre deadline (jour_bilan à midi) —
+// distinct de "en retard" au sens habituel du mot dans la console (qui désigne un bilan pas
+// encore envoyé du tout, cf. _supaCalculerRetard). Même source de vérité que le bonus XP
+// (_bilanEstPonctuel) pour ne jamais désynchroniser les deux notions de ponctualité.
+function _bilanEnvoiEnRetard(b, jourBilanNom) {
+  if (!b || !b.envoye_coach) return false;
+  const envoyeAt = b.envoye_at || (b.date_validation ? b.date_validation + 'T12:00:00' : null);
+  return !_bilanEstPonctuel(b.created_at, envoyeAt, jourBilanNom);
+}
+
 // ── Protocole chimie — moteur de calcul partagé coach (console.html) +
 // client (protocole.js), même logique que le générateur Google Sheets
 // (genererProtocole/genererPlanning) : totaux du cycle par molécule +
