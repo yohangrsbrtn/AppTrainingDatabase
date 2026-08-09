@@ -588,7 +588,7 @@ const NAV = [
 ];
 
 let state = { nav:"dashboard", search:"", sortKey:"nom", sortDir:1, statusFilter:"all", clientTab:"actif", selected:null, progLogsId:null };
-let data = { clients:[], bilansCoach:[], bilansSupa:[], logs:[], aValider:[] };
+let data = { clients:[], bilansCoach:[], bilansAll:[], logs:[], aValider:[] };
 let _dataRefreshing = false;
 let ficheData = { loaded:false, profil:null, tous_programmes:[], programme:null, tous_dietes:[], diete:null, progression:null, notes:null };
 let ficheTab = 'profil'; // 'profil' | 'programmes' | 'diete' | 'progression' | 'notes' | 'bilans'
@@ -1405,19 +1405,6 @@ async function chargerDonnees(){
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?order=created_at.desc&limit=500`, { headers: supaHeaders() });
     if (res.ok) bilansAll = await res.json();
   } catch(e) {}
-  // Trié par date d'ENVOI réelle (envoye_at), pas par date de création de la
-  // semaine du bilan (created_at) — sinon un bilan tout juste envoyé reste
-  // noyé au milieu des bilans migrés en masse (created_at ancien, envoye_at
-  // absent) au lieu de remonter en tête de liste comme attendu. Fallback sur
-  // created_at pour les bilans migrés (envoye_at jamais renseigné côté GAS).
-  const bilansSupa = bilansAll.filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente)
-    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
-  // "En attente" : le coach a explicitement mis ce bilan de côté (info manquante, ex:
-  // mensurations) — sorti de "à traiter" tant qu'il n'est pas repassé "à traiter" ou
-  // marqué traité directement.
-  const bilansEnAttente = bilansAll.filter(b => b.envoye_coach && !b.coach_traite && b.en_attente)
-    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
-
   let aValiderRows = [];
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?valide=eq.false&order=created_at.desc`, { headers: supaHeaders() });
@@ -1428,8 +1415,11 @@ async function chargerDonnees(){
   const logs = await _chargerActiviteRecente(clientsById).catch(()=>[]);
 
   // bilansCoach (ancien format GAS ts/client/coachTraite) conservé vide pour compat —
-  // tout ce qui l'utilisait lit maintenant bilansAll/bilansSupa directement.
-  data = { clients, bilansCoach: [], bilansSupa, bilansEnAttente, bilansAll, logs, aValider };
+  // tout ce qui l'utilisait lit maintenant bilansAll directement.
+  // Pas de bilansSupa/bilansEnAttente stockés ici : voir _bilansATraiterListe/
+  // _bilansEnAttenteListe (calculés à la volée depuis bilansAll à chaque appel — une seule
+  // source de vérité, jamais désynchronisée après une action qui modifie bilansAll ailleurs).
+  data = { clients, bilansCoach: [], bilansAll, logs, aValider };
   // Persist pour stale-while-revalidate au prochain chargement
   try {
     localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data }));
@@ -1439,6 +1429,24 @@ async function chargerDonnees(){
       localStorage.setItem('at_console_cache_v2', JSON.stringify({ ts: Date.now(), data: { ...data, logs: data.logs.slice(0, 50), bilansAll: data.bilansAll.slice(0, 100) } }));
     } catch(e2) {}
   }
+}
+
+// Listes "à traiter"/"en attente" calculées à la volée depuis data.bilansAll — pas de copie
+// mise en cache à tenir synchronisée. Trié par date d'ENVOI réelle (envoye_at), pas par date
+// de création de la semaine (created_at) — sinon un bilan tout juste envoyé reste noyé au
+// milieu des bilans migrés en masse (created_at ancien, envoye_at absent) au lieu de remonter
+// en tête de liste. Fallback sur created_at pour les bilans migrés (envoye_at jamais renseigné
+// côté GAS).
+function _bilansATraiterListe(){
+  return (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente)
+    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
+}
+// "En attente" : le coach a explicitement mis ce bilan de côté (info manquante, ex:
+// mensurations) — sorti de "à traiter" tant qu'il n'est pas repassé "à traiter" ou marqué
+// traité directement.
+function _bilansEnAttenteListe(){
+  return (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && b.en_attente)
+    .sort((a,b)=>((b.envoye_at||b.created_at)||'').localeCompare((a.envoye_at||a.created_at)||''));
 }
 
 // Activité récente (dashboard) : événements réels (bilan envoyé, séance
@@ -2327,8 +2335,8 @@ function _bilanJoursAvecDates(joursArr, debut) {
 }
 
 function renderBilansPage(el) {
-  const pendingCount = (data.bilansAll||[]).filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente).length;
-  const attenteCount = (data.bilansEnAttente||[]).length;
+  const pendingCount = _bilansATraiterListe().length;
+  const attenteCount = _bilansEnAttenteListe().length;
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Bilans</h1></div>
@@ -2351,7 +2359,7 @@ function _renderBilansTabContent() {
 }
 
 function _renderBilansEnAttente() {
-  const list = data.bilansEnAttente || [];
+  const list = _bilansEnAttenteListe();
   const nomOf = clientId => { const c = data.clients.find(x=>x.id===clientId); return c ? c.nom : clientId; };
   const dateFrOf = b => {
     const iso = b.date_validation || (b.created_at ? b.created_at.slice(0,10) : '');
@@ -4351,7 +4359,7 @@ async function reparerDietesPartagees(){
 
 function renderDashboard(el){
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
-  const bilansSupaATrait = (data.bilansSupa || []).map(b => {
+  const bilansSupaATrait = _bilansATraiterListe().map(b => {
     const c = data.clients.find(x=>x.id===b.client_id);
     // semaine_label est figé à la création du bilan et peut être faux (bug vécu : bilan
     // validé le 2 août affichant "3 août → 9 août") — recalculé ici via _bilanPeriodeLabel
@@ -4423,15 +4431,17 @@ function renderDashboard(el){
         </div>` : `<div class="card-empty">${iCheckCircle()}Tous vos clients sont à jour.</div>`}
       </div>
       <div class="card">
-        <div class="card-head">${iClipboard()}<span class="t">Bilans en attente</span>${(data.bilansEnAttente||[]).length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${data.bilansEnAttente.length}</span>`:''}</div>
-        ${(data.bilansEnAttente||[]).length ? `<div class="card-list">
-          ${data.bilansEnAttente.map(b => { const c = data.clients.find(x=>x.id===b.client_id); const nom = c ? c.nom : b.client_id; return `
+        ${(() => { const enAttente = _bilansEnAttenteListe(); return `
+        <div class="card-head">${iClipboard()}<span class="t">Bilans en attente</span>${enAttente.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${enAttente.length}</span>`:''}</div>
+        ${enAttente.length ? `<div class="card-list">
+          ${enAttente.map(b => { const c = data.clients.find(x=>x.id===b.client_id); const nom = c ? c.nom : b.client_id; return `
             <div class="card-list-row" onclick="ouvrirBilanDashboard(${b.id})">
               <div class="mini-avatar">${initials(nom)}</div>
               <div><div class="t">${esc(nom)}</div><div class="s">${esc(_bilanPeriodeLabel(b, c ? c.jour_bilan : null) || b.semaine_label || '')} · en attente d'info</div></div>
               <button class="btn" style="font-size:10px;padding:3px 8px;" onclick="event.stopPropagation();toggleBilanEnAttente(${b.id}, false)">↩ À traiter</button>
             </div>`; }).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
+        `; })()}
       </div>
       <div class="card timeline-card" style="grid-row: span 2;">
         <div class="card-head">${iGrid()}<span class="t">Activité récente</span></div>
@@ -4527,7 +4537,6 @@ async function marquerBilanSupaTraite(bilanId) {
       method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ coach_traite: true, coach_traite_at: traiteAt })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    data.bilansSupa = (data.bilansSupa || []).filter(b => b.id !== bilanId);
     const ba = (data.bilansAll || []).find(b => b.id === bilanId);
     if (ba) { ba.coach_traite = true; ba.coach_traite_at = traiteAt; }
     if (state.nav === 'dashboard' || state.nav === 'bilans') renderMain();
@@ -4546,8 +4555,6 @@ async function toggleBilanEnAttente(bilanId, enAttente) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const ba = (data.bilansAll || []).find(b => b.id === bilanId);
     if (ba) ba.en_attente = enAttente;
-    data.bilansSupa = (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && !b.en_attente);
-    data.bilansEnAttente = (data.bilansAll || []).filter(b => b.envoye_coach && !b.coach_traite && b.en_attente);
     if (_ficheBilans) {
       const b = _ficheBilans.find(x => x.id === bilanId);
       if (b) b.en_attente = enAttente;
@@ -4840,6 +4847,7 @@ function renderFicheClientPage(el){
       <button class="fiche-tab ${ficheTab==='diete'?'active':''}" onclick="setFicheTab('diete')">Diète</button>
       <button class="fiche-tab ${ficheTab==='bilans'?'active':''}" onclick="setFicheTab('bilans')">Bilans</button>
       <button class="fiche-tab ${ficheTab==='mensurations'?'active':''}" onclick="setFicheTab('mensurations')">Mensurations</button>
+      <button class="fiche-tab ${ficheTab==='photos'?'active':''}" onclick="setFicheTab('photos')">Photos</button>
       ${c.chimieActifSupa ? `<button class="fiche-tab ${ficheTab==='protocole'?'active':''}" onclick="setFicheTab('protocole')">Protocole</button>` : ''}
       <button class="fiche-tab ${ficheTab==='roadmap'?'active':''}" onclick="setFicheTab('roadmap')">Roadmap</button>
       <button class="fiche-tab ${ficheTab==='notes'?'active':''}" onclick="setFicheTab('notes')">Suivi</button>
@@ -5115,9 +5123,75 @@ function renderFicheTabContent(c){
   if (ficheTab === 'notes')       return renderFicheSuiviTab(c);
   if (ficheTab === 'bilans')        return renderFicheBilansTab(c);
   if (ficheTab === 'mensurations')  return renderFicheMensurationsTab(c);
+  if (ficheTab === 'photos')        return renderFichePhotosTab(c);
   if (ficheTab === 'roadmap')       return renderFicheRoadmapTab(c);
   if (ficheTab === 'protocole')     return renderFicheProtocoleTab(c);
   return '';
+}
+
+// Charge (si besoin) la galerie photo unifiée (bilans + mensurations) + toutes les mensurations
+// du client — partagé entre l'onglet Bilans (galerie en tête de liste + rapprochement par
+// semaine) et l'onglet Photos dédié, pour ne charger qu'une seule fois peu importe l'ordre de
+// visite des deux onglets.
+function _assurerGaleriePhotos(c){
+  if (!c) return;
+  if (_ficheBilanPhotosClientId !== c.id) {
+    _ficheBilanPhotosClientId = c.id;
+    _ficheBilanPhotosGallery = null;
+    _ficheBilanPhotosSel = [];
+    _ficheBilansMensurations = null;
+  }
+  if (_ficheBilanPhotosGallery !== null) return;
+  // Galerie unifiée, toutes sources confondues (bilans + mensurations), triée par la
+  // vraie date représentée par la photo (date_validation du bilan / date de la
+  // mensuration) — PAS par date d'upload, pour une chronologie fidèle. _key
+  // (préfixe 'b'/'m' + id) évite toute collision entre les deux séquences d'id
+  // distinctes (bilan_photos.id et mensuration_photos.id ne sont pas liées). Charge aussi,
+  // en même temps, TOUTES les mensurations du client (pas juste celles avec photo) — sert
+  // au rapprochement bilan↔mensurations par plage de dates de la semaine (pas date exacte).
+  Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,mensurations(date)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(c.id)}&order=date.asc&select=id,date,poids,mesure,fessiers,cuisses,mollets,poitrine,epaules,bras`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+  ]).then(([bilanRows, mensRows, mensurations]) => {
+    const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _date: (p.bilans && p.bilans.date_validation) || null, _key: 'b' + p.id }));
+    const b = (Array.isArray(mensRows) ? mensRows : []).map(p => ({ ...p, _source: 'mensuration', _date: (p.mensurations && p.mensurations.date) || null, _key: 'm' + p.id }));
+    _ficheBilanPhotosGallery = [...a, ...b].sort((x, y) => {
+      if (!x._date && !y._date) return 0;
+      if (!x._date) return -1; // pas de date connue (bilan en cours non validé) : en tête
+      if (!y._date) return 1;
+      return y._date.localeCompare(x._date);
+    });
+    _ficheBilansMensurations = Array.isArray(mensurations) ? mensurations : [];
+    const el = document.getElementById('ficheTabContent');
+    if (el && (ficheTab === 'bilans' || ficheTab === 'photos')) el.innerHTML = renderFicheTabContent(c);
+  }).catch(() => { _ficheBilanPhotosGallery = []; _ficheBilansMensurations = []; });
+}
+
+// Onglet dédié "Photos" — même galerie unifiée que celle affichée en tête de l'onglet Bilans
+// (bilans + mensurations, triée par date réelle), présentée ici en grand format plein écran
+// plutôt qu'en bandeau compact — demandé en plus de la galerie déjà en place dans Bilans.
+function renderFichePhotosTab(c){
+  if (!c) return '';
+  _assurerGaleriePhotos(c);
+  if (_ficheBilanPhotosGallery === null) {
+    return `<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  }
+  if (!_ficheBilanPhotosGallery.length) {
+    return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune photo enregistrée (bilans ou mensurations) pour ce client.</p></div>`;
+  }
+  return `<div class="fiche-card">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;">
+      ${_ficheBilanPhotosGallery.map((p, idx) => `
+        <div style="width:130px;">
+          <div style="position:relative;width:130px;aspect-ratio:9/16;">
+            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,${idx})">
+            <span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 6px;border-radius:999px;">${p._source==='bilan'?'📋 Bilan':'📏 Mensuration'}</span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:4px;">${p._date ? new Date(p._date+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 function renderFicheBilansTab(c){
@@ -5131,38 +5205,7 @@ function renderFicheBilansTab(c){
     _ficheBilansCorbeille = null;
     _ficheBilansCorbeilleSel = new Set();
   }
-  if (_ficheBilanPhotosClientId !== c.id) {
-    _ficheBilanPhotosClientId = c.id;
-    _ficheBilanPhotosGallery = null;
-    _ficheBilanPhotosSel = [];
-    _ficheBilansMensurations = null;
-  }
-  if (_ficheBilanPhotosGallery === null) {
-    // Galerie unifiée, toutes sources confondues (bilans + mensurations), triée par la
-    // vraie date représentée par la photo (date_validation du bilan / date de la
-    // mensuration) — PAS par date d'upload, pour une chronologie fidèle. _key
-    // (préfixe 'b'/'m' + id) évite toute collision entre les deux séquences d'id
-    // distinctes (bilan_photos.id et mensuration_photos.id ne sont pas liées). Charge aussi,
-    // en même temps, TOUTES les mensurations du client (pas juste celles avec photo) — sert
-    // au rapprochement bilan↔mensurations par plage de dates de la semaine (pas date exacte).
-    Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
-      fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,mensurations(date)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
-      fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(c.id)}&order=date.asc&select=id,date,poids,mesure,fessiers,cuisses,mollets,poitrine,epaules,bras`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
-    ]).then(([bilanRows, mensRows, mensurations]) => {
-      const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _date: (p.bilans && p.bilans.date_validation) || null, _key: 'b' + p.id }));
-      const b = (Array.isArray(mensRows) ? mensRows : []).map(p => ({ ...p, _source: 'mensuration', _date: (p.mensurations && p.mensurations.date) || null, _key: 'm' + p.id }));
-      _ficheBilanPhotosGallery = [...a, ...b].sort((x, y) => {
-        if (!x._date && !y._date) return 0;
-        if (!x._date) return -1; // pas de date connue (bilan en cours non validé) : en tête
-        if (!y._date) return 1;
-        return y._date.localeCompare(x._date);
-      });
-      _ficheBilansMensurations = Array.isArray(mensurations) ? mensurations : [];
-      const el = document.getElementById('ficheTabContent');
-      if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
-    }).catch(() => { _ficheBilanPhotosGallery = []; _ficheBilansMensurations = []; });
-  }
+  _assurerGaleriePhotos(c);
   if (_ficheBilansVoirCorbeille) return _renderFicheBilansCorbeille(c);
   if (_ficheBilans === null) {
     if (!_ficheBilansLoading) {
