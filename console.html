@@ -8277,7 +8277,7 @@ async function supprimerDieteTemplate(id){
 // position, jamais requis par les appels déjà existants.
 function _dieteEnEdition(slot){ return slot ? _dieteCompare[slot] : dieteTplEnEdition; }
 function _slotSuffix(slot){ return slot ? '-'+slot : ''; }
-function _reRenderDieteEditeur(slot){ if (slot) renderMain(); else setNav('editeur-diete'); }
+function _reRenderDieteEditeur(slot){ _updateRepasBlocsDom(slot); }
 
 async function ouvrirEditeurDiete(id){
   _dietNavBack = 'dietes';
@@ -8333,11 +8333,11 @@ function _renderAlimListHtml(ri, slot) {
     </div>` : `<div id="repas-macros-${ri}${sfx}"></div>`}`;
 }
 
-function _updateAlimentsDom(ri, slot) {
+// Recalcul du bandeau de totaux (#ed-total-macros[-slot]) — factorisé, réutilisé par
+// _updateAlimentsDom (édition d'un aliment) ET _updateRepasBlocsDom (ajout/suppression/
+// duplication d'un repas entier) pour ne jamais dupliquer ce template.
+function _updateDieteTotalsDom(slot){
   const sfx = _slotSuffix(slot);
-  const el = document.getElementById(`alim-list-${ri}${sfx}`);
-  if (el) el.innerHTML = _renderAlimListHtml(ri, slot);
-  // Recalcul total
   const tpl = _dieteEnEdition(slot);
   const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
   const tot = document.getElementById(`ed-total-macros${sfx}`);
@@ -8346,6 +8346,24 @@ function _updateAlimentsDom(ri, slot) {
     <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.prot}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">prot</div></div>
     <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
     <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>` : '';
+}
+
+function _updateAlimentsDom(ri, slot) {
+  const sfx = _slotSuffix(slot);
+  const el = document.getElementById(`alim-list-${ri}${sfx}`);
+  if (el) el.innerHTML = _renderAlimListHtml(ri, slot);
+  _updateDieteTotalsDom(slot);
+}
+
+// Mise à jour partielle du bloc des repas (ajout/suppression/duplication en équivalence,
+// réordonnancement) — évite de repasser par setNav('editeur-diete')/renderMain(), qui
+// remplace tout #main et fait perdre la position de scroll (le coach devait redescendre
+// chercher le repas qu'il venait de modifier, cf. demande explicite du coach).
+function _updateRepasBlocsDom(slot){
+  const sfx = _slotSuffix(slot);
+  const el = document.getElementById(`ed-repas-blocs${sfx}`);
+  if (el) el.innerHTML = _renderDieteBlocsHtml(slot);
+  _updateDieteTotalsDom(slot);
 }
 
 function renderEditeurDiete() { setNav('editeur-diete'); }
@@ -8423,7 +8441,7 @@ function renderEditeurDietePage(el) {
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.glu}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">gluc</div></div>
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;">${totalM.lip}g</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">lip</div></div>` : ''}
       </div>
-      ${repasHtml}
+      <div id="ed-repas-blocs">${repasHtml}</div>
       <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px;" onclick="ajouterRepas()">+ Ajouter un repas</button>
       <div id="dErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:8px;"></div>
     </div>`;
@@ -8927,7 +8945,7 @@ function _dcColHtml(slot){
         </div>
       </div>
       <div style="padding:0 16px 24px;">
-        ${_renderDieteBlocsHtml(slot)}
+        <div id="ed-repas-blocs-${slot}">${_renderDieteBlocsHtml(slot)}</div>
         <button class="btn" style="width:100%;justify-content:center;" onclick="ajouterRepas('${slot}')">+ Ajouter un repas</button>
       </div>
     </div>`;
