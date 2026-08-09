@@ -737,15 +737,26 @@ async function _kcalTotalTemplate(templateId){
 // Texte auto "Nom diète : XXXX kcal" pour chaque diète active du client — utilisé
 // pour pré-remplir le champ Calories du suivi (une ou plusieurs diètes simultanées).
 async function _suiviCaloriesAuto(clientId){
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=nom`, { headers: supaHeaders() });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=nom,diete_template_id`, { headers: supaHeaders() });
   const dietes = res.ok ? await res.json() : [];
   if (!dietes.length) return '';
   const lignes = [];
   for (const d of dietes) {
-    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(d.nom)}&order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
-    const tpl = tplRes.ok ? await tplRes.json() : [];
-    if (!tpl.length) { lignes.push(`${d.nom} : —`); continue; }
-    lignes.push(`${d.nom} : ${await _kcalTotalTemplate(tpl[0].id)} kcal`);
+    // Résoudre par diete_template_id (lien fiable, posé à l'assignation) en priorité — le
+    // fallback par nom peut ramener un AUTRE template si plusieurs partagent le même nom
+    // générique (ex: "DIETE JOUR OFF TRAINING" créé pour plusieurs clients migrés le même
+    // jour), "le plus récent gagne" n'étant alors pas forcément celui de CE client (bug vécu :
+    // Perrine Ayot, 1946 kcal réels affichés à 2782 kcal, doublon créé 6 min plus tard pour
+    // un autre client). Fallback par nom uniquement pour les diètes assignées avant l'ajout
+    // de cette colonne (diete_template_id absent).
+    let tplId = d.diete_template_id || null;
+    if (!tplId) {
+      const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(d.nom)}&order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+      const tpl = tplRes.ok ? await tplRes.json() : [];
+      tplId = tpl[0] && tpl[0].id;
+    }
+    if (!tplId) { lignes.push(`${d.nom} : —`); continue; }
+    lignes.push(`${d.nom} : ${await _kcalTotalTemplate(tplId)} kcal`);
   }
   return lignes.join('\n');
 }
