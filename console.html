@@ -8671,6 +8671,18 @@ function _updateRepasBlocsDom(slot){
   const el = document.getElementById(`ed-repas-blocs${sfx}`);
   if (el) el.innerHTML = _renderDieteBlocsHtml(slot);
   _updateDieteTotalsDom(slot);
+  _dieteAutoGrowComments();
+}
+
+// Donne leur hauteur initiale aux textarea de commentaire déjà remplis (sinon ils restent à
+// min-height jusqu'au premier caractère tapé) — appelé après chaque (re)render de l'éditeur
+// diète (classique et mode "Comparer 2 diètes") et à chaque mise à jour partielle du bloc repas.
+function _dieteAutoGrowComments(){
+  setTimeout(() => {
+    document.querySelectorAll('[data-repas-comment]').forEach(rmAutoGrow);
+    const dDesc = document.getElementById('dDesc');
+    if (dDesc) rmAutoGrow(dDesc);
+  }, 0);
 }
 
 function renderEditeurDiete() { setNav('editeur-diete'); }
@@ -8708,7 +8720,7 @@ function _renderDieteBlocsHtml(slot){
           <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
         </div>
         <div style="padding:2px 14px 6px;">
-          <input type="text" value="${esc(r.commentaire||'')}" placeholder="💬 Commentaire pour le client (ex: ajouter de la levure)" oninput="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].commentaire=this.value" style="width:100%;background:transparent;border:1px dashed var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-muted);font-size:12px;font-family:inherit;box-sizing:border-box;">
+          <textarea rows="1" data-repas-comment placeholder="💬 Commentaire pour le client (ex: ajouter de la levure)" oninput="rmAutoGrow(this);_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].commentaire=this.value" style="width:100%;background:transparent;border:1px dashed var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-muted);font-size:12px;font-family:inherit;box-sizing:border-box;resize:none;overflow:hidden;min-height:30px;">${esc(r.commentaire||'')}</textarea>
         </div>
         <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
         <div style="padding:8px 14px;">
@@ -8746,7 +8758,7 @@ function renderEditeurDietePage(el) {
     </div>
     <div style="max-width:720px;padding:20px 24px;">
       <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
-      <div class="field-row"><label>Commentaire (visible par le client)</label><input id="dDesc" type="text" value="${esc(tpl.description||'')}" placeholder="ex: à suivre pendant la sèche, bien s'hydrater…"></div>
+      <div class="field-row"><label>Commentaire (visible par le client)</label><textarea id="dDesc" rows="1" oninput="rmAutoGrow(this)" placeholder="ex: à suivre pendant la sèche, bien s'hydrater…" style="resize:none;overflow:hidden;min-height:38px;">${esc(tpl.description||'')}</textarea></div>
       ${isClient ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" ${!_ficheCreateClientId?'':'checked'}> Enregistrer comme template réutilisable</label>` : ''}
       <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;position:sticky;z-index:9;box-shadow:0 8px 12px -6px rgba(0,0,0,.35);${totalM.kcal?'':'display:none;'}">
         ${totalM.kcal ? `
@@ -8767,6 +8779,7 @@ function renderEditeurDietePage(el) {
     const bar = document.getElementById('ed-total-macros');
     if (toolbar && bar) bar.style.top = toolbar.offsetHeight + 'px';
   }, 0);
+  _dieteAutoGrowComments();
 }
 
 function retourDepuisEditeurDiete() {
@@ -9310,6 +9323,7 @@ function renderEditeurDieteComparePage(el){
     const row = document.getElementById('dc-cols-row');
     if (toolbar && row) row.style.height = `calc(100vh - ${toolbar.getBoundingClientRect().bottom}px)`;
   }, 0);
+  _dieteAutoGrowComments();
 }
 
 function retourDepuisEditeurDieteCompare(){

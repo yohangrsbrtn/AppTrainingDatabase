@@ -544,7 +544,7 @@ function renderDieteDetail() {
         <div style="font-size:15px;font-weight:600;">${esc(r.nom)}</div>
         ${hasOpts ? `<div id="dDots_${idx}" style="font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;">1 / ${options.length}</div>` : ''}
       </div>
-      ${r.commentaire ? `<div id="dCommentaire_${idx}" style="font-size:12.5px;color:var(--accent);background:rgba(79,110,247,.12);border-radius:10px;padding:6px 10px;margin-bottom:10px;">💬 ${esc(r.commentaire)}</div>` : ''}`;
+      ${r.commentaire ? `<div id="dCommentaire_${idx}" style="font-size:12.5px;color:var(--accent);background:rgba(79,110,247,.12);border-radius:10px;padding:6px 10px;margin-bottom:10px;white-space:pre-wrap;">💬 ${esc(r.commentaire)}</div>` : ''}`;
 
     if (hasOpts) {
       repasHtml += `<div id="dSlider_${idx}" style="display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;">`;
@@ -597,7 +597,7 @@ function renderDieteDetail() {
     </div>
     <div class="page">
       <button class="btn-secondary" onclick="_dSubPage='list';setPage('diete')" style="margin-bottom:12px;">← Retour</button>
-      ${data.commentaire ? `<div class="card" style="background:rgba(79,110,247,.12);margin-bottom:12px;"><div style="font-size:13px;color:var(--accent);">💬 ${esc(data.commentaire)}</div></div>` : ''}
+      ${data.commentaire ? `<div class="card" style="background:rgba(79,110,247,.12);margin-bottom:12px;"><div style="font-size:13px;color:var(--accent);white-space:pre-wrap;">💬 ${esc(data.commentaire)}</div></div>` : ''}
       ${repasHtml}
     </div>
     ${renderNavBar('diete')}
