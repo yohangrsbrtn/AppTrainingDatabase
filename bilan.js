@@ -843,7 +843,7 @@ async function _supprimerBilanPhotoClient(photoId, url) {
 async function _doEnvoyerBilanSupa(btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
   try {
-    _ouvrirRecapBilanSupa();
+    await _ouvrirRecapBilanSupa();
     if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = '📤 Envoyer au coach'; }
@@ -851,9 +851,22 @@ async function _doEnvoyerBilanSupa(btn) {
   }
 }
 
-function _ouvrirRecapBilanSupa() {
+// Aucune mensuration saisie à la date d'envoi (poids/mesures manquants ce jour-là) — signalé
+// au client AVANT l'envoi (même esprit que le retard/notes manquantes ci-dessous), pour ne pas
+// que le coach découvre après coup un bilan sans aucune donnée de mensuration associée.
+async function _bilanMensurationDuJourManquante(clientId) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=eq.${today}&select=id&limit=1`, { headers: supaHeaders() });
+    const arr = res.ok ? await res.json() : [];
+    return arr.length === 0;
+  } catch(e) { return false; }
+}
+
+async function _ouvrirRecapBilanSupa() {
   const data = _bilanData;
   if (!data) { _validerEtEnvoyerSupa(); return; }
+  const mensurationManquante = await _bilanMensurationDuJourManquante(getClient());
 
   let joursOk = 0, joursTraining = 0, totalSteps = 0;
   (data.jours || []).forEach(j => {
@@ -883,6 +896,9 @@ function _ouvrirRecapBilanSupa() {
   const retardWarn = enRetard
     ? `<div style="background:#3a1414;border:1px solid #e05555;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#ff8a8a;text-align:left;">⏰ Bilan envoyé après le jour assigné (${esc(_bilanJourBilanNom || '')}) — le bonus ponctualité ne sera pas accordé cette semaine.</div>`
     : '';
+  const mensurationWarn = mensurationManquante
+    ? `<div style="background:#332200;border:1px solid #f0a500;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#f0c040;text-align:left;">⚠️ Aucune mensuration remplie à cette date. Renseigne tes mensurations avant d'envoyer ton bilan.</div>`
+    : '';
 
   const modal = document.createElement('div');
   modal.id = 'recap-bilan-modal';
@@ -892,6 +908,7 @@ function _ouvrirRecapBilanSupa() {
     <div style="font-size:12px;color:#8892a4;margin-bottom:16px;">${esc(data.semaineLabel || '')}</div>
     <div style="background:#0f1117;border-radius:12px;padding:4px 14px;margin-bottom:10px;">${statsHtml}</div>
     ${retardWarn}
+    ${mensurationWarn}
     ${noteWarn}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:#2d3142;margin:0;padding:12px;font-size:14px;border:none;border-radius:10px;color:#e8eaf0;cursor:pointer;">Modifier</button>
