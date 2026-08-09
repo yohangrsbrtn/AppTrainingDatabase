@@ -8384,7 +8384,11 @@ function _renderDieteBlocsHtml(slot){
   const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
 
   return ordres.map((ordre, gi) => {
-    const variants = grouped[ordre];
+    // Le standard (variante_index=0) toujours en tête, puis les équivalents dans leur
+    // ordre — sinon un repas promu standard après suppression du standard d'origine (cf.
+    // supprimerRepas) resterait affiché à sa position d'insertion d'origine, potentiellement
+    // après un autre équivalent encore marqué "≡ ÉQUIVALENT", ce qui serait déroutant.
+    const variants = grouped[ordre].slice().sort((a,b) => (a.variante_index||0)-(b.variante_index||0));
     const blocksHtml = variants.map(r => {
       const ri = r._ri;
       const isVariante = (r.variante_index||0) > 0;
@@ -8496,8 +8500,23 @@ function dupliquerRepas(ri, slot){
   _reRenderDieteEditeur(slot);
 }
 
+// Supprimer le repas STANDARD (variante_index=0) d'un emplacement qui a des équivalents ne
+// supprime pas les équivalents — l'équivalent restant le plus proche (variante_index le plus
+// bas) est promu standard à sa place (variante_index→0), les autres équivalents éventuels sont
+// renumérotés à la suite (1, 2, 3…). Supprimer un équivalent (pas le standard) ne touche pas
+// aux autres — demande explicite du coach (2026-08-09) : ne jamais perdre un repas équivalent
+// par ricochet en supprimant juste le standard.
 function supprimerRepas(ri, slot){
-  _dieteEnEdition(slot).repas.splice(ri,1);
+  const tpl = _dieteEnEdition(slot);
+  const removed = tpl.repas[ri];
+  tpl.repas.splice(ri, 1);
+  if (removed && (removed.variante_index||0) === 0) {
+    const ordre = removed.ordre != null ? removed.ordre : 0;
+    const siblings = tpl.repas
+      .filter(r => (r.ordre != null ? r.ordre : 0) === ordre)
+      .sort((a,b) => (a.variante_index||0) - (b.variante_index||0));
+    siblings.forEach((r, i) => { r.variante_index = i; });
+  }
   _reRenderDieteEditeur(slot);
 }
 
