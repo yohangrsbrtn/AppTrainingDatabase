@@ -2690,15 +2690,20 @@ function renderBilanDetailPage(el) {
     </div>`:''}
 
     ${bilanDetailState._supabaseBilanId && bornes ? (() => {
-      const mensSemaine = _mensurationsDansPeriode(bornes, bilanDetailState.mensurations || []);
-      if (bilanDetailState.mensurations === null) return `<div class="table-card" style="margin-bottom:16px;"><div class="table-toolbar"><div class="title">Mensurations de la semaine</div></div><div style="padding:14px 20px;color:var(--text-faint);font-size:12px;">Chargement…</div></div>`;
-      if (!mensSemaine.length) return '';
+      if (bilanDetailState.mensurations === null) return `<div class="table-card" style="margin-bottom:16px;"><div class="table-toolbar"><div class="title">Mensurations</div></div><div style="padding:14px 20px;color:var(--text-faint);font-size:12px;">Chargement…</div></div>`;
+      // Semaine du bilan + 4 semaines précédentes (comparaison directe demandée par le coach) —
+      // bornes de la fenêtre étendue calculées à partir de bornes.debut, jamais date_validation
+      // brute (cohérent avec le reste du fichier, cf. _bilanDetailBornes).
+      const debutEtendu = new Date(bornes.debut); debutEtendu.setDate(debutEtendu.getDate() - 4*7);
+      const mens = _mensurationsDansPeriode({ debut: debutEtendu, fin: bornes.fin }, bilanDetailState.mensurations || []);
+      if (!mens.length) return '';
       const cm = v => v!=null ? v+' cm' : '—', kg = v => v!=null ? v+' kg' : '—';
+      const dansSemaine = m => { const t = new Date(m.date+'T12:00:00').getTime(); return t >= bornes.debut.getTime() && t <= bornes.fin.getTime(); };
       return `<div class="table-card" style="margin-bottom:16px;">
-        <div class="table-toolbar"><div class="title">Mensurations de la semaine (${_weekRange(bornes.debut, bornes.fin)})</div></div>
+        <div class="table-toolbar"><div class="title">Mensurations — semaine du bilan (${_weekRange(bornes.debut, bornes.fin)}) + 4 précédentes</div></div>
         <div class="table-scroll"><table class="alim-table" style="width:100%;">
           <thead><tr><th>Date</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th></tr></thead>
-          <tbody>${mensSemaine.map(m => `<tr>
+          <tbody>${mens.map(m => `<tr style="${dansSemaine(m) ? 'background:var(--surface-2);font-weight:600;' : ''}">
             <td class="mono">${esc((m.date||'').split('-').reverse().join('/'))}</td>
             <td>${kg(m.poids)}</td><td>${cm(m.mesure)}</td><td>${cm(m.fessiers)}</td><td>${cm(m.cuisses)}</td>
             <td>${cm(m.mollets)}</td><td>${cm(m.poitrine)}</td><td>${cm(m.epaules)}</td><td>${cm(m.bras)}</td>
