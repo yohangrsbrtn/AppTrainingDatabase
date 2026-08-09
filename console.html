@@ -602,11 +602,14 @@ let _ficheBilansSel = new Set(); // ids bilans sélectionnés (fiche client → 
 let _ficheBilanPhotosClientId = null;
 let _ficheBilanPhotosGallery = null; // null=non chargé — toutes les photos de tous les bilans du client, avec bilans(date_validation)
 let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2)
+let _ficheBilansMensurations = null; // null=non chargé — toutes les mensurations du client (rapprochement par plage de dates)
 let _bilanNavList = null;   // liste Supabase bilans pour nav prev/next
 let _bilanNavIdx  = -1;
 let _bilanNavSource = null; // 'fiche' | 'bilans'
 let _ficheMensurationsClientId = null;
 let _ficheMensurations = null;
+let _ficheMensPhotosIds = null; // null=non chargé — Set des mensuration_id ayant au moins une photo
+let _ficheMensPhotosIdsLoading = false;
 let _ficheMensurationsLoading = false;
 // Filtre période pour les graphes/écart de la fiche client : mode 'tout' (tout l'historique),
 // 'phase' (une valeur de mensurations.phase précise) ou 'custom' (plage de dates libre).
@@ -808,6 +811,18 @@ function _mensurationLaPlusProche(dateIso, mensurations){
     if (diff < bestDiff) { bestDiff = diff; best = m; }
   });
   return best;
+}
+// Mensurations tombant dans la plage {debut,fin} d'un bilan (Date objects) — PAS une date
+// exacte : une mensuration prise n'importe quel jour de la semaine du bilan est considérée
+// "liée" à ce bilan (demande explicite : bilan du 1 au 8, mensuration du 7 → liée).
+function _mensurationsDansPeriode(bornes, mensurations){
+  if (!bornes || !mensurations || !mensurations.length) return [];
+  const debut = bornes.debut.getTime(), fin = bornes.fin.getTime();
+  return mensurations.filter(m => {
+    if (!m.date) return false;
+    const t = new Date(m.date + 'T12:00:00').getTime();
+    return t >= debut && t <= fin;
+  }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
 }
 const _MENS_LABELS_COURT = { fessiers:'Fess.', cuisses:'Cuis.', mollets:'Moll.', poitrine:'Poit.', epaules:'Ép.', bras:'Bras' };
 function _renderMensurationSousPhoto(m){
@@ -2673,6 +2688,24 @@ function renderBilanDetailPage(el) {
         ${d.commentaireSommeil?`<div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Sommeil</div><div style="font-size:13px;white-space:pre-wrap;">${esc(d.commentaireSommeil)}</div></div>`:''}
       </div>
     </div>`:''}
+
+    ${bilanDetailState._supabaseBilanId && bornes ? (() => {
+      const mensSemaine = _mensurationsDansPeriode(bornes, bilanDetailState.mensurations || []);
+      if (bilanDetailState.mensurations === null) return `<div class="table-card" style="margin-bottom:16px;"><div class="table-toolbar"><div class="title">Mensurations de la semaine</div></div><div style="padding:14px 20px;color:var(--text-faint);font-size:12px;">Chargement…</div></div>`;
+      if (!mensSemaine.length) return '';
+      const cm = v => v!=null ? v+' cm' : '—', kg = v => v!=null ? v+' kg' : '—';
+      return `<div class="table-card" style="margin-bottom:16px;">
+        <div class="table-toolbar"><div class="title">Mensurations de la semaine (${_weekRange(bornes.debut, bornes.fin)})</div></div>
+        <div class="table-scroll"><table class="alim-table" style="width:100%;">
+          <thead><tr><th>Date</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th></tr></thead>
+          <tbody>${mensSemaine.map(m => `<tr>
+            <td class="mono">${esc((m.date||'').split('-').reverse().join('/'))}</td>
+            <td>${kg(m.poids)}</td><td>${cm(m.mesure)}</td><td>${cm(m.fessiers)}</td><td>${cm(m.cuisses)}</td>
+            <td>${cm(m.mollets)}</td><td>${cm(m.poitrine)}</td><td>${cm(m.epaules)}</td><td>${cm(m.bras)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+    })() : ''}
 
     ${bilanDetailState._supabaseBilanId ? (() => {
       const mProche = _mensurationLaPlusProche(bilanDetailState.dateIso, bilanDetailState.mensurations);
@@ -5086,17 +5119,21 @@ function renderFicheBilansTab(c){
     _ficheBilanPhotosClientId = c.id;
     _ficheBilanPhotosGallery = null;
     _ficheBilanPhotosSel = [];
+    _ficheBilansMensurations = null;
   }
   if (_ficheBilanPhotosGallery === null) {
     // Galerie unifiée, toutes sources confondues (bilans + mensurations), triée par la
     // vraie date représentée par la photo (date_validation du bilan / date de la
     // mensuration) — PAS par date d'upload, pour une chronologie fidèle. _key
     // (préfixe 'b'/'m' + id) évite toute collision entre les deux séquences d'id
-    // distinctes (bilan_photos.id et mensuration_photos.id ne sont pas liées).
+    // distinctes (bilan_photos.id et mensuration_photos.id ne sont pas liées). Charge aussi,
+    // en même temps, TOUTES les mensurations du client (pas juste celles avec photo) — sert
+    // au rapprochement bilan↔mensurations par plage de dates de la semaine (pas date exacte).
     Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/bilan_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,bilans(date_validation)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=*,mensurations(date)&order=created_at.desc`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
-    ]).then(([bilanRows, mensRows]) => {
+      fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(c.id)}&order=date.asc&select=id,date,poids,mesure,fessiers,cuisses,mollets,poitrine,epaules,bras`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    ]).then(([bilanRows, mensRows, mensurations]) => {
       const a = (Array.isArray(bilanRows) ? bilanRows : []).map(p => ({ ...p, _source: 'bilan', _date: (p.bilans && p.bilans.date_validation) || null, _key: 'b' + p.id }));
       const b = (Array.isArray(mensRows) ? mensRows : []).map(p => ({ ...p, _source: 'mensuration', _date: (p.mensurations && p.mensurations.date) || null, _key: 'm' + p.id }));
       _ficheBilanPhotosGallery = [...a, ...b].sort((x, y) => {
@@ -5105,9 +5142,10 @@ function renderFicheBilansTab(c){
         if (!y._date) return 1;
         return y._date.localeCompare(x._date);
       });
+      _ficheBilansMensurations = Array.isArray(mensurations) ? mensurations : [];
       const el = document.getElementById('ficheTabContent');
       if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
-    }).catch(() => { _ficheBilanPhotosGallery = []; });
+    }).catch(() => { _ficheBilanPhotosGallery = []; _ficheBilansMensurations = []; });
   }
   if (_ficheBilansVoirCorbeille) return _renderFicheBilansCorbeille(c);
   if (_ficheBilans === null) {
@@ -5146,6 +5184,9 @@ function renderFicheBilansTab(c){
       ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
       : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`);
     const checked = _ficheBilansSel.has(b.id);
+    const aPhoto = (_ficheBilanPhotosGallery || []).some(p => p._source === 'bilan' && p.bilan_id === b.id);
+    const bornesLigne = _bilanDetailBornes(b.date_validation, b.created_at, c.jour_bilan, b.envoye_coach);
+    const mensLiees = _mensurationsDansPeriode(bornesLigne, _ficheBilansMensurations || []);
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td style="width:32px;text-align:center;" onclick="event.stopPropagation();">
         <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanSel(${b.id}, this.checked)">
@@ -5153,6 +5194,8 @@ function renderFicheBilansTab(c){
       <td>${esc(periode)}</td>
       <td>${dateFr}</td>
       <td>${chip}</td>
+      <td style="text-align:center;" title="${aPhoto ? 'Photo(s) liée(s)' : ''}">${aPhoto ? '📷' : ''}</td>
+      <td style="font-size:11px;color:var(--text-faint);" title="${mensLiees.map(m=>m.date).join(', ')}">${mensLiees.length ? `📏 ${mensLiees.length}` : ''}</td>
     </tr>`;
   }).join('');
   return `${_renderFicheBilanPhotosGallery(c)}${corbeilleLinkHtml}<div class="fiche-card" style="overflow-x:auto;">
@@ -5176,6 +5219,8 @@ function renderFicheBilansTab(c){
         <th style="text-align:left;padding:6px 8px;">Période</th>
         <th style="text-align:left;padding:6px 8px;">Validé le</th>
         <th style="text-align:left;padding:6px 8px;">Statut</th>
+        <th style="text-align:center;padding:6px 8px;" title="Photos liées">📷</th>
+        <th style="text-align:left;padding:6px 8px;" title="Mensurations prises dans la semaine du bilan">Mensurations</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -5737,6 +5782,20 @@ function renderFicheMensurationsTab(c){
     _ficheMensurations = null;
     _ficheMensurationsLoading = false;
     _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
+    _ficheMensPhotosIds = null;
+    _ficheMensPhotosIdsLoading = false;
+  }
+  if (_ficheMensPhotosIds === null && !_ficheMensPhotosIdsLoading) {
+    _ficheMensPhotosIdsLoading = true;
+    fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos?client_id=eq.${encodeURIComponent(c.id)}&select=mensuration_id`, { headers: supaHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        _ficheMensPhotosIds = new Set((rows||[]).map(r => r.mensuration_id));
+        _ficheMensPhotosIdsLoading = false;
+        const el = document.getElementById('ficheTabContent');
+        if (el && ficheTab === 'mensurations') el.innerHTML = renderFicheMensurationsTab(c);
+      })
+      .catch(() => { _ficheMensPhotosIds = new Set(); _ficheMensPhotosIdsLoading = false; });
   }
   if (_ficheMensurations === null) {
     if (!_ficheMensurationsLoading) {
@@ -5778,8 +5837,9 @@ function renderFicheMensurationsTab(c){
 
   const tableRows = [...rows].reverse().map(r => {
     const dateFr = (r.date||'').split('-').reverse().join('/');
+    const aPhoto = _ficheMensPhotosIds && _ficheMensPhotosIds.has(r.id);
     return `<tr>
-      <td class="mono">${esc(dateFr)}</td>
+      <td class="mono">${esc(dateFr)}${aPhoto ? ' <span title="Photo liée">📷</span>' : ''}</td>
       <td onclick="event.stopPropagation();">${_mensPhaseSelectHtml(r.id, c.id, r.phase)}</td>
       <td>${kg(r.poids)}</td>
       <td>${cm(r.mesure)}</td>
