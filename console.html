@@ -2612,7 +2612,11 @@ function renderBilanDetailPage(el) {
   const avgPoids = poidsVals.length ? (poidsVals.reduce((a,b)=>a+b,0)/poidsVals.length).toFixed(1) : null;
   const eauVals = jours.map(j=>parseFloat(j.eau)).filter(v=>!isNaN(v)&&v>0);
   const avgEau = eauVals.length ? (eauVals.reduce((a,b)=>a+b,0)/eauVals.length).toFixed(1) : null;
-  const totalSteps = jours.reduce((s,j)=>s+(parseInt(j.steps)||0),0);
+  // Moyenne (pas total) — cohérent avec l'objectif steps_cible qui est un pas/JOUR, et avec
+  // "Moyenne steps/jour" déjà affiché côté client (bilan.js) : ne compte que les jours où le
+  // client a réellement saisi des pas, pas /7 (sinon une semaine mal remplie fausse la moyenne).
+  const stepsVals = jours.map(j=>parseInt(j.steps)).filter(v=>!isNaN(v)&&v>0);
+  const avgSteps = stepsVals.length ? Math.round(stepsVals.reduce((a,b)=>a+b,0)/stepsVals.length) : 0;
   const joursOkDiete = jours.filter(j=>j.diete).length;
   const joursOkTraining = jours.filter(j=>j.training).length;
   const joursOkCardio = jours.filter(j=>j.cardio).length;
@@ -2663,7 +2667,7 @@ function renderBilanDetailPage(el) {
       ${statCard('Diète OK', joursOkDiete, '/7j')}
       ${statCard('Training', joursOkTraining, '/7j')}
       ${statCard('Cardio', joursOkCardio, '/7j')}
-      ${totalSteps>0?statCard('Pas total',(totalSteps/1000).toFixed(1),'k'):''}
+      ${avgSteps>0?statCard('Pas moy./j',avgSteps.toLocaleString('fr-FR'),''):''}
     </div>
 
     <div class="table-card" style="margin-bottom:16px;">
