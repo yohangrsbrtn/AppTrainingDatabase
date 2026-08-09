@@ -824,6 +824,19 @@ function _mensurationsDansPeriode(bornes, mensurations){
     return t >= debut && t <= fin;
   }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
 }
+// Étend la borne haute d'une semaine de bilan d'un jour : le jour_bilan lui-même (lendemain de
+// bornes.fin, qui est la VEILLE du jour_bilan) est le jour où le client remplit à la fois son
+// bilan ET sa mensuration de la semaine qui vient de se terminer — une mensuration prise ce
+// jour-là doit donc être rattachée à CE bilan, pas laissée orpheline. N'affecte QUE le
+// rapprochement bilan↔mensuration/photo — ne pas utiliser ce résultat pour l'affichage de la
+// plage de dates du bilan (_weekRange doit continuer à afficher la vraie semaine, ex: 2→8 Août).
+function _bilanBornesAvecGraceMens(bornes){
+  if (!bornes) return bornes;
+  const fin = new Date(bornes.fin);
+  fin.setDate(fin.getDate() + 1);
+  fin.setHours(23, 59, 59, 999);
+  return { debut: bornes.debut, fin };
+}
 const _MENS_LABELS_COURT = { fessiers:'Fess.', cuisses:'Cuis.', mollets:'Moll.', poitrine:'Poit.', epaules:'Ép.', bras:'Bras' };
 function _renderMensurationSousPhoto(m){
   if (!m) return '';
@@ -2721,11 +2734,12 @@ function renderBilanDetailPage(el) {
       // Semaine du bilan + 4 semaines précédentes (comparaison directe demandée par le coach) —
       // bornes de la fenêtre étendue calculées à partir de bornes.debut, jamais date_validation
       // brute (cohérent avec le reste du fichier, cf. _bilanDetailBornes).
+      const finGrace = _bilanBornesAvecGraceMens(bornes).fin;
       const debutEtendu = new Date(bornes.debut); debutEtendu.setDate(debutEtendu.getDate() - 4*7);
-      const mens = _mensurationsDansPeriode({ debut: debutEtendu, fin: bornes.fin }, bilanDetailState.mensurations || []).reverse(); // plus récent en premier
+      const mens = _mensurationsDansPeriode({ debut: debutEtendu, fin: finGrace }, bilanDetailState.mensurations || []).reverse(); // plus récent en premier
       if (!mens.length) return '';
       const cm = v => v!=null ? v+' cm' : '—', kg = v => v!=null ? v+' kg' : '—';
-      const dansSemaine = m => { const t = new Date(m.date+'T12:00:00').getTime(); return t >= bornes.debut.getTime() && t <= bornes.fin.getTime(); };
+      const dansSemaine = m => { const t = new Date(m.date+'T12:00:00').getTime(); return t >= bornes.debut.getTime() && t <= finGrace.getTime(); };
       return `<div class="table-card" style="margin-bottom:16px;">
         <div class="table-toolbar"><div class="title">Mensurations — semaine du bilan (${_weekRange(bornes.debut, bornes.fin)}) + 4 précédentes</div></div>
         <div class="table-scroll"><table class="alim-table" style="width:100%;">
@@ -2744,11 +2758,12 @@ function renderBilanDetailPage(el) {
       // Photos prises depuis une mensuration mais tombant dans la semaine de CE bilan (bornes,
       // calculées plus haut) — remontées ici en plus des photos propres au bilan, avec un badge
       // pour distinguer la source (pas de suppression possible d'ici, ça se gère depuis Mensurations).
+      const finGrace = bornes ? _bilanBornesAvecGraceMens(bornes).fin : null;
       const mensPhotosSemaine = (bornes && bilanDetailState.mensPhotos) ? bilanDetailState.mensPhotos.filter(p => {
         const d = p.mensurations && p.mensurations.date;
         if (!d) return false;
         const t = new Date(d+'T12:00:00').getTime();
-        return t >= bornes.debut.getTime() && t <= bornes.fin.getTime();
+        return t >= bornes.debut.getTime() && t <= finGrace.getTime();
       }).map(p => ({ ...p, _source:'mensuration', _date: p.mensurations.date })) : [];
       const bilanPhotosArr = (bilanDetailState.photos||[]).map(p => ({ ...p, _source:'bilan' }));
       const allPhotos = [...bilanPhotosArr, ...mensPhotosSemaine];
@@ -5264,9 +5279,14 @@ function renderFicheBilansTab(c){
       ? (traite ? `<span class="chip ok"><span class="dot"></span>Traité</span>` : `<span class="chip late"><span class="dot"></span>À traiter</span>`)
       : (stillCurrent ? `<span class="chip off"><span class="dot"></span>En cours</span>` : `<span class="chip late"><span class="dot"></span>Non validé</span>`);
     const checked = _ficheBilansSel.has(b.id);
-    const aPhoto = (_ficheBilanPhotosGallery || []).some(p => p._source === 'bilan' && p.bilan_id === b.id);
     const bornesLigne = _bilanDetailBornes(b.date_validation, b.created_at, c.jour_bilan, b.envoye_coach);
-    const mensLiees = _mensurationsDansPeriode(bornesLigne, _ficheBilansMensurations || []);
+    const bornesLigneGrace = _bilanBornesAvecGraceMens(bornesLigne);
+    const mensLiees = _mensurationsDansPeriode(bornesLigneGrace, _ficheBilansMensurations || []);
+    // 📷 : photo propre au bilan OU photo d'une mensuration liée (même fenêtre avec grâce
+    // jour_bilan+1, cf. _bilanBornesAvecGraceMens) — cohérent avec la carte Photos du détail.
+    const aPhoto = (_ficheBilanPhotosGallery || []).some(p =>
+      (p._source === 'bilan' && p.bilan_id === b.id) ||
+      (p._source === 'mensuration' && mensLiees.some(m => m.id === p.mensuration_id)));
     return `<tr style="cursor:pointer;" onclick="openFicheBilanDetail(${idx})">
       <td style="width:32px;text-align:center;" onclick="event.stopPropagation();">
         <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFicheBilanSel(${b.id}, this.checked)">
