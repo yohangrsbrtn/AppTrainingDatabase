@@ -603,8 +603,10 @@ let _ficheBilansLoading = false;
 let _ficheBilansSel = new Set(); // ids bilans sélectionnés (fiche client → onglet Bilans)
 let _ficheBilanPhotosClientId = null;
 let _ficheBilanPhotosGallery = null; // null=non chargé — toutes les photos de tous les bilans du client, avec bilans(date_validation)
-let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2)
+let _ficheBilanPhotosSel = []; // ids photos sélectionnées pour comparaison (max 2) — galerie compacte de l'onglet Bilans
 let _fichePhotosDelSel = new Set(); // clés (_key, "b"+id/"m"+id) sélectionnées pour suppression — onglet Photos
+let _fichePhotosSlotL = null; // clé photo placée à GAUCHE dans le comparatif de l'onglet Photos dédié
+let _fichePhotosSlotR = null; // clé photo placée à DROITE dans le comparatif de l'onglet Photos dédié
 let _ficheBilansMensurations = null; // null=non chargé — toutes les mensurations du client (rapprochement par plage de dates)
 let _ficheStreakClientId = null;
 let _ficheStreak = null; // null=non chargé — nb de bilans consécutifs envoyés ET ponctuels (série actuelle, _calculerStreakBilans)
@@ -901,10 +903,14 @@ function _renderMensurationSousPhoto(m){
 // ── Lightbox photo — carrousel plein écran (overlay, pas de nouvel onglet) ──
 // Usage : ouvrirPhotoLightbox(tableauDePhotos, indexDeDepart) où chaque photo a
 // au moins { url } (un champ date_validation ou created_at optionnel sert de légende).
-let _photoLightbox = null; // { photos, index } ou null si fermé
+let _photoLightbox = null; // { photos, index, compare } ou null si fermé
 
-function ouvrirPhotoLightbox(photos, startIndex){
-  _photoLightbox = { photos: photos || [], index: startIndex || 0 };
+// enableCompare (optionnel) : affiche un bouton "🆚 Comparer" qui place la photo affichée dans le
+// comparatif de l'onglet Photos (_fichePhotosToggleCompare) sans quitter la galerie plein écran —
+// réservé aux appels depuis l'onglet Photos dédié, les autres lightbox (bilan detail...) n'ont pas
+// ce comparatif donc n'activent pas ce bouton.
+function ouvrirPhotoLightbox(photos, startIndex, enableCompare){
+  _photoLightbox = { photos: photos || [], index: startIndex || 0, compare: !!enableCompare };
   document.addEventListener('keydown', _lightboxKeyHandler);
   _renderLightboxDom();
 }
@@ -931,17 +937,27 @@ function _lightboxKeyHandler(e){
   else if (e.key === 'ArrowRight') lightboxNav(1);
 }
 function _lightboxDateLabel(p){
-  const iso = (p.bilans && p.bilans.date_validation) || p.date_validation || p.created_at;
+  const iso = (p.bilans && p.bilans.date_validation) || p.date_validation || p._date || p.created_at;
   if (!iso) return '';
   return iso.slice(0,10).split('-').reverse().join('/');
+}
+function _lightboxToggleCompare(){
+  if (!_photoLightbox) return;
+  const p = _photoLightbox.photos[_photoLightbox.index];
+  if (!p) return;
+  _fichePhotosToggleCompare(p._key);
+  _renderLightboxDom();
 }
 function _renderLightboxDom(){
   const existing = document.getElementById('photoLightboxOverlay');
   if (!_photoLightbox) { if (existing) existing.remove(); return; }
-  const { photos, index } = _photoLightbox;
-  const label = _lightboxDateLabel(photos[index] || {});
+  const { photos, index, compare } = _photoLightbox;
+  const cur = photos[index] || {};
+  const label = _lightboxDateLabel(cur);
+  const isCmp = compare && (cur._key === _fichePhotosSlotL || cur._key === _fichePhotosSlotR);
   const html = `<div id="photoLightboxOverlay" style="position:fixed;inset:0;background:rgba(5,6,10,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;" onclick="if(event.target===this)fermerPhotoLightbox()">
     <button onclick="fermerPhotoLightbox()" title="Fermer" style="position:absolute;top:16px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:16px;cursor:pointer;">✕</button>
+    ${compare ? `<button onclick="event.stopPropagation();_lightboxToggleCompare()" title="Ajouter à la comparaison" style="position:absolute;top:16px;right:64px;height:36px;padding:0 14px;border-radius:18px;background:${isCmp?'var(--accent)':'rgba(255,255,255,.1)'};border:none;color:#fff;font-size:13px;cursor:pointer;">🆚 ${isCmp?'Dans la comparaison':'Comparer'}</button>` : ''}
     <div style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:960px;padding:0 16px;">
       <button onclick="event.stopPropagation();lightboxNav(-1)" ${index<=0?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index<=0?'.2':'.8'};">‹</button>
       <div style="display:flex;align-items:center;justify-content:center;gap:14px;overflow:hidden;flex:1;min-width:0;">
@@ -5295,6 +5311,8 @@ function _assurerGaleriePhotos(c){
     _ficheBilanPhotosGallery = null;
     _ficheBilanPhotosSel = [];
     _fichePhotosDelSel = new Set();
+    _fichePhotosSlotL = null;
+    _fichePhotosSlotR = null;
     _ficheBilansMensurations = null;
   }
   if (_ficheBilanPhotosGallery !== null) return;
@@ -5326,11 +5344,14 @@ function _assurerGaleriePhotos(c){
 
 // Onglet dédié "Photos" — même galerie unifiée que celle affichée en tête de l'onglet Bilans
 // (bilans + mensurations, triée par date réelle), présentée ici en grand format plein écran
-// plutôt qu'en bandeau compact. Deux sélections indépendantes coexistent sur la même grille :
-// - clic sur la PHOTO elle-même → comparaison côte à côte (jusqu'à 2, même mécanisme/état que
-//   _renderFicheBilanPhotosGallery dans l'onglet Bilans — cliquer une 3e photo remplace la plus
-//   ancienne des deux, donc "changer la photo d'un des deux côtés" se fait en cliquant dessus) ;
-// - la CASE À COCHER (coin, stopPropagation) → sélection multiple pour suppression groupée.
+// plutôt qu'en bandeau compact. Sur chaque vignette :
+// - clic sur la PHOTO elle-même → ouvre la galerie plein écran (ouvrirPhotoLightbox), navigable
+//   au clavier/flèches, avec un bouton "🆚 Comparer" intégré (voir _renderLightboxDom) ;
+// - l'icône 🆚 (coin bas-gauche, stopPropagation) → place/retire la photo dans le comparatif
+//   (remplit GAUCHE puis DROITE, une 3e photo remplace la plus ancienne des deux — FIFO) ;
+// - la CASE À COCHER (coin haut-droit, stopPropagation) → sélection multiple pour suppression groupée.
+// Chaque vignette est aussi draggable : glisser-déposer directement sur le slot GAUCHE ou DROITE
+// du comparatif ci-dessous permet de choisir précisément quel côté elle occupe.
 function renderFichePhotosTab(c){
   if (!c) return '';
   _assurerGaleriePhotos(c);
@@ -5341,22 +5362,34 @@ function renderFichePhotosTab(c){
     return `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune photo enregistrée (bilans ou mensurations) pour ce client.</p></div>`;
   }
   const dateOf = p => p._date ? new Date(p._date+'T00:00:00').toLocaleDateString('fr-FR') : '—';
-  const cmpSel = _ficheBilanPhotosSel;
   const findPhoto = key => _ficheBilanPhotosGallery.find(p => p._key === key);
-  const compareHtml = cmpSel.length === 2 ? `
+  const compareSlotHtml = (key, slot) => {
+    const p = key ? findPhoto(key) : null;
+    if (!p) return `
+      <div ondragover="event.preventDefault();" ondrop="_fichePhotosDropSlot(event,'${slot}')"
+           style="flex:1;min-width:0;max-width:320px;aspect-ratio:9/16;border:2px dashed var(--border);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;text-align:center;color:var(--text-faint);font-size:11.5px;padding:10px;">
+        Glisse une photo ici<br>ou clique sur 🆚 (${slot==='L'?'gauche':'droite'})
+      </div>`;
+    return `
+      <div ondragover="event.preventDefault();" ondrop="_fichePhotosDropSlot(event,'${slot}')" style="flex:1;text-align:center;min-width:0;max-width:320px;position:relative;">
+        <button onclick="_fichePhotosClearSlot('${slot}')" title="Retirer" style="position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:12px;cursor:pointer;z-index:1;">✕</button>
+        <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,_ficheBilanPhotosGallery.findIndex(x=>x._key==='${p._key}'),true)">
+        <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)} · ${p._manuelle?'🖼️ Ajoutée':(p._source==='bilan'?'📋 Bilan':'📏 Mensuration')}</div>
+      </div>`;
+  };
+  const hasCompare = _fichePhotosSlotL || _fichePhotosSlotR;
+  const compareHtml = `
     <div class="fiche-card" style="margin-bottom:14px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
         Comparaison
-        <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="_ficheBilanPhotosSel=[];_reRenderFichePhotosTab()">✕ Réinitialiser</button>
+        ${hasCompare ? `<button class="btn" style="font-size:11px;padding:4px 9px;" onclick="_fichePhotosSlotL=null;_fichePhotosSlotR=null;_reRenderFichePhotosTab()">✕ Réinitialiser</button>` : ''}
       </div>
       <div style="display:flex;gap:12px;">
-        ${cmpSel.map(key => { const p = findPhoto(key); if (!p) return ''; return `
-          <div style="flex:1;text-align:center;min-width:0;max-width:320px;">
-            <img src="${esc(p.url)}" style="width:100%;aspect-ratio:9/16;object-fit:contain;border-radius:var(--radius-sm);background:var(--surface-2);">
-            <div style="font-size:12px;color:var(--text-faint);margin-top:6px;">${dateOf(p)} · ${p._manuelle?'🖼️ Ajoutée':(p._source==='bilan'?'📋 Bilan':'📏 Mensuration')}</div>
-          </div>`; }).join('')}
+        ${compareSlotHtml(_fichePhotosSlotL,'L')}
+        ${compareSlotHtml(_fichePhotosSlotR,'R')}
       </div>
-    </div>` : `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px;">Clique sur 2 photos pour les comparer côte à côte — reclique sur l'une des deux (ou une 3e) pour la changer.</div>`;
+      <div style="font-size:11px;color:var(--text-faint);margin-top:8px;">Clique sur 🆚 pour ajouter une photo à la comparaison (gauche puis droite), ou glisse-la directement dans le slot voulu.</div>
+    </div>`;
   const delCount = _fichePhotosDelSel.size;
   const toutesCoches = _ficheBilanPhotosGallery.length > 0 && _ficheBilanPhotosGallery.every(p => _fichePhotosDelSel.has(p._key));
   return `${compareHtml}<div class="fiche-card">
@@ -5370,15 +5403,16 @@ function renderFichePhotosTab(c){
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;">
       ${_ficheBilanPhotosGallery.map((p, idx) => {
-        const isCmp = cmpSel.includes(p._key);
+        const isCmp = p._key === _fichePhotosSlotL || p._key === _fichePhotosSlotR;
         const isDel = _fichePhotosDelSel.has(p._key);
-        return `<div style="width:130px;">
+        return `<div style="width:130px;" draggable="true" ondragstart="_fichePhotosDragStart(event,'${p._key}')">
           <div style="position:relative;width:130px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isCmp?'box-shadow:0 0 0 3px var(--accent);':''}">
-            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="toggleFicheBilanPhotoSel('${p._key}');_reRenderFichePhotosTab()">
+            <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,${idx},true)">
             <span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;padding:2px 6px;border-radius:999px;">${p._manuelle?'🖼️ Ajoutée':(p._source==='bilan'?'📋 Bilan':'📏 Mensuration')}</span>
             <label style="position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.55);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="event.stopPropagation();">
               <input type="checkbox" ${isDel?'checked':''} onchange="_fichePhotosToggleDelSel('${p._key}')" style="width:15px;height:15px;margin:0;">
             </label>
+            <button onclick="event.stopPropagation();_fichePhotosToggleCompare('${p._key}')" title="Ajouter à la comparaison" style="position:absolute;bottom:4px;left:4px;width:24px;height:24px;border-radius:6px;background:${isCmp?'var(--accent)':'rgba(0,0,0,.55)'};border:none;color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;">🆚</button>
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:4px;">${dateOf(p)}</div>
         </div>`;
@@ -5391,6 +5425,41 @@ function _reRenderFichePhotosTab(){
   const c = (data.clients||[]).find(cl => cl.id === _ficheBilanPhotosClientId);
   const el = document.getElementById('ficheTabContent');
   if (el && ficheTab === 'photos') el.innerHTML = renderFichePhotosTab(c);
+}
+
+// Icône 🆚 sur une vignette : retire la photo si elle est déjà dans un slot, sinon la place dans
+// le premier slot libre (gauche en priorité) ; si les deux sont déjà occupés, remplace le plus
+// ancien des deux (gauche) et décale l'ancien "droite" — cohérent avec le clic répété sur une 3e
+// photo qui "change" la comparaison plutôt que de la bloquer.
+function _fichePhotosToggleCompare(key){
+  if (_fichePhotosSlotL === key) { _fichePhotosSlotL = null; }
+  else if (_fichePhotosSlotR === key) { _fichePhotosSlotR = null; }
+  else if (!_fichePhotosSlotL) { _fichePhotosSlotL = key; }
+  else if (!_fichePhotosSlotR) { _fichePhotosSlotR = key; }
+  else { _fichePhotosSlotL = _fichePhotosSlotR; _fichePhotosSlotR = key; }
+  _reRenderFichePhotosTab();
+}
+
+function _fichePhotosClearSlot(slot){
+  if (slot === 'L') _fichePhotosSlotL = null; else _fichePhotosSlotR = null;
+  _reRenderFichePhotosTab();
+}
+
+function _fichePhotosDragStart(e, key){
+  e.dataTransfer.setData('text/plain', key);
+  e.dataTransfer.effectAllowed = 'copy';
+}
+
+// Glisser-déposer une vignette directement sur le slot gauche ou droite du comparatif — si la
+// photo occupait déjà l'autre slot, on la déplace (pas de doublon des deux côtés).
+function _fichePhotosDropSlot(e, slot){
+  e.preventDefault();
+  const key = e.dataTransfer.getData('text/plain');
+  if (!key) return;
+  if (_fichePhotosSlotL === key) _fichePhotosSlotL = null;
+  if (_fichePhotosSlotR === key) _fichePhotosSlotR = null;
+  if (slot === 'L') _fichePhotosSlotL = key; else _fichePhotosSlotR = key;
+  _reRenderFichePhotosTab();
 }
 
 function _fichePhotosToggleDelSel(key){
@@ -5421,6 +5490,8 @@ async function _fichePhotosSupprimerSelection(clientId){
   }
   _fichePhotosDelSel = new Set();
   _ficheBilanPhotosSel = _ficheBilanPhotosSel.filter(k => !keys.includes(k));
+  if (keys.includes(_fichePhotosSlotL)) _fichePhotosSlotL = null;
+  if (keys.includes(_fichePhotosSlotR)) _fichePhotosSlotR = null;
   _ficheBilanPhotosGallery = null; // force un rechargement propre de la galerie
   if (erreurs) alert(`${erreurs} photo(s) n'ont pas pu être supprimées.`);
   const c = (data.clients||[]).find(cl => cl.id === clientId);
