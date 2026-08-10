@@ -3679,6 +3679,7 @@ let exoGroupeFiltre = 'all';
 let exoRecherche = '';
 let recensementMetaData = null; // null = pas encore chargé — blocs métabolique de TOUS les programmes clients (actifs ou non)
 let _recensementMetaOuvert = new Set(); // groupes musculaires (dossiers) dépliés
+let _recensementMetaLigneOuverte = new Set(); // signatures des programmes dont la répartition détaillée est dépliée
 let recensementMetaNoms = {};   // signature de contenu -> nom de template proposé/édité par le coach
 let _recensementMetaCrees = new Set(); // signatures pour lesquelles un template a déjà été créé cette session (évite les doublons sur double-clic)
 let tplCategorieFiltre = 'all';
@@ -4009,16 +4010,31 @@ function renderRecensementMetaSub(){
               ${rows.map(g => {
                 const cree = _recensementMetaCrees.has(g.signature);
                 const sigJs = g.signature.replace(/'/g,"\\'").replace(/\n/g,'');
-                return `<tr>
+                const ligneOuverte = _recensementMetaLigneOuverte.has(g.signature);
+                const totalSeries = g.repartition.reduce((a,[,n])=>a+n,0);
+                return `<tr onclick="_recensementMetaToggleLigne('${sigJs}')" style="cursor:pointer;">
                   <td style="min-width:180px;">
-                    <input type="text" value="${esc(recensementMetaNoms[g.signature] || '')}" oninput="recensementMetaNoms['${sigJs}']=this.value" ${cree?'disabled':''}
+                    <input type="text" value="${esc(recensementMetaNoms[g.signature] || '')}" oninput="recensementMetaNoms['${sigJs}']=this.value" onclick="event.stopPropagation();" ${cree?'disabled':''}
                       style="width:100%;padding:6px 8px;background:var(--surface-2);border:1px solid transparent;border-radius:6px;color:var(--text);font-size:12.5px;font-weight:600;">
                   </td>
                   <td>${g.nbSeances}</td>
                   <td style="font-size:11px;color:var(--text-faint);">${g.repartition.slice(0,4).map(([grp,n]) => `${esc(grp)} (${n})`).join(' · ')}${g.repartition.length>4?'…':''}</td>
-                  <td style="font-size:11px;">${g.assignations.map(a => `<span class="chip ${a.progActif?'ok':'off'}" style="cursor:pointer;margin:1px;" onclick="_recensementMetaOuvrirClient('${a.clientId}')" title="${esc(a.progNom)}">${a.progActif?'<span class="dot"></span>':''}${esc(a.nomClient)}</span>`).join(' ')}</td>
+                  <td style="font-size:11px;">${g.assignations.map(a => `<span class="chip ${a.progActif?'ok':'off'}" style="cursor:pointer;margin:1px;" onclick="event.stopPropagation();_recensementMetaOuvrirClient('${a.clientId}')" title="${esc(a.progNom)}">${a.progActif?'<span class="dot"></span>':''}${esc(a.nomClient)}</span>`).join(' ')}</td>
                   <td>${cree ? '<span class="chip ok"><span class="dot"></span>Créé</span>' : ''}</td>
-                </tr>`;
+                </tr>
+                ${ligneOuverte ? `<tr>
+                  <td colspan="5" style="background:var(--surface-2);padding:14px 16px;">
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:8px;">Répartition des séries par groupe musculaire</div>
+                    ${g.repartition.map(([grp,n]) => `
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                        <div style="width:170px;font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(grp)}</div>
+                        <div style="flex:1;height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;">
+                          <div style="height:100%;width:${totalSeries?Math.round(n/totalSeries*100):0}%;background:${g.groupesPrio.includes(grp)?'var(--accent)':'var(--hairline)'};border-radius:4px;"></div>
+                        </div>
+                        <div style="width:50px;font-size:12px;font-weight:700;text-align:right;">${n} sér.</div>
+                      </div>`).join('')}
+                  </td>
+                </tr>` : ''}`;
               }).join('')}
             </tbody>
           </table>
@@ -4029,6 +4045,11 @@ function renderRecensementMetaSub(){
 
 function _recensementMetaToggle(g){
   if (_recensementMetaOuvert.has(g)) _recensementMetaOuvert.delete(g); else _recensementMetaOuvert.add(g);
+  renderRecensementMetaSub();
+}
+
+function _recensementMetaToggleLigne(signature){
+  if (_recensementMetaLigneOuverte.has(signature)) _recensementMetaLigneOuverte.delete(signature); else _recensementMetaLigneOuverte.add(signature);
   renderRecensementMetaSub();
 }
 
