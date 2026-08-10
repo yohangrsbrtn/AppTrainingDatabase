@@ -2251,7 +2251,8 @@ function openBilanHistoClient(clientId) {
     .then(r => r.ok ? r.json() : Promise.reject(new Error('supabase_' + r.status)))
     .then(rows => {
       if (bilansHistoClientId !== clientId) return;
-      bilansHistoData = { loaded: true, error: null, bilans: rows || [] };
+      const cli = (data.clients || []).find(x => x.id === clientId);
+      bilansHistoData = { loaded: true, error: null, bilans: _bilanTrierParPeriode(rows || [], cli ? cli.jour_bilan : null) };
       if (state.nav === 'bilans') renderMain();
     }).catch(e => {
       if (bilansHistoClientId !== clientId) return;
@@ -2407,6 +2408,21 @@ function _bilanDetailBornes(dateValidationIso, createdAtIso, jourBilanNom, envoy
   // (_bilanPeriodeLabel a le même garde-fou depuis l'origine).
   if (createdAtIso && !envoyeCoach) return _bilanWeekBounds(jourBilanNom, new Date(createdAtIso));
   return null;
+}
+
+// Trie une liste de bilans par vraie semaine (date de FIN de période, la plus récente en
+// premier) plutôt que par état envoyé/non-envoyé — un bilan non-envoyé orphelin d'une semaine
+// ancienne ne doit jamais passer devant un bilan plus récent juste parce qu'il traîne encore
+// sans réponse. Résidu de migration sans aucune borne calculable (envoyé sans date_validation
+// ET sans le garde-fou created_at) : repli sur created_at pour rester grossièrement à sa place
+// plutôt que de planter le tri.
+function _bilanTrierParPeriode(rows, jourBilanNom){
+  const finDe = b => {
+    const bornes = _bilanDetailBornes(b.date_validation, b.created_at, jourBilanNom, b.envoye_coach);
+    if (bornes) return bornes.fin.getTime();
+    return b.created_at ? new Date(b.created_at).getTime() : 0;
+  };
+  return rows.slice().sort((a, b) => finDe(b) - finDe(a));
 }
 
 function _weekRange(debut, fin) {
@@ -5499,7 +5515,14 @@ function renderFicheBilansTab(c){
       fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(c.id)}&archive=eq.false&order=envoye_coach.asc,date_validation.desc.nullslast,created_at.desc`, { headers: supaHeaders() })
         .then(r => r.json())
         .then(rows => {
-          _ficheBilans = Array.isArray(rows) ? rows : [];
+          // Re-tri côté client par vraie semaine (date de FIN de période, calculée comme
+          // partout ailleurs via _bilanDetailBornes) plutôt que par l'ordre SQL brut
+          // (envoye_coach.asc d'abord) — sinon un bilan non-envoyé orphelin d'une semaine
+          // ancienne se retrouvait affiché AU-DESSUS d'un bilan bien plus récent juste parce
+          // qu'il n'a jamais été envoyé, ce qui n'a aucun sens dans une liste chronologique
+          // (vécu chez Manon Besnier : "27 Juil→2 Août" non-envoyé affiché avant "3→9 Août"
+          // pourtant son tout dernier bilan réellement validé).
+          _ficheBilans = _bilanTrierParPeriode(Array.isArray(rows) ? rows : [], c.jour_bilan);
           _ficheBilansLoading = false;
           const el = document.getElementById('ficheTabContent');
           if (el && ficheTab === 'bilans') el.innerHTML = renderFicheBilansTab(c);
