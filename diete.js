@@ -22,6 +22,7 @@ let _dJournalSlotEnEdition= null; // 1-7 : numéro du "Repas N" en cours de remp
 let _dJournalAjoutEtape   = null; // null | 'choix' | 'coach-dietes' | 'coach-repas' | 'menu' | 'compose'
 let _dJournalDerniereErreur = null; // message d'erreur persistant (survit au toast) affiché dans le picker diagnostiqué
 let _dJournalDieteChoisie = null; // { ligne, col, nom, repas } — diète en cours de parcours (choix d'un repas coach)
+let _dJournalAppendMode  = false; // true : le choix coach-dietes/coach-repas/menu en cours doit AJOUTER ses aliments à _dMenuDraft (déjà ouvert en compose) au lieu d'écrire directement le slot — cf. "+ Ajouter un repas de ma diète"/"+ Ajouter un de mes menus" depuis l'écran Composer
 let _dDieteDetailCache    = {};   // "ligne|col" -> détail chargerDieteParPosition (résolution cible + slots coach)
 
 // ── Modale de recherche/ajout/création d'aliment (alimente _dMenuDraft) ──────
@@ -1019,14 +1020,15 @@ function _resoudreSlot(s) {
   return r.vi ? ((repas.equivalences || [])[r.vi - 1]?.aliments || []) : repas.aliments;
 }
 
-// Convertit le contenu résolu d'un slot (coach OU menu, deux formats différents — voir
+// Convertit une liste d'aliments résolus (coach OU menu, deux formats différents — voir
 // _resoudreSlot/_sommeAliments) au format attendu par _dMenuDraft.aliments (nom, quantite,
 // kcal/prot/glu/lip totaux déjà multipliés par la quantité, sucres/fibres/ags jamais null —
-// 0 par défaut comme partout ailleurs dans le draft, cf. confirmerAjoutAliment). Sert de point
-// de départ à "+ Ajouter des aliments à ce repas" (ouvrirAjoutExtraJournal) : le coach/menu
-// d'origine n'est jamais modifié, seul un nouveau menu privé "photo + extra" est créé.
-function _snapshotAlimentsSlot(slotReel) {
-  return _resoudreSlot(slotReel).map(a => {
+// 0 par défaut comme partout ailleurs dans le draft, cf. confirmerAjoutAliment). Sert à la fois
+// à "+ Ajouter des aliments à ce repas" (photo de l'existant, voir _snapshotAlimentsSlot) et à
+// "+ Ajouter un repas de ma diète"/"+ Ajouter un de mes menus" depuis l'écran Composer (ajoute
+// un repas/menu ENTIER par-dessus le draft en cours, sans jamais modifier l'original).
+function _normaliserAliments(aliments) {
+  return (aliments || []).map(a => {
     if (a.quantite != null) { // déjà au format "menu"
       return { nom: a.nom, quantite: a.quantite, kcal: a.kcal || 0, prot: a.prot || 0, glu: a.glu || 0,
         sucres: a.sucres || 0, fibres: a.fibres || 0, lip: a.lip || 0, ags: a.ags || 0 };
@@ -1035,6 +1037,10 @@ function _snapshotAlimentsSlot(slotReel) {
     return { nom: a.nom, quantite: Math.round(a.qte || 0), kcal: a.cals || 0, prot: a.prot || 0,
       glu: a.glu || 0, sucres: 0, fibres: 0, lip: a.lip || 0, ags: 0 };
   });
+}
+
+function _snapshotAlimentsSlot(slotReel) {
+  return _normaliserAliments(_resoudreSlot(slotReel));
 }
 
 // Diète cible du jour actuellement ouvert, résolue (repas + macros) — ou null si aucune.
@@ -1185,6 +1191,7 @@ function annulerChoixSlotJournal() {
   _dJournalAjoutEtape = null;
   _dJournalSlotEnEdition = null;
   _dJournalDieteChoisie = null;
+  _dJournalAppendMode = false;
   setPage('diete');
 }
 
@@ -1208,7 +1215,7 @@ function renderJournalChoixSource() {
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Depuis quelle diète ?</div>
       ${_dJournalDerniereErreur ? `<div style="font-size:12px;color:#e05c5c;background:#e05c5c1a;border:1px solid #e05c5c55;border-radius:8px;padding:8px 10px;margin-bottom:10px;">⚠ ${esc(_dJournalDerniereErreur)}</div>` : ''}
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucune diète trouvée.</div>'}
-      <button onclick="_dJournalAjoutEtape='choix';setPage('diete')" style="width:100%;margin-top:10px;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">‹ Retour</button>`;
+      <button onclick="_dJournalAjoutEtape=_dJournalAppendMode?'compose':'choix';setPage('diete')" style="width:100%;margin-top:10px;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">‹ Retour</button>`;
   }
   if (_dJournalAjoutEtape === 'coach-repas') {
     const dc = _dJournalDieteChoisie;
@@ -1237,7 +1244,7 @@ function renderJournalChoixSource() {
     return `
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Quel menu ?</div>
       ${rows || '<div style="font-size:13px;color:var(--muted);">Aucun menu créé. Va dans "Mes menus" pour en créer un.</div>'}
-      <button onclick="_dJournalAjoutEtape='choix';setPage('diete')" style="width:100%;margin-top:10px;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">‹ Retour</button>`;
+      <button onclick="_dJournalAjoutEtape=_dJournalAppendMode?'compose':'choix';setPage('diete')" style="width:100%;margin-top:10px;padding:10px;background:transparent;border:none;color:#8892a4;font-size:13px;cursor:pointer;">‹ Retour</button>`;
   }
   return '';
 }
@@ -1260,6 +1267,7 @@ function ouvrirComposeJournal() {
     }
   }
   _dMenuDraft = { nom: '', aliments: [], cible, menuIdEdition: null };
+  _dJournalAppendMode = false;
   _dJournalAjoutEtape = 'compose';
   setPage('diete');
 }
@@ -1288,6 +1296,7 @@ function ouvrirModificationSlotJournal(slotNum) {
     cible, menuIdEdition: m.menuId
   };
   _dJournalSlotEnEdition = slotNum;
+  _dJournalAppendMode = false;
   _dJournalAjoutEtape = 'compose';
   setPage('diete');
 }
@@ -1314,6 +1323,7 @@ function ouvrirAjoutExtraJournal(slotNum) {
   }
   _dMenuDraft = { nom: slotReel.label, aliments, cible, menuIdEdition: null, _remplaceSlot: slotReel.ligne };
   _dJournalSlotEnEdition = slotNum;
+  _dJournalAppendMode = false;
   _dJournalAjoutEtape = 'compose';
   setPage('diete');
 }
@@ -1321,6 +1331,7 @@ function ouvrirAjoutExtraJournal(slotNum) {
 function annulerComposeJournal() {
   const enEdition = !!(_dMenuDraft && (_dMenuDraft.menuIdEdition || _dMenuDraft._remplaceSlot));
   _dMenuDraft = null;
+  _dJournalAppendMode = false;
   _dJournalAjoutEtape = enEdition ? null : 'choix';
   if (enEdition) _dJournalSlotEnEdition = null;
   setPage('diete');
@@ -1355,7 +1366,10 @@ function renderJournalCompose() {
           <div><span style="font-size:14px;font-weight:600;color:var(--green);">${Math.round(s.glu)}</span><div class="macro-label">GLU</div></div>
           <div><span style="font-size:14px;font-weight:600;color:#D85A30;">${Math.round(s.lip)}</span><div class="macro-label">LIP</div></div>
         </div>` : ''}
-        <button onclick="ouvrirAjoutAliment()" style="width:100%;margin-top:${d.aliments.length?'12px':'8px'};padding:12px;background:#2d3142;border:none;border-radius:10px;color:#a78bfa;font-size:14px;font-weight:700;cursor:pointer;">+ Ajouter un aliment</button>
+        <div style="margin-top:${d.aliments.length?'12px':'8px'};font-size:11px;color:#8892a4;margin-bottom:6px;">AJOUTER AU REPAS</div>
+        <button onclick="_dJournalAppendMode=true;_dJournalAjoutEtape='coach-dietes';setPage('diete')" style="width:100%;padding:11px;background:#2d3142;border:none;border-radius:10px;color:#a78bfa;font-size:13.5px;font-weight:700;cursor:pointer;margin-bottom:6px;">📋 Un repas de ma diète</button>
+        <button onclick="_dJournalAppendMode=true;_dJournalAjoutEtape='menu';setPage('diete')" style="width:100%;padding:11px;background:#2d3142;border:none;border-radius:10px;color:#a78bfa;font-size:13.5px;font-weight:700;cursor:pointer;margin-bottom:6px;">🍽️ Un de mes menus</button>
+        <button onclick="ouvrirAjoutAliment()" style="width:100%;padding:11px;background:#2d3142;border:none;border-radius:10px;color:#a78bfa;font-size:13.5px;font-weight:700;cursor:pointer;">🥗 Un aliment</button>
       </div>
       <button onclick="_guardAction(confirmerComposeJournal, this)" style="width:100%;margin-top:12px;padding:14px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">${enEdition ? 'Enregistrer les modifications' : 'Ajouter au journal'}</button>
     </div>
@@ -1421,6 +1435,18 @@ async function ajouterSlotCoach(idx, vi) {
   if (!r) return;
   const variant = vi ? (r.equivalences || [])[vi - 1] : null;
   if (vi && !variant) return;
+  // Mode ajout (depuis l'écran Composer, "+ Ajouter un repas de ma diète") : on empile les
+  // aliments de ce repas dans le draft en cours au lieu d'écrire directement le slot — la diète
+  // du coach n'est jamais modifiée, seul le draft (futur menu privé) grandit.
+  if (_dJournalAppendMode) {
+    const aliments = _normaliserAliments((variant ? variant.aliments : r.aliments) || []);
+    _dMenuDraft.aliments = _dMenuDraft.aliments.concat(aliments);
+    _dJournalAppendMode = false;
+    _dJournalAjoutEtape = 'compose';
+    _dJournalDieteChoisie = null;
+    setPage('diete');
+    return;
+  }
   const ref = 'sb|' + dc.refKey.id + '|' + idx + '|' + vi;
   const label = (variant ? variant.nom : r.nom) + ' · ' + dc.nom;
   const slot = _dJournalSlotEnEdition;
@@ -1438,6 +1464,16 @@ async function ajouterSlotCoach(idx, vi) {
 async function ajouterSlotMenu(menuId) {
   const m = (_dMenus||[]).find(mm => mm.menuId === menuId);
   if (!m) return;
+  // Mode ajout (depuis l'écran Composer, "+ Ajouter un de mes menus") : empile les aliments de
+  // ce menu dans le draft en cours ("ce menu fois deux", menu + extra...) sans jamais modifier
+  // le menu partagé d'origine dans "Mes menus".
+  if (_dJournalAppendMode) {
+    _dMenuDraft.aliments = _dMenuDraft.aliments.concat(_normaliserAliments(m.aliments));
+    _dJournalAppendMode = false;
+    _dJournalAjoutEtape = 'compose';
+    setPage('diete');
+    return;
+  }
   const slot = _dJournalSlotEnEdition;
   try {
     const res = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'menu', menuId, m.nom);
