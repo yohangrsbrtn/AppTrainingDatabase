@@ -3679,6 +3679,8 @@ let exoGroupeFiltre = 'all';
 let exoRecherche = '';
 let recensementMetaData = null; // null = pas encore chargé — blocs métabolique de TOUS les programmes clients (actifs ou non)
 let _recensementMetaOuvert = new Set(); // groupes musculaires (dossiers) dépliés
+let recensementMetaNoms = {};   // signature de contenu -> nom de template proposé/édité par le coach
+let _recensementMetaCrees = new Set(); // signatures pour lesquelles un template a déjà été créé cette session (évite les doublons sur double-clic)
 let tplCategorieFiltre = 'all';
 
 async function chargerExercices(){
@@ -3723,37 +3725,116 @@ async function chargerRecensementMeta(){
     // FK explicite requise : 2 relations existent entre ces 2 tables (bloc_actif_id ET
     // client_programme_id) — PostgREST refuse sinon avec PGRST201 "ambiguous embedding".
     `&select=id,client_programme_id,nombre_semaines,client_programmes!client_programme_blocs_client_programme_id_fkey(id,nom,actif,client_id),` +
-    `client_programme_seances(id,titre,client_programme_exercices(id,exercice_id,nom,series))`,
+    `client_programme_seances(id,titre,ordre,client_programme_exercices(id,exercice_id,nom,series,reps,repos,tempo,rir,notes,ordre))` +
+    `&client_programme_seances.order=ordre.asc&client_programme_seances.client_programme_exercices.order=ordre.asc`,
     { headers: supaHeaders() }
   );
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
 
-// Transforme les lignes brutes (chargerRecensementMeta) en une liste plate { clientId, nomClient,
-// progNom, progActif, nbSeances, groupePrio, repartition } — un item par bloc métabolique trouvé
-// (un même client peut apparaître plusieurs fois s'il a plusieurs programmes avec bloc
-// métabolique). Exclut le compte coach (yohanp).
+// Retrouve l'exercice de la bibliothèque coach correspondant à un exercice de programme client —
+// par exercice_id si présent, sinon par nom (exercices migrés depuis GAS, exercice_id null,
+// même pattern que ouvrirEditeurProgrammeClient). Renvoie null si introuvable (l'exercice sera
+// alors ignoré à la génération du template, programme_seance_exercices exige un exercice_id valide).
+function _resoudreExerciceBiblio(ex){
+  return (exercicesData || []).find(e => e.id === ex.exercice_id) ||
+         (exercicesData || []).find(e => e.nom && e.nom.toLowerCase() === (ex.nom || '').toLowerCase()) || null;
+}
+
+// Transforme les lignes brutes (chargerRecensementMeta) en une liste plate d'items par bloc
+// métabolique trouvé, avec un "signature" de contenu (mêmes exercices, même ordre, mêmes séries —
+// règle de dédoublonnage demandée par le coach) permettant à _recensementMetaGroupes() de fusionner
+// les programmes strictement identiques appartenant à plusieurs clients. Exclut le compte coach (yohanp).
 function _recensementMetaItems(){
   return (recensementMetaData || []).map(b => {
     const cp = b.client_programmes;
     if (!cp || cp.client_id === 'yohanp') return null;
     const client = (data.clients || []).find(c => c.id === cp.client_id);
     const nomClient = client ? `${client.prenom || ''} ${client.nom || ''}`.trim() : cp.client_id;
-    const seances = b.client_programme_seances || [];
+    const seances = (b.client_programme_seances || []).map(s => ({
+      titre: s.titre,
+      exercices: (s.client_programme_exercices || []).map(ex => ({
+        exercice_id: ex.exercice_id, nom: ex.nom, series: ex.series, reps: ex.reps, repos: ex.repos,
+        tempo: ex.tempo, rir: ex.rir, notes: ex.notes,
+      })),
+    }));
     const map = {};
-    seances.forEach(s => (s.client_programme_exercices || []).forEach(ex => {
-      const exData = (exercicesData || []).find(e => e.id === ex.exercice_id) ||
-                     (exercicesData || []).find(e => e.nom && e.nom.toLowerCase() === (ex.nom || '').toLowerCase());
+    seances.forEach(s => s.exercices.forEach(ex => {
+      const exData = _resoudreExerciceBiblio(ex);
       const g = (exData && exData.groupe_musculaire) || 'Non défini';
       map[g] = (map[g] || 0) + (parseInt(ex.series) || 0);
     }));
     const repartition = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    const maxSeries = repartition.length ? repartition[0][1] : 0;
+    const groupesPrio = maxSeries > 0 ? repartition.filter(([,n]) => n === maxSeries).map(([g]) => g) : ['Non défini'];
+    const signature = seances.map(s => s.exercices.map(ex => (ex.nom||'').trim().toLowerCase()+':'+(parseInt(ex.series)||0)).join(',')).join('||');
     return {
       clientId: cp.client_id, nomClient, progId: cp.id, progNom: cp.nom, progActif: !!cp.actif, blocId: b.id,
-      nbSeances: seances.length, groupePrio: repartition.length ? repartition[0][0] : 'Non défini', repartition,
+      nombreSemaines: b.nombre_semaines || null, nbSeances: seances.length, seances, repartition, groupesPrio, signature,
     };
   }).filter(Boolean);
+}
+
+// Fusionne les items par signature de contenu — un seul "programme unique" par signature, avec la
+// liste de tous les clients/programmes qui le partagent (demande coach : "je ne veux pas de doublon,
+// si deux personnes ont le même programme on ne fait qu'un seul template et on identifie qui l'a").
+function _recensementMetaGroupes(){
+  const items = _recensementMetaItems();
+  const parSignature = {};
+  items.forEach(it => {
+    if (!parSignature[it.signature]) {
+      parSignature[it.signature] = {
+        signature: it.signature, nbSeances: it.nbSeances, seances: it.seances, repartition: it.repartition,
+        groupesPrio: it.groupesPrio, nombreSemaines: it.nombreSemaines, assignations: [],
+      };
+    }
+    parSignature[it.signature].assignations.push({ clientId: it.clientId, nomClient: it.nomClient, progId: it.progId, progNom: it.progNom, progActif: it.progActif });
+    if (recensementMetaNoms[it.signature] == null) {
+      const suggestion = 'Focus ' + it.groupesPrio.join(' + ');
+      recensementMetaNoms[it.signature] = suggestion;
+    }
+  });
+  return Object.values(parSignature);
+}
+
+// Crée réellement les templates (programme_templates + blocs + séances + exercices, catégorie
+// "Métabolique") pour tous les programmes uniques pas encore générés cette session. Les exercices
+// sans correspondance dans la bibliothèque coach (nom introuvable, ni exercice_id ni nom qui matche)
+// sont ignorés — programme_seance_exercices exige un exercice_id valide, contrairement au
+// programme client d'origine qui tolère les résidus de migration.
+async function _recensementMetaGenererTous(){
+  const groupes = _recensementMetaGroupes().filter(g => !_recensementMetaCrees.has(g.signature));
+  if (!groupes.length) { alert('Rien à générer — tous les templates ont déjà été créés cette session.'); return; }
+  const btn = document.getElementById('btnGenererTemplatesMeta');
+  if (btn) { btn.disabled = true; btn.textContent = 'Génération…'; }
+  let crees = 0, ignores = [];
+  for (const g of groupes) {
+    const exercicesIgnores = [];
+    const seances = g.seances.map(s => ({
+      titre: s.titre,
+      exercices: s.exercices.map(ex => {
+        const exData = _resoudreExerciceBiblio(ex);
+        if (!exData) { exercicesIgnores.push(ex.nom); return null; }
+        return { exercice_id: exData.id, series: ex.series, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '' };
+      }).filter(Boolean),
+    }));
+    const nom = (recensementMetaNoms[g.signature] || ('Focus ' + g.groupesPrio.join(' + '))).trim() || 'Focus';
+    try {
+      await sauvegarderTemplateComplet({
+        id: null, nom, categorie: 'Métabolique',
+        description: 'Généré automatiquement depuis le recensement des programmes clients le ' + new Date().toLocaleDateString('fr-FR') + '.',
+        blocs: [{ type: 'metabolique', nombre_semaines: g.nombreSemaines, seances }],
+      });
+      _recensementMetaCrees.add(g.signature);
+      crees++;
+      if (exercicesIgnores.length) ignores.push(...exercicesIgnores);
+    } catch(e) { /* on continue les autres même si celui-ci échoue */ }
+  }
+  templatesData = null; // force un rechargement du catalogue de templates (nouveaux venus)
+  if (btn) { btn.disabled = false; btn.textContent = '🏗️ Générer tous les templates'; }
+  alert(`${crees} template${crees>1?'s':''} créé${crees>1?'s':''} dans "Templates" (catégorie "Métabolique").${ignores.length ? `\n\n${ignores.length} exercice(s) ignoré(s) (introuvable(s) dans la bibliothèque) : ${[...new Set(ignores)].join(', ')}` : ''}`);
+  renderRecensementMetaSub();
 }
 
 async function chargerTemplateArbo(templateId){
@@ -3879,48 +3960,63 @@ function renderExercicesSub(){
 }
 
 // ── Sous-onglet "Recensement Métabolique" ─────────────────────────────────
-// Tous les blocs de type MÉTABOLIQUE de TOUS les programmes clients (actifs ET inactifs),
-// rangés en "dossiers" par groupe musculaire priorisé (celui qui totalise le plus de séries
-// dans le bloc) — dossiers triés du plus représenté au moins représenté ; à l'intérieur d'un
-// dossier, les programmes sont triés par nombre de séances/semaine décroissant.
+// Objectif (demande coach 2026-08-10) : PAS juste un inventaire — une fabrique de templates
+// réutilisables. Tous les blocs MÉTABOLIQUE de tous les programmes clients (actifs ET inactifs)
+// sont dédoublonnés par contenu strict (mêmes exercices, même ordre, mêmes séries — deux clients
+// avec le même programme = un seul "programme unique"), rangés en dossiers par groupe musculaire
+// priorisé (un programme peut apparaître dans PLUSIEURS dossiers en cas d'égalité au sommet,
+// ex: Pectoraux/Trapèzes/Ischios à 12 séries chacun), avec un nom de template éditable
+// ("Focus X" ou "Focus X + Y" par défaut) et la liste des clients qui l'ont déjà. Le bouton
+// "Générer tous les templates" crée réellement les programme_templates (catégorie "Métabolique"),
+// visibles ensuite dans l'onglet "Templates" normal pour être réassignés à d'autres clients.
 function renderRecensementMetaSub(){
   const sub = document.getElementById('progrSub');
-  const items = _recensementMetaItems();
-  if (!items.length) {
+  const groupesUniques = _recensementMetaGroupes();
+  if (!groupesUniques.length) {
     sub.innerHTML = `<div class="empty-panel"><strong>Aucun bloc métabolique trouvé</strong>Aucun programme client (actif ou non) ne contient de bloc de type "Métabolique" pour l'instant.</div>`;
     return;
   }
+  const nbNonCrees = groupesUniques.filter(g => !_recensementMetaCrees.has(g.signature)).length;
   const parGroupe = {};
-  items.forEach(it => { (parGroupe[it.groupePrio] = parGroupe[it.groupePrio] || []).push(it); });
-  const groupes = Object.keys(parGroupe).sort((a, b) => parGroupe[b].length - parGroupe[a].length);
-  groupes.forEach(g => parGroupe[g].sort((a, b) => b.nbSeances - a.nbSeances));
+  groupesUniques.forEach(g => g.groupesPrio.forEach(nomGroupe => { (parGroupe[nomGroupe] = parGroupe[nomGroupe] || []).push(g); }));
+  const nomsGroupes = Object.keys(parGroupe).sort((a, b) => parGroupe[b].length - parGroupe[a].length);
+  nomsGroupes.forEach(nomGroupe => parGroupe[nomGroupe].sort((a, b) => b.nbSeances - a.nbSeances));
+  const nbClientsTotal = new Set(groupesUniques.flatMap(g => g.assignations.map(a => a.clientId))).size;
 
   sub.innerHTML = `
-    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">${items.length} bloc${items.length>1?'s':''} métabolique${items.length>1?'s':''} · ${groupes.length} groupe${groupes.length>1?'s':''} musculaire${groupes.length>1?'s':''} priorisé${groupes.length>1?'s':''}</div>
-    ${groupes.map(g => {
-      const rows = parGroupe[g];
-      const ouvert = _recensementMetaOuvert.has(g);
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="font-size:12px;color:var(--text-faint);flex:1;">${groupesUniques.length} programme${groupesUniques.length>1?'s':''} unique${groupesUniques.length>1?'s':''} (${nbClientsTotal} client${nbClientsTotal>1?'s':''}) · ${nomsGroupes.length} groupe${nomsGroupes.length>1?'s':''} musculaire${nomsGroupes.length>1?'s':''} priorisé${nomsGroupes.length>1?'s':''}</div>
+      <button id="btnGenererTemplatesMeta" class="btn primary" ${nbNonCrees?'':'disabled'} onclick="_recensementMetaGenererTous()">🏗️ Générer tous les templates${nbNonCrees?` (${nbNonCrees})`:''}</button>
+    </div>
+    ${nomsGroupes.map(nomGroupe => {
+      const rows = parGroupe[nomGroupe];
+      const ouvert = _recensementMetaOuvert.has(nomGroupe);
       return `<div class="table-card" style="margin-bottom:12px;overflow:hidden;">
-        <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="_recensementMetaToggle('${esc(g).replace(/'/g,"\\'")}')">
+        <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="_recensementMetaToggle('${esc(nomGroupe).replace(/'/g,"\\'")}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${ouvert?'0':'-90'}deg);">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
-          <span style="font-weight:700;font-size:13.5px;flex:1;">${esc(g)}</span>
+          <span style="font-weight:700;font-size:13.5px;flex:1;">${esc(nomGroupe)}</span>
           <span class="chip off">${rows.length} programme${rows.length>1?'s':''}</span>
         </div>
         <div style="display:${ouvert?'block':'none'};border-top:1px solid var(--hairline);">
           <table class="clients">
-            <thead><tr><th>Client</th><th>Programme</th><th>Statut</th><th>Séances / sem.</th><th>${esc(g)}</th><th>Répartition complète</th></tr></thead>
+            <thead><tr><th>Nom du template</th><th>Séances / sem.</th><th>Focus</th><th>Assigné à</th><th></th></tr></thead>
             <tbody>
-              ${rows.map(it => `
-                <tr onclick="_recensementMetaOuvrirClient('${it.clientId}')" style="cursor:pointer;">
-                  <td style="font-weight:600;">${esc(it.nomClient)}</td>
-                  <td>${esc(it.progNom)}</td>
-                  <td>${it.progActif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}</td>
-                  <td>${it.nbSeances}</td>
-                  <td>${it.repartition.length ? it.repartition[0][1] : 0} sér.</td>
-                  <td style="font-size:11px;color:var(--text-faint);">${it.repartition.map(([grp,n]) => `${esc(grp)} (${n})`).join(' · ') || '—'}</td>
-                </tr>`).join('')}
+              ${rows.map(g => {
+                const cree = _recensementMetaCrees.has(g.signature);
+                const sigJs = g.signature.replace(/'/g,"\\'").replace(/\n/g,'');
+                return `<tr>
+                  <td style="min-width:180px;">
+                    <input type="text" value="${esc(recensementMetaNoms[g.signature] || '')}" oninput="recensementMetaNoms['${sigJs}']=this.value" ${cree?'disabled':''}
+                      style="width:100%;padding:6px 8px;background:var(--surface-2);border:1px solid transparent;border-radius:6px;color:var(--text);font-size:12.5px;font-weight:600;">
+                  </td>
+                  <td>${g.nbSeances}</td>
+                  <td style="font-size:11px;color:var(--text-faint);">${g.repartition.slice(0,4).map(([grp,n]) => `${esc(grp)} (${n})`).join(' · ')}${g.repartition.length>4?'…':''}</td>
+                  <td style="font-size:11px;">${g.assignations.map(a => `<span class="chip ${a.progActif?'ok':'off'}" style="cursor:pointer;margin:1px;" onclick="_recensementMetaOuvrirClient('${a.clientId}')" title="${esc(a.progNom)}">${a.progActif?'<span class="dot"></span>':''}${esc(a.nomClient)}</span>`).join(' ')}</td>
+                  <td>${cree ? '<span class="chip ok"><span class="dot"></span>Créé</span>' : ''}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
