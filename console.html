@@ -2401,7 +2401,7 @@ function _fmtJourMois(d) { return d.toLocaleDateString('fr-FR', { day:'numeric',
 // ce qui donnait l'impression trompeuse d'une semaine lundi→dimanche même quand jour_bilan
 // décale la semaine sur un autre jour (ex: Perrine, jour_bilan=Dimanche, semaine dimanche→samedi).
 function _bilanDetailBornes(dateValidationIso, createdAtIso, jourBilanNom, envoyeCoach) {
-  if (dateValidationIso) return _bilanWeekBoundsNearest(jourBilanNom, new Date(dateValidationIso + 'T12:00:00'));
+  if (dateValidationIso) return _bilanWeekBoundsNearest(jourBilanNom, new Date(dateValidationIso + 'T12:00:00'), createdAtIso ? new Date(createdAtIso) : null);
   // Le fallback sur created_at ne vaut que pour un bilan encore EN COURS (projection en avant
   // de sa semaine depuis sa création) — un bilan déjà envoyé sans date_validation est un résidu
   // de migration (voir project_architecture_bilans.md) : created_at = date de MIGRATION, pas de
@@ -5627,15 +5627,29 @@ function renderFicheBilansTab(c){
 // Nécessaire pour un envoi tardif : un client dont jour_bilan=Dimanche mais qui valide le
 // lundi (un jour de retard) doit voir "27 Juil→2 Août" (le dimanche qui vient de passer),
 // pas "3 Août→9 Août" (le prochain dimanche, que donnerait une recherche uniquement en avant).
-function _bilanWeekBoundsNearest(jourBilanNom, refDate) {
+// createdAtDate (optionnel) désambiguïse le cas exactement "à égalité d'un jour" (validé pile
+// le jour_bilan lui-même, avant=6/arriere=1 ou l'inverse selon le jour) : si le bilan a été CRÉÉ
+// après le début de la semaine "en avant", il ne peut pas s'agir d'un envoi tardif de la semaine
+// "en arrière" (déjà terminée avant même sa création) — on force alors la semaine en avant même
+// si elle est numériquement plus loin. Bug vécu (Jean-Baptiste Bernard) : bilan CRÉÉ ET validé
+// le dimanche jour_bilan lui-même pour la semaine qui démarre ce jour — la recherche "plus
+// proche" le collait par erreur sur la semaine précédente, déjà occupée par un vrai bilan
+// orphelin (deux bilans distincts affichant la même plage de dates "2 Août → 8 Août").
+function _bilanWeekBoundsNearest(jourBilanNom, refDate, createdAtDate) {
   jourBilanNom = typeof _normJourBilan === 'function' ? _normJourBilan(jourBilanNom) : jourBilanNom;
   const rawIdx = (jourBilanNom && jourBilanNom in _JOURS_IDX_FR) ? _JOURS_IDX_FR[jourBilanNom] : 6;
   const cibleIdx = (rawIdx - 1 + 7) % 7; // veille du jour_bilan — cohérent avec _bilanWeekBounds (api.js)
   const curIdx = (refDate.getDay() + 6) % 7;
   const avant = (cibleIdx - curIdx + 7) % 7;
   const arriere = (curIdx - cibleIdx + 7) % 7;
+  let preferForward = avant <= arriere;
+  if (!preferForward && createdAtDate) {
+    const finForward = new Date(refDate); finForward.setDate(refDate.getDate() + avant); finForward.setHours(23, 59, 59, 999);
+    const debutForward = new Date(finForward); debutForward.setDate(finForward.getDate() - 6); debutForward.setHours(0, 0, 0, 0);
+    if (createdAtDate.getTime() >= debutForward.getTime()) preferForward = true;
+  }
   const fin = new Date(refDate);
-  fin.setDate(refDate.getDate() + (avant <= arriere ? avant : -arriere));
+  fin.setDate(refDate.getDate() + (preferForward ? avant : -arriere));
   fin.setHours(23, 59, 59, 999);
   const debut = new Date(fin); debut.setDate(fin.getDate() - 6); debut.setHours(0, 0, 0, 0);
   return { debut, fin };
@@ -5646,7 +5660,7 @@ function _bilanPeriodeLabel(b, jourBilanNom) {
   if (b.date_validation) {
     // date_validation est un fait déjà connu (fin réelle, à un jour de retard/avance près) —
     // recherche la plus proche, pas uniquement en avant.
-    const { debut, fin } = _bilanWeekBoundsNearest(jourBilanNom, new Date(b.date_validation + 'T12:00:00'));
+    const { debut, fin } = _bilanWeekBoundsNearest(jourBilanNom, new Date(b.date_validation + 'T12:00:00'), b.created_at ? new Date(b.created_at) : null);
     return `${fmt(debut)} → ${fmt(fin)}`;
   }
   if (b.created_at && !b.envoye_coach) {
