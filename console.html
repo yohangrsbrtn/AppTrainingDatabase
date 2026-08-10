@@ -3977,8 +3977,11 @@ function renderRecensementMetaSub(){
     return;
   }
   const nbNonCrees = groupesUniques.filter(g => !_recensementMetaCrees.has(g.signature)).length;
+  // Dossier = la combinaison COMPLÈTE des groupes prioritaires (pas un dossier par groupe
+  // individuel) — sinon un programme à égalité entre 3 groupes apparaîtrait dans 3 dossiers
+  // différents, donnant l'impression (à tort) d'un doublon. Un programme = un seul dossier.
   const parGroupe = {};
-  groupesUniques.forEach(g => g.groupesPrio.forEach(nomGroupe => { (parGroupe[nomGroupe] = parGroupe[nomGroupe] || []).push(g); }));
+  groupesUniques.forEach(g => { const nomGroupe = g.groupesPrio.join(' + '); (parGroupe[nomGroupe] = parGroupe[nomGroupe] || []).push(g); });
   const nomsGroupes = Object.keys(parGroupe).sort((a, b) => parGroupe[b].length - parGroupe[a].length);
   nomsGroupes.forEach(nomGroupe => parGroupe[nomGroupe].sort((a, b) => b.nbSeances - a.nbSeances));
   const nbClientsTotal = new Set(groupesUniques.flatMap(g => g.assignations.map(a => a.clientId))).size;
