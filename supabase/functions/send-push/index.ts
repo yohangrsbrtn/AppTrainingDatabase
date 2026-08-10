@@ -43,6 +43,8 @@ async function envoyerPush(
   body: string | undefined,
   urgent: boolean | undefined,
   page: string | null | undefined,
+  semaine: number | null | undefined,
+  seanceId: number | null | undefined,
 ): Promise<number> {
   const url = cid === "all"
     ? `${SUPABASE_URL}/rest/v1/push_subscriptions?select=endpoint,p256dh,auth`
@@ -61,7 +63,15 @@ async function envoyerPush(
         // notificationclick dans sw.js) plutôt que juste l'accueil.
         // data.page (optionnel) : deep-link — au clic, sw.js navigue directement
         // vers cette page de l'app (ex: "roadmap") au lieu du panneau de notifs.
-        JSON.stringify({ title: title || "AppTraining", body: body || "", data: { openNotifs: true, page: page || null } }),
+        // data.semaine/data.seanceId (optionnels, chrono repos) : en plus de la page, ramène
+        // le client exactement sur la séance/semaine d'où le chrono a été lancé (capturée côté
+        // client à l'instant du clic "Lancer", jamais reconstituée depuis un statut
+        // complet/incomplet — une séance déjà validée peut être re-remplie).
+        JSON.stringify({
+          title: title || "AppTraining",
+          body: body || "",
+          data: { openNotifs: true, page: page || null, semaine: semaine ?? null, seanceId: seanceId ?? null },
+        }),
         // urgent (chrono repos) : priorité "high" + TTL court — un rappel de
         // fin de repos n'a aucune valeur s'il est livré avec plusieurs minutes
         // de retard (vécu : notification arrivée très en retard sur iOS avec
@@ -90,7 +100,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: CORS_HEADERS });
   }
   try {
-    const { title, body, client_id, urgent, page, delay_ms } = await req.json();
+    const { title, body, client_id, urgent, page, delay_ms, semaine, seance_id } = await req.json();
     const cid = client_id || "yohanp";
 
     if (delay_ms && delay_ms > 0) {
@@ -119,7 +129,7 @@ Deno.serve(async (req) => {
           const checkRows = await checkRes.json().catch(() => []);
           if (checkRows?.[0]?.cancelled || checkRows?.[0]?.fired) return;
         }
-        await envoyerPush(cid, title, body, urgent, page);
+        await envoyerPush(cid, title, body, urgent, page, semaine, seance_id);
         if (jobId != null) {
           await fetch(`${SUPABASE_URL}/rest/v1/timer_jobs?id=eq.${jobId}`, {
             method: "PATCH",
@@ -139,7 +149,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sent = await envoyerPush(cid, title, body, urgent, page);
+    const sent = await envoyerPush(cid, title, body, urgent, page, semaine, seance_id);
     return new Response(JSON.stringify({ ok: true, sent }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });

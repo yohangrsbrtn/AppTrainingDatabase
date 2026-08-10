@@ -71,12 +71,25 @@ self.addEventListener('notificationclick', e => {
   // par le coach depuis la fiche client → Roadmap → 🔔 Notifier), on y amène le
   // client directement plutôt que juste ouvrir le panneau de notifications.
   const page = e.notification.data && e.notification.data.page;
-  const targetUrl = '/AppTrainingDatabase/' + (page ? `?openPage=${encodeURIComponent(page)}` : (ouvrirNotifs ? '?openNotif=1' : ''));
+  // semaine/seanceId (optionnels, chrono repos) : en plus de la page, ramène le client
+  // exactement sur la séance/semaine d'où le chrono a été lancé (voir send-push/index.ts et
+  // pcDemarrerChrono/programme-client.js) — jamais reconstitué depuis un statut
+  // complet/incomplet, une séance déjà validée peut être re-remplie.
+  const semaine = e.notification.data && e.notification.data.semaine;
+  const seanceId = e.notification.data && e.notification.data.seanceId;
+  let targetUrl = '/AppTrainingDatabase/';
+  if (page) {
+    const params = new URLSearchParams({ openPage: page });
+    if (seanceId != null) { params.set('semaine', semaine || 1); params.set('seanceId', seanceId); }
+    targetUrl += '?' + params.toString();
+  } else if (ouvrirNotifs) {
+    targetUrl += '?openNotif=1';
+  }
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientsArr => {
       const existant = clientsArr.find(c => c.url.includes('/AppTrainingDatabase/'));
       if (existant) {
-        if (page) existant.postMessage({ type: 'openPage', page });
+        if (page) existant.postMessage({ type: 'openPage', page, semaine, seanceId });
         else if (ouvrirNotifs) existant.postMessage({ type: 'openNotifs' });
         return existant.focus().then(c => c.navigate ? c.navigate(targetUrl) : c);
       }

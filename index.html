@@ -189,7 +189,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=18"></script>
+<script src="programme-client.js?v=19"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=17"></script>
@@ -1019,8 +1019,12 @@ function _apresChargementHome() {
   // sur la page ciblée au lieu du panneau de notifications générique.
   const _openPage = new URLSearchParams(location.search).get('openPage');
   if (_openPage) {
+    // semaine/seanceId (optionnels, chrono repos) : voir goTo/loadProgrammeClient.
+    const _qs = new URLSearchParams(location.search);
+    const _seanceId = _qs.get('seanceId');
+    const _deepLink = _seanceId != null ? { semaine: parseInt(_qs.get('semaine')) || 1, seanceId: parseInt(_seanceId) } : undefined;
     history.replaceState(null, '', window.location.pathname);
-    setTimeout(() => goTo(_openPage), 300);
+    setTimeout(() => goTo(_openPage, _deepLink), 300);
   }
   // Détection déblocages niveau/titres — le coach voit ses propres passages
   // de niveau/titres comme n'importe quel client, seule la vue client (coach
@@ -2552,9 +2556,11 @@ function renderNavBar(active) {
 
 function bindNav() {}
 
-function goTo(page) {
+// deepLink { semaine, seanceId } (optionnel, chrono repos) : ne s'applique qu'aux pages
+// 'training'/'programme-client' — voir loadProgrammeClient (programme-client.js).
+function goTo(page, deepLink) {
   if (page === 'home')             loadHomeSupabase();
-  else if (page === 'training')    loadProgrammeClient();
+  else if (page === 'training')    loadProgrammeClient(deepLink);
   else if (page === 'bilan')       loadBilan();
   else if (page === 'diete')       loadDiete();
   else if (page === 'mensurations') loadMensurations();
@@ -2564,7 +2570,7 @@ function goTo(page) {
   else if (page === 'classement')  loadClassement();
   else if (page === 'progression') loadProgression();
   else if (page === 'collection')  loadCollection();
-  else if (page === 'programme-client') loadProgrammeClient();
+  else if (page === 'programme-client') loadProgrammeClient(deepLink);
   else setPage(page);
 }
 
@@ -2576,7 +2582,7 @@ if ('serviceWorker' in navigator) {
   // postMessage à la place et on ouvre directement le panneau.
   navigator.serviceWorker.addEventListener('message', e => {
     if (e.data && e.data.type === 'openNotifs' && S.client) ouvrirNotificationsClient();
-    else if (e.data && e.data.type === 'openPage' && e.data.page && S.client) goTo(e.data.page);
+    else if (e.data && e.data.type === 'openPage' && e.data.page && S.client) goTo(e.data.page, e.data.seanceId != null ? { semaine: e.data.semaine || 1, seanceId: e.data.seanceId } : undefined);
   });
 }
 

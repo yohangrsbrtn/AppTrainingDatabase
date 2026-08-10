@@ -36,7 +36,13 @@ async function _chargerObjectifsClient() {
   } catch(e) { _pcObjectifs = null; }
 }
 
-async function loadProgrammeClient() {
+// deepLink { semaine, seanceId } (optionnel) : ouvre directement la séance ciblée au lieu du
+// sélecteur — utilisé par la notification "Repos terminé" (voir pcDemarrerChrono) pour ramener
+// le client exactement là où il a lancé son chrono, quels que soient semaine/séance déjà en
+// mémoire ou déjà validés (le client peut re-remplir une séance déjà faite, on ne se base donc
+// JAMAIS sur un statut "complet/incomplet" pour choisir où réouvrir — seulement sur ce qui était
+// réellement affiché au moment du clic sur "Lancer").
+async function loadProgrammeClient(deepLink) {
   _pcSubPage = 'selector';
   setPage('programme-client-loading');
   try {
@@ -60,6 +66,18 @@ async function loadProgrammeClient() {
     if (!resArbo.ok) throw new Error('supabase_' + resArbo.status);
     const blocs = await resArbo.json();
     _pcClientProgramme = Object.assign({}, cp, { blocs });
+    // Retrouve le BLOC qui contient la séance ciblée — peut différer du bloc_actif_id du coach
+    // si celui-ci a changé de bloc actif entre-temps ; sans ce garde-fou, le bloc "par défaut"
+    // écraserait _pcBlocId juste après et la séance ciblée ne serait plus trouvable dedans.
+    if (deepLink && deepLink.seanceId != null) {
+      const blocCible = blocs.find(b => (b.client_programme_seances || []).some(s => s.id === deepLink.seanceId));
+      if (blocCible) {
+        _pcBlocId = blocCible.id;
+        _pcSeanceId = deepLink.seanceId;
+        _pcSemaine = deepLink.semaine || 1;
+        _pcSubPage = 'seance';
+      }
+    }
     if (!_pcSemaine) _pcSemaine = 1;
     // Sélection du bloc : bloc_actif_id défini par le coach, sinon premier bloc
     const defaultBlocId = cp.bloc_actif_id || (blocs[0]?.id ?? null);
@@ -970,6 +988,12 @@ async function pcDemarrerChrono() {
         body: 'C\'est reparti 💪',
         urgent: true,
         delay_ms: _pcTemps * 1000,
+        // Deep-link : ramène le client exactement sur la séance/semaine affichée au moment du
+        // clic "Lancer" — pas une reconstitution a posteriori (ex: "première séance
+        // incomplète"), qui serait fausse si le client re-remplit une séance déjà validée.
+        page: 'training',
+        semaine: _pcSemaine,
+        seance_id: _pcSeanceId,
       })
     }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.job_id != null) _pcJobId = j.job_id; }).catch(() => {});
   }
