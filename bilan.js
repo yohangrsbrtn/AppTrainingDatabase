@@ -86,13 +86,25 @@ async function _supaGetOrCreateBilanCourant(clientId) {
       return { row: arr[0], jourBilanNom };
     }
     // Le dernier bilan couvre une semaine déjà terminée. On ne le quitte QUE s'il n'a pas
-    // encore été envoyé ET qu'on est encore dans sa fenêtre de grâce (jour_bilan à midi,
-    // _bilanDeadline/api.js) — le temps de laisser le client l'envoyer avant de basculer sur
-    // la semaine suivante. Dès qu'il est envoyé (ou la grâce dépassée), plus aucune raison de
-    // continuer à écrire dedans : on tombe dans la création d'un nouveau bilan ci-dessous.
+    // encore été envoyé ET qu'on est encore dans sa fenêtre de RÉUTILISATION — toute la
+    // journée du jour_bilan lui-même (23:59:59), PAS seulement jusqu'à midi. Midi
+    // (_bilanDeadline/api.js) ne sert qu'au calcul de PONCTUALITÉ (bonus XP) — jamais à décider
+    // si on peut encore écrire dans ce bilan. Sans cette distinction, un client qui remplit son
+    // bilan le jour_bilan mais l'après-midi/le soir se voyait créer un TOUT NOUVEAU bilan à son
+    // insu : ses réponses partaient dans le bilan de la semaine SUIVANTE (qui vient tout juste
+    // de commencer) au lieu de la semaine qu'il décrivait réellement — laissant l'ancien bilan
+    // orphelin et vide pour toujours, et le nouveau affichant une semaine "remplie" impossible
+    // (des jours qui n'ont pas encore eu lieu). Bug vécu chez Jean-Baptiste Bernard (23h46) et
+    // Hugo Saubusse (17h58) : semaine réelle et remplie rattachée à la mauvaise semaine à
+    // chaque fois. Dès que le jour_bilan est révolu (lendemain), plus aucune raison de
+    // continuer à écrire dedans : on tombe dans la création d'un nouveau bilan ci-dessous — la
+    // ponctualité (et donc le bonus) reste calculée séparément sur la deadline de midi.
     if (!arr[0].envoye_coach) {
-      const limite = _bilanDeadline(jourBilanNom, new Date(arr[0].created_at));
-      if (new Date() <= limite) {
+      const { fin: finSemaineDernier } = _bilanWeekBounds(jourBilanNom, new Date(arr[0].created_at));
+      const finReutilisation = new Date(finSemaineDernier);
+      finReutilisation.setDate(finReutilisation.getDate() + 1);
+      finReutilisation.setHours(23, 59, 59, 999);
+      if (new Date() <= finReutilisation) {
         await _supaResyncSemaineLabel(arr[0], jourBilanNom);
         await _supaReconcilierNbRepas(arr[0], clientId);
         return { row: arr[0], jourBilanNom };
