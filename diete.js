@@ -1019,6 +1019,24 @@ function _resoudreSlot(s) {
   return r.vi ? ((repas.equivalences || [])[r.vi - 1]?.aliments || []) : repas.aliments;
 }
 
+// Convertit le contenu résolu d'un slot (coach OU menu, deux formats différents — voir
+// _resoudreSlot/_sommeAliments) au format attendu par _dMenuDraft.aliments (nom, quantite,
+// kcal/prot/glu/lip totaux déjà multipliés par la quantité, sucres/fibres/ags jamais null —
+// 0 par défaut comme partout ailleurs dans le draft, cf. confirmerAjoutAliment). Sert de point
+// de départ à "+ Ajouter des aliments à ce repas" (ouvrirAjoutExtraJournal) : le coach/menu
+// d'origine n'est jamais modifié, seul un nouveau menu privé "photo + extra" est créé.
+function _snapshotAlimentsSlot(slotReel) {
+  return _resoudreSlot(slotReel).map(a => {
+    if (a.quantite != null) { // déjà au format "menu"
+      return { nom: a.nom, quantite: a.quantite, kcal: a.kcal || 0, prot: a.prot || 0, glu: a.glu || 0,
+        sucres: a.sucres || 0, fibres: a.fibres || 0, lip: a.lip || 0, ags: a.ags || 0 };
+    }
+    // format "coach" résolu (qte/cals) — pas de détail sucres/fibres/AGS pour cette base.
+    return { nom: a.nom, quantite: Math.round(a.qte || 0), kcal: a.cals || 0, prot: a.prot || 0,
+      glu: a.glu || 0, sucres: 0, fibres: 0, lip: a.lip || 0, ags: 0 };
+  });
+}
+
 // Diète cible du jour actuellement ouvert, résolue (repas + macros) — ou null si aucune.
 function _cibleJournalActuelle() {
   const row = (_dJournal || []).find(s => s.date === _dJournalDateOuverte && s.type === 'cible');
@@ -1141,7 +1159,7 @@ function renderRepasSlotCard(slotNum, slotReel, repasCible) {
 
   if (slotReel) {
     const aliments = _resoudreSlot(slotReel);
-    const modifiable = slotReel.type === 'menu'; // un repas du coach n'est jamais éditable, seul le sien
+    const modifiable = slotReel.type === 'menu'; // un repas du coach n'est jamais éditable, seul le sien (le bouton "+ Ajouter des aliments" ci-dessous fonctionne quand même pour les deux, sans toucher à l'original)
     return `<div class="card"${modifiable ? ` onclick="ouvrirModificationSlotJournal(${slotNum})" style="cursor:pointer;"` : ''}>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
         <div>
@@ -1152,6 +1170,7 @@ function renderRepasSlotCard(slotNum, slotReel, repasCible) {
         <button onclick="event.stopPropagation();_guardAction(() => supprimerSlotJournalClient(${slotReel.ligne}), this)" style="background:transparent;border:none;color:#8892a4;font-size:16px;cursor:pointer;line-height:1;">✕</button>
       </div>
       ${rendreCorpsRepas({ aliments })}
+      <button onclick="event.stopPropagation();ouvrirAjoutExtraJournal(${slotNum})" style="width:100%;margin-top:10px;padding:10px;background:#161b2e;border:1px dashed #a78bfa66;border-radius:10px;color:#a78bfa;font-size:13px;font-weight:700;cursor:pointer;">+ Ajouter des aliments à ce repas</button>
     </div>`;
   }
 
@@ -1273,8 +1292,34 @@ function ouvrirModificationSlotJournal(slotNum) {
   setPage('diete');
 }
 
+// "+ Ajouter des aliments à ce repas" — dispo sur TOUT repas déjà rempli, qu'il vienne d'une
+// diète du coach ou d'un menu enregistré ("j'ai pris ce repas mais j'ai mangé autre chose en
+// plus", "j'ai pris ce menu fois deux"...). Préremplit le compose avec le contenu ACTUEL résolu
+// du repas (_snapshotAlimentsSlot) puis laisse ajouter d'autres aliments par-dessus.
+// Sauvegarder crée systématiquement un NOUVEAU menu privé (jamais de modification de la diète
+// du coach ni du menu partagé d'origine — un "repas + extra" est propre à ce jour précis) et
+// remplace le slot (_remplaceSlot, lu par confirmerComposeJournal) pour pointer dessus.
+function ouvrirAjoutExtraJournal(slotNum) {
+  const slotReel = (_dJournal||[]).find(s => s.date === _dJournalDateOuverte && s.slot === slotNum && s.type !== 'cible');
+  if (!slotReel) return;
+  const aliments = _snapshotAlimentsSlot(slotReel);
+  let cible = { cals: null, prot: null, glu: null, lip: null };
+  const cibleJour = _cibleJournalActuelle();
+  if (cibleJour) {
+    const repasCible = cibleJour.repas[slotNum - 1];
+    if (repasCible) {
+      const sc = _sommeAliments(repasCible.aliments);
+      cible = { cals: Math.round(sc.cals), prot: Math.round(sc.prot), glu: Math.round(sc.glu), lip: Math.round(sc.lip) };
+    }
+  }
+  _dMenuDraft = { nom: slotReel.label, aliments, cible, menuIdEdition: null, _remplaceSlot: slotReel.ligne };
+  _dJournalSlotEnEdition = slotNum;
+  _dJournalAjoutEtape = 'compose';
+  setPage('diete');
+}
+
 function annulerComposeJournal() {
-  const enEdition = !!(_dMenuDraft && _dMenuDraft.menuIdEdition);
+  const enEdition = !!(_dMenuDraft && (_dMenuDraft.menuIdEdition || _dMenuDraft._remplaceSlot));
   _dMenuDraft = null;
   _dJournalAjoutEtape = enEdition ? null : 'choix';
   if (enEdition) _dJournalSlotEnEdition = null;
@@ -1283,7 +1328,7 @@ function annulerComposeJournal() {
 
 function renderJournalCompose() {
   const d = _dMenuDraft;
-  const enEdition = !!d.menuIdEdition;
+  const enEdition = !!(d.menuIdEdition || d._remplaceSlot);
   const s = _sommeAliments(d.aliments);
   const lignes = d.aliments.map((a, i) => `
     <div onclick="ouvrirModifQuantiteDraft(${i})" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;">
@@ -1337,6 +1382,11 @@ async function confirmerComposeJournal() {
     } else {
       const res = await _apiCreerMenu(nom, _dMenuDraft.aliments);
       if (!res || !res.ok) { showToast('Erreur lors de la création.', '#c0392b'); return; }
+      // "+ Ajouter des aliments à ce repas" (ouvrirAjoutExtraJournal) : le slot est déjà rempli
+      // (coach ou menu) — on le supprime d'abord pour laisser la place au nouveau menu privé
+      // "photo + extra" qui le remplace, sans jamais toucher à l'original (diète coach ou menu
+      // partagé).
+      if (_dMenuDraft._remplaceSlot) await _apiSupprimerSlotJournal(_dMenuDraft._remplaceSlot);
       const res2 = await _apiAjouterSlotJournal(_dJournalDateOuverte, slot, 'menu', res.menuId, nom);
       if (!res2 || !res2.ok) { showToast(res2 && res2.erreur === 'slot_deja_rempli' ? 'Ce repas est déjà rempli.' : 'Erreur.', '#c0392b'); return; }
     }
