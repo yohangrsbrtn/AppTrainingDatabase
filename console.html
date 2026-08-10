@@ -1911,9 +1911,11 @@ function _fmtDateHeureBilan(b){
   if (!b) return '—';
   if (b.envoye_at) return _fmtNotifDate(b.envoye_at);
   if (b.date_validation) return b.date_validation.split('-').reverse().join('/');
-  // Résidu de migration (envoyé sans date_validation ni envoye_at) : repli sur la date de
-  // création, même filet de sécurité que l'ancien code qu'elle remplace.
-  if (b.created_at) return b.created_at.slice(0,10).split('-').reverse().join('/');
+  // Un bilan jamais envoyé (encore en cours) n'a PAS de date de validation — repli sur
+  // created_at uniquement pour un résidu de migration (envoye_coach=true mais date perdue),
+  // jamais pour un bilan simplement pas encore rempli (bug vécu : "Validé le 09/08" affiché
+  // sur le bilan en cours de Manon Besnier, créé ce jour-là mais jamais envoyé).
+  if (b.envoye_coach && b.created_at) return b.created_at.slice(0,10).split('-').reverse().join('/');
   return '—';
 }
 
