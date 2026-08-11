@@ -3678,6 +3678,7 @@ let templatesData = null;
 let exoGroupeFiltre = 'all';
 let exoRecherche = '';
 let recensementMetaData = null; // null = pas encore chargé — blocs métabolique de TOUS les programmes clients (actifs ou non)
+let recensementMetaTemplatesSignatures = null; // null = pas encore chargé — Set des signatures de contenu des templates "Métabolique" DÉJÀ créés (persiste entre sessions, contrairement à _recensementMetaCrees qui ne couvre que le clic dans la session en cours)
 let _recensementMetaOuvert = new Set(); // groupes musculaires (dossiers) dépliés
 let _recensementMetaLigneOuverte = new Set(); // signatures des programmes dont la répartition détaillée est dépliée
 let recensementMetaNoms = {};   // signature de contenu -> nom de template proposé/édité par le coach
@@ -3742,6 +3743,24 @@ async function chargerRecensementMeta(){
   );
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
+}
+
+// Charge le contenu de tous les templates déjà créés en catégorie "Métabolique" et renvoie
+// l'ensemble de leurs signatures — permet au recensement de savoir QUELS programmes uniques ont
+// déjà un template, de façon PERSISTANTE (contrairement à _recensementMetaCrees qui ne couvre que
+// les clics faits dans la session en cours) : sans ça, recharger la page faisait réapparaître
+// "+ Créer ce template" sur des programmes déjà générés, risque de doublons en base.
+async function chargerRecensementMetaTemplatesSignatures(){
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/programme_templates?categorie=eq.${encodeURIComponent('Métabolique')}` +
+    `&select=id,programme_blocs(id,programme_seances(id,programme_seance_exercices(id,exercice_id,series)))`,
+    { headers: supaHeaders() }
+  );
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  const templates = await res.json();
+  const set = new Set();
+  templates.forEach(t => set.add(_progSignatureFromTemplateBlocs(t.programme_blocs)));
+  return set;
 }
 
 // Retrouve l'exercice de la bibliothèque coach correspondant à un exercice de programme client —
@@ -3950,6 +3969,7 @@ async function renderProgrammesPage(el){
     } else {
       if (exercicesData === null) exercicesData = await chargerExercices();
       if (recensementMetaData === null) recensementMetaData = await chargerRecensementMeta();
+      if (recensementMetaTemplatesSignatures === null) recensementMetaTemplatesSignatures = await chargerRecensementMetaTemplatesSignatures();
       renderRecensementMetaSub();
     }
   } catch(e) {
@@ -4008,7 +4028,8 @@ function renderRecensementMetaSub(){
     sub.innerHTML = `<div class="empty-panel"><strong>Aucun bloc métabolique trouvé</strong>Aucun programme client (actif ou non) ne contient de bloc de type "Métabolique" pour l'instant.</div>`;
     return;
   }
-  const nbNonCrees = groupesUniques.filter(g => !_recensementMetaCrees.has(g.signature)).length;
+  const estCree = g => _recensementMetaCrees.has(g.signature) || (recensementMetaTemplatesSignatures && recensementMetaTemplatesSignatures.has(g.signature));
+  const nbNonCrees = groupesUniques.filter(g => !estCree(g)).length;
   // Dossier = la combinaison COMPLÈTE des groupes prioritaires (pas un dossier par groupe
   // individuel) — sinon un programme à égalité entre 3 groupes apparaîtrait dans 3 dossiers
   // différents, donnant l'impression (à tort) d'un doublon. Un programme = un seul dossier.
@@ -4039,7 +4060,7 @@ function renderRecensementMetaSub(){
             <thead><tr><th>Nom du template</th><th>Séances / sem.</th><th>Focus</th><th>Assigné à</th><th></th></tr></thead>
             <tbody>
               ${rows.map(g => {
-                const cree = _recensementMetaCrees.has(g.signature);
+                const cree = estCree(g);
                 const sigJs = g.signature.replace(/'/g,"\\'").replace(/\n/g,'');
                 const ligneOuverte = _recensementMetaLigneOuverte.has(g.signature);
                 const totalSeries = g.repartition.reduce((a,[,n])=>a+n,0);
