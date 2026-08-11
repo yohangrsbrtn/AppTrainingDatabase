@@ -44,7 +44,7 @@ Le compte test est `yohanp` (`supabase_only=true` dans `client_profils`). Tester
 
 ### Programmes (snapshot par client)
 
-- **`client_programmes`** : `{ id, client_id, nom, actif, created_at }`
+- **`client_programmes`** : `{ id, client_id, nom, actif, created_at, source_template_id }` — `source_template_id` (FK nullable → `programme_templates.id`, `sql/2026-08-10_source_template_id.sql`) : posé automatiquement par `assignerTemplateAuClient` et par la génération de templates depuis le Recensement Métabolique. Lien stable (survit à un renommage du programme côté client/coach) utilisé par "Assignés" (👥 sur une carte template) pour retrouver les clients, avec badge "modifié" si le contenu actuel diverge du template (comparaison de signature — mêmes exercices/ordre/séries, `_progContentSignature`). Programmes assignés avant l'ajout de ce champ : retrouvés par repli sur le nom (`or=(source_template_id.eq.,nom.eq.)`), moins fiable.
 - **`client_programme_blocs`** → **`client_programme_seances`** → **`client_programme_exercices`** → **`client_programme_logs`**
 - **`client_programme_logs`** : `{ client_programme_exercice_id, semaine, numero_serie, charge, reps, rir, commentaire }` — upsert `(client_programme_exercice_id, semaine, numero_serie)`
 

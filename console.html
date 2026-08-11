@@ -3708,6 +3708,16 @@ async function supprimerExercice(id){
   }
 }
 
+// Signature de contenu d'un ensemble de séances (mêmes exercices, même ordre, mêmes séries —
+// règle de dédoublonnage/comparaison choisie par le coach). Prend une forme normalisée
+// [{ exercices: [{ nom, series }] }] — le nom du repas/séance n'entre PAS dans la signature
+// (deux séances au contenu identique mais renommées restent "identiques"). Réutilisée pour :
+// dédoublonner le recensement (_recensementMetaItems), et détecter si le programme d'un client
+// a divergé de son template d'origine (_progDivergeDuTemplate).
+function _progContentSignature(seances){
+  return (seances||[]).map(s => (s.exercices||[]).map(ex => (ex.nom||'').trim().toLowerCase()+':'+(parseInt(ex.series)||0)).join(',')).join('||');
+}
+
 async function chargerTemplates(){
   // Compte imbriqué léger (ids seulement) pour afficher séances/exercices sur les cartes sans requête séparée.
   const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_templates?order=nom.asc&select=*,programme_blocs(id,programme_seances(id,programme_seance_exercices(id)))`, { headers: supaHeaders() });
@@ -3769,7 +3779,7 @@ function _recensementMetaItems(){
     const repartition = Object.entries(map).sort((a, b) => b[1] - a[1]);
     const maxSeries = repartition.length ? repartition[0][1] : 0;
     const groupesPrio = maxSeries > 0 ? repartition.filter(([,n]) => n === maxSeries).map(([g]) => g) : ['Non défini'];
-    const signature = seances.map(s => s.exercices.map(ex => (ex.nom||'').trim().toLowerCase()+':'+(parseInt(ex.series)||0)).join(',')).join('||');
+    const signature = _progContentSignature(seances);
     return {
       clientId: cp.client_id, nomClient, progId: cp.id, progNom: cp.nom, progActif: !!cp.actif, blocId: b.id,
       nombreSemaines: b.nombre_semaines || null, nbSeances: seances.length, seances, repartition, groupesPrio, signature,
@@ -3799,11 +3809,48 @@ function _recensementMetaGroupes(){
   return Object.values(parSignature);
 }
 
-// Crée réellement les templates (programme_templates + blocs + séances + exercices, catégorie
-// "Métabolique") pour tous les programmes uniques pas encore générés cette session. Les exercices
-// sans correspondance dans la bibliothèque coach (nom introuvable, ni exercice_id ni nom qui matche)
-// sont ignorés — programme_seance_exercices exige un exercice_id valide, contrairement au
-// programme client d'origine qui tolère les résidus de migration.
+// Crée réellement UN template (programme_templates + blocs + séances + exercices, catégorie
+// "Métabolique") pour un programme unique du recensement. Les exercices sans correspondance dans
+// la bibliothèque coach (nom introuvable, ni exercice_id ni nom qui matche) sont ignorés —
+// programme_seance_exercices exige un exercice_id valide, contrairement au programme client
+// d'origine qui tolère les résidus de migration. Une fois créé, retro-lie TOUS les
+// client_programmes d'origine (les "assignations" de ce groupe — ils sont byte-identiques au
+// template qu'on vient de créer à partir d'eux) via source_template_id, pour qu'ils apparaissent
+// immédiatement dans "Assignés" sans badge "modifié".
+async function _recensementMetaGenererUn(g){
+  const exercicesIgnores = [];
+  const seances = g.seances.map(s => ({
+    titre: s.titre,
+    exercices: s.exercices.map(ex => {
+      const exData = _resoudreExerciceBiblio(ex);
+      if (!exData) { exercicesIgnores.push(ex.nom); return null; }
+      return { exercice_id: exData.id, series: ex.series, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '' };
+    }).filter(Boolean),
+  }));
+  const nom = (recensementMetaNoms[g.signature] || ('Focus ' + g.groupesPrio.join(' + '))).trim() || 'Focus';
+  const saved = await sauvegarderTemplateComplet({
+    id: null, nom, categorie: 'Métabolique',
+    description: 'Généré automatiquement depuis le recensement des programmes clients le ' + new Date().toLocaleDateString('fr-FR') + '.',
+    blocs: [{ type: 'metabolique', nombre_semaines: g.nombreSemaines, seances }],
+  });
+  await Promise.all(g.assignations.map(a =>
+    fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${a.progId}`, { method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ source_template_id: saved.id }) })
+  ));
+  _recensementMetaCrees.add(g.signature);
+  templatesData = null; // force un rechargement du catalogue de templates (nouveau venu)
+  return { templateId: saved.id, exercicesIgnores };
+}
+
+async function _recensementMetaGenererUnDepuisBouton(signature){
+  const g = _recensementMetaGroupes().find(gr => gr.signature === signature);
+  if (!g || _recensementMetaCrees.has(g.signature)) return;
+  try {
+    const { exercicesIgnores } = await _recensementMetaGenererUn(g);
+    alert(`Template "${recensementMetaNoms[g.signature]}" créé dans "Templates" (catégorie "Métabolique").${exercicesIgnores.length ? `\n\n${exercicesIgnores.length} exercice(s) ignoré(s) (introuvable(s) dans la bibliothèque) : ${[...new Set(exercicesIgnores)].join(', ')}` : ''}`);
+  } catch(e) { alert('Erreur : ' + e.message); }
+  renderRecensementMetaSub();
+}
+
 async function _recensementMetaGenererTous(){
   const groupes = _recensementMetaGroupes().filter(g => !_recensementMetaCrees.has(g.signature));
   if (!groupes.length) { alert('Rien à générer — tous les templates ont déjà été créés cette session.'); return; }
@@ -3811,28 +3858,12 @@ async function _recensementMetaGenererTous(){
   if (btn) { btn.disabled = true; btn.textContent = 'Génération…'; }
   let crees = 0, ignores = [];
   for (const g of groupes) {
-    const exercicesIgnores = [];
-    const seances = g.seances.map(s => ({
-      titre: s.titre,
-      exercices: s.exercices.map(ex => {
-        const exData = _resoudreExerciceBiblio(ex);
-        if (!exData) { exercicesIgnores.push(ex.nom); return null; }
-        return { exercice_id: exData.id, series: ex.series, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '' };
-      }).filter(Boolean),
-    }));
-    const nom = (recensementMetaNoms[g.signature] || ('Focus ' + g.groupesPrio.join(' + '))).trim() || 'Focus';
     try {
-      await sauvegarderTemplateComplet({
-        id: null, nom, categorie: 'Métabolique',
-        description: 'Généré automatiquement depuis le recensement des programmes clients le ' + new Date().toLocaleDateString('fr-FR') + '.',
-        blocs: [{ type: 'metabolique', nombre_semaines: g.nombreSemaines, seances }],
-      });
-      _recensementMetaCrees.add(g.signature);
+      const { exercicesIgnores } = await _recensementMetaGenererUn(g);
       crees++;
       if (exercicesIgnores.length) ignores.push(...exercicesIgnores);
     } catch(e) { /* on continue les autres même si celui-ci échoue */ }
   }
-  templatesData = null; // force un rechargement du catalogue de templates (nouveaux venus)
   if (btn) { btn.disabled = false; btn.textContent = '🏗️ Générer tous les templates'; }
   alert(`${crees} template${crees>1?'s':''} créé${crees>1?'s':''} dans "Templates" (catégorie "Métabolique").${ignores.length ? `\n\n${ignores.length} exercice(s) ignoré(s) (introuvable(s) dans la bibliothèque) : ${[...new Set(ignores)].join(', ')}` : ''}`);
   renderRecensementMetaSub();
@@ -4020,7 +4051,7 @@ function renderRecensementMetaSub(){
                   <td>${g.nbSeances}</td>
                   <td style="font-size:11px;color:var(--text-faint);">${g.repartition.slice(0,4).map(([grp,n]) => `${esc(grp)} (${n})`).join(' · ')}${g.repartition.length>4?'…':''}</td>
                   <td style="font-size:11px;">${g.assignations.map(a => `<span class="chip ${a.progActif?'ok':'off'}" style="cursor:pointer;margin:1px;" onclick="event.stopPropagation();_recensementMetaOuvrirClient('${a.clientId}')" title="${esc(a.progNom)}">${a.progActif?'<span class="dot"></span>':''}${esc(a.nomClient)}</span>`).join(' ')}</td>
-                  <td>${cree ? '<span class="chip ok"><span class="dot"></span>Créé</span>' : ''}</td>
+                  <td>${cree ? '<span class="chip ok"><span class="dot"></span>Créé</span>' : `<button class="btn" style="font-size:11px;padding:4px 9px;" onclick="event.stopPropagation();_recensementMetaGenererUnDepuisBouton('${sigJs}')">+ Créer ce template</button>`}</td>
                 </tr>
                 ${ligneOuverte ? `<tr>
                   <td colspan="5" style="background:var(--surface-2);padding:14px 16px;">
@@ -4615,7 +4646,7 @@ async function assignerTemplateAuClient(templateId, clientId){
 
   const resCp = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
-    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, actif: true })
+    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, actif: true, source_template_id: templateId })
   });
   if (!resCp.ok) throw new Error('supabase_' + resCp.status);
   const cp = (await resCp.json())[0];
@@ -8967,7 +8998,34 @@ function ouvrirClocheNotifConsole(ev){
   }
 }
 
+// Signature de contenu d'un template déjà chargé via chargerTemplateArbo (programme_blocs bruts,
+// exercice_id seulement — passe par exercicesData pour retrouver le nom, comme partout ailleurs).
+function _progSignatureFromTemplateBlocs(blocsArbo){
+  const seances = (blocsArbo||[]).flatMap(b => (b.programme_seances||[]).map(s => ({
+    exercices: (s.programme_seance_exercices||[]).map(ex => {
+      const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+      return { nom: exData ? exData.nom : '', series: ex.series };
+    }),
+  })));
+  return _progContentSignature(seances);
+}
+// Signature de contenu d'un programme client déjà chargé avec ses blocs/séances/exercices imbriqués
+// (client_programme_exercices a directement `nom`, pas besoin de exercicesData ici).
+function _progSignatureFromClientBlocs(blocs){
+  const seances = (blocs||[]).flatMap(b => (b.client_programme_seances||[]).map(s => ({
+    exercices: (s.client_programme_exercices||[]).map(ex => ({ nom: ex.nom, series: ex.series })),
+  })));
+  return _progContentSignature(seances);
+}
+
 // ── Voir les assignés d'un template programme ─────────────────────────
+// Retrouve les clients par source_template_id (lien stable, posé à l'assignation — voir
+// assignerTemplateAuClient et sql/2026-08-10_source_template_id.sql) — plus par nom en secours
+// pour les assignations faites AVANT ce champ. Le lien par nom seul cassait dès qu'un programme
+// était renommé côté client ou coach (bug signalé par le coach) ; source_template_id ne bouge
+// jamais, même si le nom change. Un badge "modifié" s'affiche si le contenu actuel du client a
+// divergé du template (comparaison de signature, mêmes exercices/ordre/séries) — le client reste
+// dans la liste plutôt que d'en disparaître silencieusement.
 async function ouvrirAssignesTemplate(templateId, templateNom){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -8975,8 +9033,17 @@ async function ouvrirAssignesTemplate(templateId, templateNom){
   overlay.innerHTML = `<div class="modal-box"><h3>Assignés — ${esc(templateNom)}</h3><div style="text-align:center;padding:20px;color:var(--text-faint);">Chargement…</div></div>`;
   document.body.appendChild(overlay);
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?nom=eq.${encodeURIComponent(templateNom)}&order=created_at.desc`, { headers: supaHeaders() });
-    const rows = res.ok ? await res.json() : [];
+    if (exercicesData === null) exercicesData = await chargerExercices();
+    const [resRows, blocsArboTpl] = await Promise.all([
+      fetch(
+        `${SUPABASE_URL}/rest/v1/client_programmes?or=(source_template_id.eq.${templateId},nom.eq.${encodeURIComponent(templateNom)})&order=created_at.desc` +
+        `&select=*,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,client_programme_seances(id,client_programme_exercices(id,nom,series)))`,
+        { headers: supaHeaders() }
+      ).then(r => r.ok ? r.json() : []),
+      chargerTemplateArbo(templateId),
+    ]);
+    const rows = resRows;
+    const tplSignature = _progSignatureFromTemplateBlocs(blocsArboTpl);
     const box = overlay.querySelector('.modal-box');
     if (!rows.length){
       box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3><div class="fiche-prog-empty" style="text-align:center;padding:20px;">Aucun client n'a ce programme assigné.</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
@@ -8985,15 +9052,17 @@ async function ouvrirAssignesTemplate(templateId, templateNom){
     const clientsMap = {};
     data.clients.forEach(c => { clientsMap[c.id] = c.nom; });
     box.innerHTML = `<h3>Assignés — ${esc(templateNom)}</h3>
-      ${rows.map(p=>`
+      ${rows.map(p=>{
+        const divergent = _progSignatureFromClientBlocs(p.client_programme_blocs) !== tplSignature;
+        return `
         <div class="prog-row" style="cursor:default;" onclick="this.closest('.modal-overlay').remove();openPanel('${p.client_id}');setFicheTab('programmes');">
           <div class="mini-avatar">${initials(clientsMap[p.client_id]||p.client_id)}</div>
           <div style="flex:1;min-width:0;">
-            <div class="p-nom">${esc(clientsMap[p.client_id]||p.client_id)}</div>
+            <div class="p-nom">${esc(clientsMap[p.client_id]||p.client_id)}${divergent ? ' <span class="chip off" style="font-size:9.5px;padding:1px 6px;">✎ modifié</span>' : ''}</div>
             <div class="p-meta">Assigné le ${p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}</div>
           </div>
           ${p.actif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}
-        </div>`).join('')}
+        </div>`;}).join('')}
       <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
   } catch(e){
     overlay.querySelector('.modal-box').innerHTML = `<h3>Erreur</h3><div>${esc(e.message)}</div><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Fermer</button></div>`;
