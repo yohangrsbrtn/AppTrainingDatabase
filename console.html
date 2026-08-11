@@ -4396,7 +4396,7 @@ function renderBlocsTemplate(){
             <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
-                <span class="nom" style="flex:unset;" title="${esc(ex.nom)}">${esc(ex.nom)}</span>
+                <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="ouvrirPickerExercice(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire ? `<span style="font-size:10px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(ex.groupe_musculaire)}</span>` : ''}
               </div>
               <div class="exo-champ"><label>Séries</label><input type="text" inputmode="numeric" value="${esc(ex.series||'')}" placeholder="3" oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].series=this.value"></div>
@@ -4545,8 +4545,8 @@ function onDropExo(e, bi, si, ei){
 let pickerGroupeFiltre = 'all';
 let pickerRecherche = '';
 
-function ouvrirPickerExercice(bi, si){
-  tplPickerCible = { bi, si };
+function ouvrirPickerExercice(bi, si, ei){
+  tplPickerCible = { bi, si, ei };
   pickerGroupeFiltre = 'all';
   pickerRecherche = '';
   const overlay = document.createElement('div');
@@ -4555,7 +4555,7 @@ function ouvrirPickerExercice(bi, si){
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-box">
-      <h3>Choisir un exercice</h3>
+      <h3>${ei!==undefined&&ei!==null?"Remplacer l'exercice":'Choisir un exercice'}</h3>
       <div class="field-row"><input type="text" id="pickerSearch" placeholder="Rechercher…" oninput="pickerRecherche=this.value;renderPickerListe()"></div>
       <div class="chip-filter" style="flex-wrap:wrap;margin-bottom:10px;">
         <button class="${pickerGroupeFiltre==='all'?'active':''}" onclick="pickerGroupeFiltre='all';renderPickerListe()">Tous</button>
@@ -4585,7 +4585,7 @@ function renderPickerListe(){
 }
 function ajouterExerciceASeance(exerciceId){
   const ex = exercicesData.find(e => e.id === exerciceId);
-  const { bi, si } = tplPickerCible;
+  const { bi, si, ei } = tplPickerCible;
   // Standard/générique (pas de bloc typé) : rien ne se préremplit, l'ajustement se fait à la main
   // directement dans les colonnes de la séance. Bloc typé : reps/repos de l'exercice pour ce bloc.
   const blocType = tplEnEdition.blocs[bi].type;
@@ -4593,10 +4593,18 @@ function ajouterExerciceASeance(exerciceId){
   const repos = blocType && ex['repos_'+blocType] ? ex['repos_'+blocType] : '';
   const rir   = blocType && ex['rir_'+blocType]   ? ex['rir_'+blocType]   : '';
   const tempo = blocType && ex['tempo_'+blocType] ? ex['tempo_'+blocType] : '';
-  tplEnEdition.blocs[bi].seances[si].exercices.push({
+  const nouveau = {
     exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
     series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo, rir: rir || RIR_PAR_TYPE[blocType] || '', notes: '',
-  });
+  };
+  if (ei !== undefined && ei !== null) {
+    // Remplacement en place (clic sur le nom) : on garde séries + note coach, tout le reste vient du nouvel exercice.
+    const cible = tplEnEdition.blocs[bi].seances[si].exercices[ei];
+    nouveau.series = cible.series; nouveau.notes = cible.notes;
+    tplEnEdition.blocs[bi].seances[si].exercices[ei] = nouveau;
+  } else {
+    tplEnEdition.blocs[bi].seances[si].exercices.push(nouveau);
+  }
   document.getElementById('modal-picker').remove();
   renderBlocsTemplate();
 }
@@ -8258,7 +8266,7 @@ function renderBlocsClientProg(){
             <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
-                <span class="nom" style="flex:unset;">${esc(ex.nom)}</span>
+                <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="cpOuvrirPicker(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire?`<span style="font-size:10px;color:var(--text-faint);">${esc(ex.groupe_musculaire)}</span>`:''}
               </div>
               <div class="exo-champ"><label>Séries</label><input type="text" inputmode="numeric" value="${esc(ex.series||'')}" placeholder="3" oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].series=this.value"></div>
@@ -8404,14 +8412,14 @@ function cpOnDropExo(e,bi,si,ei){
   renderBlocsClientProg();
 }
 
-function cpOuvrirPicker(bi,si){
-  _cpPickerCible={bi,si}; pickerGroupeFiltre='all'; pickerRecherche='';
+function cpOuvrirPicker(bi,si,ei){
+  _cpPickerCible={bi,si,ei}; pickerGroupeFiltre='all'; pickerRecherche='';
   const overlay=document.createElement('div');
   overlay.className='modal-overlay'; overlay.id='modal-picker-cp';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove();};
   overlay.innerHTML=`
     <div class="modal-box">
-      <h3>Choisir un exercice</h3>
+      <h3>${ei!==undefined&&ei!==null?"Remplacer l'exercice":'Choisir un exercice'}</h3>
       <div class="field-row"><input type="text" id="cpPickerSearch" placeholder="Rechercher…" oninput="pickerRecherche=this.value;cpRenderPickerListe()"></div>
       <div class="chip-filter" style="flex-wrap:wrap;margin-bottom:10px;">
         <button class="${pickerGroupeFiltre==='all'?'active':''}" onclick="pickerGroupeFiltre='all';cpRenderPickerListe()">Tous</button>
@@ -8439,15 +8447,23 @@ function cpRenderPickerListe(){
 function cpAjouterExo(exerciceId){
   const ex=(exercicesData||[]).find(e=>e.id===exerciceId);
   if(!ex||!_cpPickerCible) return;
-  const {bi,si}=_cpPickerCible;
+  const {bi,si,ei}=_cpPickerCible;
   const blocType=clientProgEnEdition.blocs[bi].type;
-  clientProgEnEdition.blocs[bi].seances[si].exercices.push({
+  const nouveau={
     id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
     series:null, reps:(blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'')||(REPS_PAR_TYPE[blocType]||''),
     repos:(blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'')||(REPOS_PAR_TYPE[blocType]||''),
     tempo:(blocType&&ex['tempo_'+blocType]?ex['tempo_'+blocType]:''),
     rir:(blocType&&ex['rir_'+blocType]?ex['rir_'+blocType]:'')||(RIR_PAR_TYPE[blocType]||''), notes:''
-  });
+  };
+  if(ei!==undefined&&ei!==null){
+    // Remplacement en place (clic sur le nom) : garde le même id (préserve les logs déjà saisis par le client) + séries/note.
+    const cible=clientProgEnEdition.blocs[bi].seances[si].exercices[ei];
+    nouveau.id=cible.id; nouveau.series=cible.series; nouveau.notes=cible.notes;
+    clientProgEnEdition.blocs[bi].seances[si].exercices[ei]=nouveau;
+  } else {
+    clientProgEnEdition.blocs[bi].seances[si].exercices.push(nouveau);
+  }
   document.getElementById('modal-picker-cp').remove();
   renderBlocsClientProg();
 }
