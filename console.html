@@ -460,8 +460,8 @@
   </div>
   <div id="chatCoachFabMessages" style="flex:1;overflow-y:auto;padding:10px 12px;"></div>
   <div style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;display:flex;gap:6px;">
-    <input id="chatCoachFabInput" type="text" placeholder="Écris un message…" autocomplete="off" style="flex:1;font-size:14px;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChatCoachFab();}">
-    <button class="btn primary" style="padding:7px 12px;" onclick="envoyerMessageChatCoachFab()">Envoyer</button>
+    <textarea id="chatCoachFabInput" rows="1" placeholder="Écris un message…" autocomplete="off" style="flex:1;font-size:14px;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);resize:none;max-height:120px;overflow-y:auto;font-family:inherit;line-height:1.4;" oninput="rmAutoGrow(this)"></textarea>
+    <button class="btn primary" style="padding:7px 12px;align-self:flex-end;" onclick="envoyerMessageChatCoachFab()">Envoyer</button>
   </div>
 </div>
 
@@ -1284,10 +1284,10 @@ function renderChatCoachPage(el) {
         ${_chatCoachLoaded ? '' : '<div style="display:flex;justify-content:center;padding:40px;"><div class="spin"></div></div>'}
       </div>
       <div style="flex-shrink:0;display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--hairline);background:var(--surface-2);">
-        <input id="chatCoachInput" type="text" placeholder="Écris un message…" autocomplete="off"
-          style="flex:1;padding:10px 14px;background:var(--surface-1);color:var(--text);border:1px solid var(--hairline);border-radius:20px;font-size:14px;"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChatCoach();}">
-        <button class="btn primary" onclick="envoyerMessageChatCoach()">Envoyer</button>
+        <textarea id="chatCoachInput" rows="1" placeholder="Écris un message…" autocomplete="off"
+          style="flex:1;padding:10px 14px;background:var(--surface-1);color:var(--text);border:1px solid var(--hairline);border-radius:20px;font-size:14px;resize:none;max-height:160px;overflow-y:auto;font-family:inherit;line-height:1.4;"
+          oninput="rmAutoGrow(this)"></textarea>
+        <button class="btn primary" style="align-self:flex-end;" onclick="envoyerMessageChatCoach()">Envoyer</button>
       </div>
     </div>`;
   if (!_chatCoachLoaded) {
@@ -1324,6 +1324,7 @@ async function _envoyerMessageChatCoachCore(inputId) {
   const texte = input.value.trim();
   if (!texte) return;
   input.value = '';
+  input.style.height = 'auto';
   input.disabled = true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages`, {

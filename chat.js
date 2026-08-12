@@ -266,10 +266,10 @@ function _chatRenderPanel() {
       <div style="text-align:center;padding:40px 0;"><div class="spin" style="margin:0 auto;"></div></div>
     </div>
     <div style="flex-shrink:0;display:flex;gap:8px;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));border-top:1px solid #232838;background:#161923;">
-      <input id="chatInput" type="text" placeholder="Écris un message…" autocomplete="off"
-        style="flex:1;padding:11px 14px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:20px;font-size:16px;"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();envoyerMessageChat();}">
-      <button onclick="envoyerMessageChat()" style="width:42px;height:42px;flex-shrink:0;background:#4f6ef7;border:none;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;">➤</button>
+      <textarea id="chatInput" rows="1" placeholder="Écris un message…" autocomplete="off"
+        style="flex:1;padding:11px 14px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:20px;font-size:16px;resize:none;max-height:140px;overflow-y:auto;font-family:inherit;line-height:1.4;"
+        oninput="_chatAutoGrow(this)"></textarea>
+      <button onclick="envoyerMessageChat()" style="width:42px;height:42px;flex-shrink:0;background:#4f6ef7;border:none;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;align-self:flex-end;">➤</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -506,12 +506,15 @@ function _chatScrollBas() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+function _chatAutoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+
 async function envoyerMessageChat() {
   const input = document.getElementById('chatInput');
   if (!input) return;
   const texte = input.value.trim();
   if (!texte) return;
   input.value = '';
+  input.style.height = 'auto';
   input.disabled = true;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages`, {
