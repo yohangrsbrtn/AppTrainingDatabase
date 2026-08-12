@@ -407,6 +407,9 @@ function _chatOuvrirPicker(messageId) {
 function _chatCloseAllPickers() {
   document.querySelectorAll('[id^="chatPicker-"]').forEach(el => el.remove());
 }
+// Fermeture globale : tout pointerdown en dehors d'un picker le ferme. Sur pointerdown
+// (pas click) pour passer AVANT le clic sur une bulle ci-dessous — sans ça l'ouverture et
+// la fermeture se courent après l'une l'autre selon l'ordre de liaison des écouteurs.
 document.addEventListener('pointerdown', e => {
   if (!e.target.closest('[id^="chatPicker-"]')) _chatCloseAllPickers();
 });
@@ -414,15 +417,22 @@ document.addEventListener('pointerdown', e => {
 // Un simple clic sur une bulle de message ouvre le picker de réaction. Délégation sur le
 // conteneur : les bulles sont ajoutées/retirées dynamiquement, pas besoin de rebrancher un
 // listener par message. On ignore les clics qui viennent de la barre de réactions déjà
-// affichée (chaque puce a son propre onclick pour toggle) ou du picker lui-même.
+// affichée (chaque puce a son propre onclick pour toggle) ou du picker lui-même. Recliquer
+// sur la même bulle qui a déjà son picker ouvert le referme (toggle) au lieu de le rouvrir
+// à l'identique. `stopPropagation` empêche le fermeur global ci-dessus de défaire
+// l'ouverture qu'on vient de faire (il tourne en premier, sur pointerdown, avant ce clic).
 function _chatBindLongPress(container) {
   if (!container || container._longPressBound) return;
   container._longPressBound = true;
-  container.addEventListener('click', e => {
+  container.addEventListener('pointerdown', e => {
     if (e.target.closest('[id^="chatPicker-"]') || e.target.closest('[id^="chatReact-"]')) return;
     const bulle = e.target.closest('[data-msg-id]');
     if (!bulle) return;
-    _chatOuvrirPicker(Number(bulle.dataset.msgId));
+    e.stopPropagation();
+    const id = Number(bulle.dataset.msgId);
+    const dejaOuvert = !!document.getElementById('chatPicker-' + id);
+    _chatCloseAllPickers();
+    if (!dejaOuvert) _chatOuvrirPicker(id);
   });
 }
 

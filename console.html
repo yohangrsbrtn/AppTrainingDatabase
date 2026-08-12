@@ -1149,20 +1149,30 @@ function _chatCoachOuvrirPicker(messageId) {
   picker.addEventListener('click', e => e.stopPropagation());
   bar.insertAdjacentElement('afterend', picker);
 }
+// Fermeture globale : tout pointerdown en dehors d'un picker le ferme. Sur pointerdown
+// (pas click) pour passer AVANT le clic sur une bulle ci-dessous — sans ça l'ouverture et
+// la fermeture se courent après l'une l'autre selon l'ordre de liaison des écouteurs.
 document.addEventListener('pointerdown', e => {
   if (!e.target.closest('[id^="chatCoachPicker-"]')) document.querySelectorAll('[id^="chatCoachPicker-"]').forEach(el => el.remove());
 });
 // Un simple clic sur une bulle de message ouvre le picker de réaction (ignore les clics
 // venant de la barre de réactions déjà affichée ou du picker lui-même, qui gèrent leur
-// propre onclick).
+// propre onclick). Rester sur la même bulle qui a déjà son picker ouvert le referme
+// (toggle) au lieu de le rouvrir à l'identique — sinon cliquer pour fermer semblait ne
+// rien faire. `stopPropagation` empêche le fermeur global ci-dessus de défaire l'ouverture
+// qu'on vient de faire (il tourne en premier, sur pointerdown, avant ce clic).
 function _chatCoachBindLongPress(container) {
   if (!container || container._longPressBound) return;
   container._longPressBound = true;
-  container.addEventListener('click', e => {
+  container.addEventListener('pointerdown', e => {
     if (e.target.closest('[id^="chatCoachPicker-"]') || e.target.closest('[id^="chatCoachReact-"]')) return;
     const bulle = e.target.closest('[data-msg-id]');
     if (!bulle) return;
-    _chatCoachOuvrirPicker(Number(bulle.dataset.msgId));
+    e.stopPropagation();
+    const id = Number(bulle.dataset.msgId);
+    const dejaOuvert = !!document.getElementById('chatCoachPicker-' + id);
+    document.querySelectorAll('[id^="chatCoachPicker-"]').forEach(el => el.remove());
+    if (!dejaOuvert) _chatCoachOuvrirPicker(id);
   });
 }
 async function _chatCoachToggleReaction(messageId, emoji) {
