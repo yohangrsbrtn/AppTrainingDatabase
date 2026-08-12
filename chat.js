@@ -551,7 +551,7 @@ async function _gifChatCharger(q){
     const resultats = await _giphyRechercher(q);
     if (_gifChatQuery !== q) return;
     grille.innerHTML = resultats.length
-      ? resultats.map(g => `<img src="${esc(g.apercu)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="_gifChatChoisir(${JSON.stringify(g.plein)})">`).join('')
+      ? resultats.map(g => `<img src="${esc(g.apercu)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="_gifChatChoisir(this.dataset.url)" data-url="${esc(g.plein)}">`).join('')
       : `<div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Aucun résultat.</div>`;
   } catch(e) {
     grille.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Erreur de chargement.</div>`;
