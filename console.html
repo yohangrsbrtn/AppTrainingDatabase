@@ -8500,7 +8500,7 @@ async function sauvegarderProgrammeClient(){
         for(let ei=0;ei<s.exercices.length;ei++){
           const ex=s.exercices[ei];
           if(ex.id){
-            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
           } else {
             const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
             ex.id=(await r.json())[0].id;
