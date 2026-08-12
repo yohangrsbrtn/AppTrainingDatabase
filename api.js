@@ -361,6 +361,38 @@ function attacherSwipeFermeture(overlayEl, onClose) {
   zone.addEventListener('touchcancel', finDrag);
 }
 
+// ── GIFs dans le chat (Giphy) — partagé chat.js (mobile) + console.html ────────────
+// Clé gratuite obtenue sur https://developers.giphy.com ("Create an App", instantané,
+// sans CB). Exposée côté client comme SUPABASE_ANON_KEY juste au-dessus — pas un secret
+// sensible pour ce type de clé (rate-limitée par Giphy, prévue pour un usage front-end).
+const GIPHY_API_KEY = 'À_REMPLACER_PAR_TA_CLÉ_GIPHY';
+
+// Un message GIF est stocké tel quel dans chat_messages.texte (juste l'URL de l'image) —
+// pas de nouvelle colonne : on distingue au rendu via ce détecteur, réutilisé pour l'envoi
+// ET l'affichage. Évite une migration SQL pour une fonctionnalité par ailleurs simple.
+function _estUrlGif(texte) {
+  if (!texte) return false;
+  const t = String(texte).trim();
+  if (!t || /\s/.test(t)) return false;
+  return /^https?:\/\/\S+\.(gif|webp)(\?\S*)?$/i.test(t) || /\.giphy\.com\/media\//i.test(t);
+}
+
+function _chatRenduContenu(texte) {
+  return _estUrlGif(texte)
+    ? `<img src="${esc(texte)}" loading="lazy" style="max-width:220px;max-height:220px;border-radius:10px;display:block;">`
+    : esc(texte);
+}
+
+async function _giphyRechercher(query) {
+  const url = query
+    ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=24&rating=pg-13&lang=fr`
+    : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=pg-13`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('giphy_' + res.status);
+  const data = await res.json();
+  return (data.data || []).map(g => ({ id: g.id, apercu: g.images.fixed_height_small.url, plein: g.images.fixed_height.url }));
+}
+
 // Verrou de scroll d'arrière-plan tant qu'au moins un volet (.sheet-body) est
 // ouvert — centralisé via MutationObserver plutôt que dupliqué dans chaque
 // fonction d'ouverture/fermeture (une dizaine de points d'entrée différents

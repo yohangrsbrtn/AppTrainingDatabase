@@ -269,6 +269,7 @@ function _chatRenderPanel() {
       <textarea id="chatInput" rows="1" placeholder="Écris un message…" autocomplete="off"
         style="flex:1;padding:11px 14px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:20px;font-size:16px;resize:none;max-height:140px;overflow-y:auto;font-family:inherit;line-height:1.4;"
         oninput="_chatAutoGrow(this)"></textarea>
+      <button onclick="ouvrirPickerGifChat()" title="Envoyer un GIF" style="width:42px;height:42px;flex-shrink:0;background:#1e2235;border:1px solid #2d3142;border-radius:50%;color:#e8eaf0;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;align-self:flex-end;">🎞️</button>
       <button onclick="envoyerMessageChat()" style="width:42px;height:42px;flex-shrink:0;background:#4f6ef7;border:none;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;align-self:flex-end;">➤</button>
     </div>
   </div>`;
@@ -469,10 +470,12 @@ function _chatBulleHtml(m) {
   // vertical de la bulle, 9px) chevauche le bas, jamais la ligne de texte elle-même,
   // même sur un message court d'une seule ligne (le padding protège toujours ce seuil).
   const reactBar = `<div id="chatReact-${m.id}" style="position:absolute;bottom:-11px;right:8px;display:flex;gap:3px;z-index:2;">${_chatReactionsBarHtml(m.id)}</div>`;
+  const estGif = _estUrlGif(m.texte);
+  const padding = estGif ? '3px' : '9px 13px';
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:78%;">
-        <div style="position:relative;background:linear-gradient(135deg,#4f6ef7,#3b5ce0);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+        <div style="position:relative;background:${estGif?'#1e2235':'linear-gradient(135deg,#4f6ef7,#3b5ce0)'};color:#fff;border-radius:14px 14px 3px 14px;padding:${padding};font-size:14px;line-height:1.4;word-break:break-word;">${_chatRenduContenu(m.texte)}${reactBar}</div>
         <div style="font-size:10px;color:#555e7a;text-align:right;margin-top:8px;">${heure}</div>
       </div>
     </div>`;
@@ -481,7 +484,7 @@ function _chatBulleHtml(m) {
     ${_avatarCircleHtml(p.photo_url, initiales, 26)}
     <div style="max-width:74%;">
       <div style="font-size:11px;color:#8892a4;margin-bottom:2px;">${esc(_chatNomAffiche(m.client_id))}</div>
-      <div style="position:relative;background:#1e2235;color:#e8eaf0;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:14px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+      <div style="position:relative;background:#1e2235;color:#e8eaf0;border-radius:14px 14px 14px 3px;padding:${padding};font-size:14px;line-height:1.4;word-break:break-word;">${_chatRenduContenu(m.texte)}${reactBar}</div>
       <div style="font-size:10px;color:#555e7a;margin-top:8px;">${heure}</div>
     </div>
   </div>`;
@@ -507,6 +510,59 @@ function _chatScrollBas() {
 }
 
 function _chatAutoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+
+// ── Picker GIF (Giphy) — même logique que console.html (_giphyRechercher/_estUrlGif
+// viennent de api.js), UI en feuille remontante pour rester cohérent avec le reste du mobile.
+let _gifChatQuery = '';
+let _gifChatDebounce = null;
+function ouvrirPickerGifChat(){
+  _gifChatQuery = '';
+  const overlay = document.createElement('div');
+  overlay.id = 'gifChatOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9500;display:flex;align-items:flex-end;';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div style="width:100%;max-height:70vh;background:#12141e;border-radius:16px 16px 0 0;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom);">
+      <div style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #232838;">
+        <div style="font-size:15px;font-weight:700;color:#e8eaf0;">🎞️ Choisir un GIF</div>
+        <button onclick="document.getElementById('gifChatOverlay').remove()" style="width:32px;height:32px;background:#1e2235;border:none;border-radius:9px;color:#8892a4;font-size:16px;cursor:pointer;">✕</button>
+      </div>
+      <div style="padding:10px 16px;">
+        <input type="text" id="gifChatSearch" placeholder="Rechercher…" oninput="_gifChatRecherche(this.value)"
+          style="width:100%;padding:10px 12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+      </div>
+      <div id="gifChatGrille" style="flex:1;overflow-y:auto;padding:0 16px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+        <div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Chargement…</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  _gifChatCharger('');
+}
+function _gifChatRecherche(q){
+  _gifChatQuery = q;
+  clearTimeout(_gifChatDebounce);
+  _gifChatDebounce = setTimeout(() => _gifChatCharger(q), 350);
+}
+async function _gifChatCharger(q){
+  const grille = document.getElementById('gifChatGrille');
+  if (!grille) return;
+  grille.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Chargement…</div>`;
+  try {
+    const resultats = await _giphyRechercher(q);
+    if (_gifChatQuery !== q) return;
+    grille.innerHTML = resultats.length
+      ? resultats.map(g => `<img src="${esc(g.apercu)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="_gifChatChoisir(${JSON.stringify(g.plein)})">`).join('')
+      : `<div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Aucun résultat.</div>`;
+  } catch(e) {
+    grille.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:16px;color:#8892a4;">Erreur de chargement.</div>`;
+  }
+}
+function _gifChatChoisir(url){
+  const input = document.getElementById('chatInput');
+  if (input) { input.value = url; envoyerMessageChat(); }
+  const overlay = document.getElementById('gifChatOverlay');
+  if (overlay) overlay.remove();
+}
 
 async function envoyerMessageChat() {
   const input = document.getElementById('chatInput');

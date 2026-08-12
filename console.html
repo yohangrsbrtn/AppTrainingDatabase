@@ -461,12 +461,13 @@
   <div id="chatCoachFabMessages" style="flex:1;overflow-y:auto;padding:10px 12px;"></div>
   <div style="padding:8px 10px;border-top:1px solid var(--hairline);flex-shrink:0;display:flex;gap:6px;">
     <textarea id="chatCoachFabInput" rows="1" placeholder="Écris un message…" autocomplete="off" style="flex:1;font-size:14px;padding:7px 9px;border-radius:var(--radius-sm);border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);resize:none;max-height:120px;overflow-y:auto;font-family:inherit;line-height:1.4;" oninput="rmAutoGrow(this)"></textarea>
+    <button class="btn" style="padding:7px 10px;align-self:flex-end;" title="Envoyer un GIF" onclick="ouvrirPickerGif('chatCoachFabInput','envoyerMessageChatCoachFab')">🎞️</button>
     <button class="btn primary" style="padding:7px 12px;align-self:flex-end;" onclick="envoyerMessageChatCoachFab()">Envoyer</button>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=11"></script>
+<script src="api.js?v=12"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -1255,10 +1256,12 @@ function _chatCoachBulle(m) {
   const nom = moi ? 'Toi' : ([p.prenom, p.nom].filter(Boolean).join(' ') || m.client_id);
   const heure = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
   const reactBar = `<div id="chatCoachReact-${m.id}" style="position:absolute;bottom:-11px;right:8px;display:flex;gap:3px;z-index:2;">${_chatCoachReactionsBarHtml(m.id)}</div>`;
+  const estGif = _estUrlGif(m.texte);
+  const padding = estGif ? '3px' : '9px 13px';
   if (moi) {
     return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;" data-msg-id="${m.id}">
       <div style="max-width:60%;">
-        <div style="position:relative;background:var(--accent);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:13px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+        <div style="position:relative;background:${estGif?'var(--surface-2)':'var(--accent)'};color:#fff;border-radius:14px 14px 3px 14px;padding:${padding};font-size:13px;line-height:1.4;word-break:break-word;">${_chatRenduContenu(m.texte)}${reactBar}</div>
         <div style="font-size:10px;color:var(--text-faint);text-align:right;margin-top:8px;">${heure}</div>
       </div>
     </div>`;
@@ -1267,7 +1270,7 @@ function _chatCoachBulle(m) {
     ${_chatCoachAvatar(p, 26)}
     <div style="max-width:60%;">
       <div style="font-size:11px;color:var(--text-faint);margin-bottom:2px;">${esc(nom)}</div>
-      <div style="position:relative;background:var(--surface-2);color:var(--text);border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:13px;line-height:1.4;word-break:break-word;">${esc(m.texte)}${reactBar}</div>
+      <div style="position:relative;background:var(--surface-2);color:var(--text);border-radius:14px 14px 14px 3px;padding:${padding};font-size:13px;line-height:1.4;word-break:break-word;">${_chatRenduContenu(m.texte)}${reactBar}</div>
       <div style="font-size:10px;color:var(--text-faint);margin-top:8px;">${heure}</div>
     </div>
   </div>`;
@@ -1287,6 +1290,7 @@ function renderChatCoachPage(el) {
         <textarea id="chatCoachInput" rows="1" placeholder="Écris un message…" autocomplete="off"
           style="flex:1;padding:10px 14px;background:var(--surface-1);color:var(--text);border:1px solid var(--hairline);border-radius:20px;font-size:14px;resize:none;max-height:160px;overflow-y:auto;font-family:inherit;line-height:1.4;"
           oninput="rmAutoGrow(this)"></textarea>
+        <button class="btn" style="align-self:flex-end;" title="Envoyer un GIF" onclick="ouvrirPickerGif('chatCoachInput','envoyerMessageChatCoach')">🎞️</button>
         <button class="btn primary" style="align-self:flex-end;" onclick="envoyerMessageChatCoach()">Envoyer</button>
       </div>
     </div>`;
@@ -1342,6 +1346,57 @@ async function _envoyerMessageChatCoachCore(inputId) {
 }
 function envoyerMessageChatCoach() { return _envoyerMessageChatCoachCore('chatCoachInput'); }
 function envoyerMessageChatCoachFab() { return _envoyerMessageChatCoachCore('chatCoachFabInput'); }
+
+// ── Picker GIF (Giphy) — partagé entre le panneau flottant et la page Chat dédiée ──────────
+let _gifPickerCible = null; // { inputId, sendFn }
+let _gifPickerQuery = '';
+let _gifPickerDebounce = null;
+
+function ouvrirPickerGif(inputId, sendFn){
+  _gifPickerCible = { inputId, sendFn };
+  _gifPickerQuery = '';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay'; overlay.id = 'modal-picker-gif';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:420px;">
+      <h3>🎞️ Choisir un GIF</h3>
+      <div class="field-row"><input type="text" id="gifPickerSearch" placeholder="Rechercher…" oninput="_gifPickerRecherche(this.value)"></div>
+      <div id="gifPickerGrille" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-height:340px;overflow-y:auto;">
+        <div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-faint);">Chargement…</div>
+      </div>
+      <div class="modal-actions"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-picker-gif').remove()">Fermer</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  _gifPickerCharger('');
+}
+function _gifPickerRecherche(q){
+  _gifPickerQuery = q;
+  clearTimeout(_gifPickerDebounce);
+  _gifPickerDebounce = setTimeout(() => _gifPickerCharger(q), 350);
+}
+async function _gifPickerCharger(q){
+  const grille = document.getElementById('gifPickerGrille');
+  if (!grille) return;
+  grille.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-faint);">Chargement…</div>`;
+  try {
+    const resultats = await _giphyRechercher(q);
+    if (_gifPickerQuery !== q) return; // une recherche plus récente est partie entre-temps, on ignore ce résultat obsolète
+    grille.innerHTML = resultats.length
+      ? resultats.map(g => `<img src="${esc(g.apercu)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="_gifPickerChoisir(${JSON.stringify(g.plein)})">`).join('')
+      : `<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-faint);">Aucun résultat.</div>`;
+  } catch(e) {
+    grille.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--text-faint);">Erreur de chargement.</div>`;
+  }
+}
+function _gifPickerChoisir(url){
+  if (_gifPickerCible) {
+    const input = document.getElementById(_gifPickerCible.inputId);
+    if (input) { input.value = url; window[_gifPickerCible.sendFn](); }
+  }
+  const overlay = document.getElementById('modal-picker-gif');
+  if (overlay) overlay.remove();
+}
 
 // ── Bouton flottant chat (💬, accès rapide depuis toute la console, comme le
 // pense-bête 📌 juste en-dessous) — panneau indépendant de la page dédiée
