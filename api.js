@@ -365,7 +365,7 @@ function attacherSwipeFermeture(overlayEl, onClose) {
 // Clé gratuite obtenue sur https://developers.giphy.com ("Create an App", instantané,
 // sans CB). Exposée côté client comme SUPABASE_ANON_KEY juste au-dessus — pas un secret
 // sensible pour ce type de clé (rate-limitée par Giphy, prévue pour un usage front-end).
-const GIPHY_API_KEY = 'À_REMPLACER_PAR_TA_CLÉ_GIPHY';
+const GIPHY_API_KEY = 'a50U1v0QkxxwknXkjP4AeyxSF12jKFft';
 
 // Un message GIF est stocké tel quel dans chat_messages.texte (juste l'URL de l'image) —
 // pas de nouvelle colonne : on distingue au rendu via ce détecteur, réutilisé pour l'envoi
