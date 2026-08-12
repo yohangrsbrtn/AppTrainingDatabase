@@ -411,27 +411,19 @@ document.addEventListener('pointerdown', e => {
   if (!e.target.closest('[id^="chatPicker-"]')) _chatCloseAllPickers();
 });
 
-// Appui long (souris ou tactile, unifié via pointer events) sur une bulle de message —
-// ouvre le picker de réaction. Un déplacement notable pendant l'appui annule (c'est un
-// scroll, pas une intention de réagir). Délégation sur le conteneur : les bulles sont
-// ajoutées/retirées dynamiquement, pas besoin de rebrancher un listener par message.
+// Un simple clic sur une bulle de message ouvre le picker de réaction. Délégation sur le
+// conteneur : les bulles sont ajoutées/retirées dynamiquement, pas besoin de rebrancher un
+// listener par message. On ignore les clics qui viennent de la barre de réactions déjà
+// affichée (chaque puce a son propre onclick pour toggle) ou du picker lui-même.
 function _chatBindLongPress(container) {
   if (!container || container._longPressBound) return;
   container._longPressBound = true;
-  let timer = null, startX = 0, startY = 0;
-  const annuler = () => { clearTimeout(timer); timer = null; };
-  container.addEventListener('pointerdown', e => {
+  container.addEventListener('click', e => {
+    if (e.target.closest('[id^="chatPicker-"]') || e.target.closest('[id^="chatReact-"]')) return;
     const bulle = e.target.closest('[data-msg-id]');
     if (!bulle) return;
-    const id = Number(bulle.dataset.msgId);
-    startX = e.clientX; startY = e.clientY;
-    timer = setTimeout(() => { timer = null; if (navigator.vibrate) navigator.vibrate(12); _chatOuvrirPicker(id); }, 420);
+    _chatOuvrirPicker(Number(bulle.dataset.msgId));
   });
-  container.addEventListener('pointermove', e => {
-    if (timer && (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8)) annuler();
-  });
-  container.addEventListener('pointerup', annuler);
-  container.addEventListener('pointercancel', annuler);
 }
 
 // Toggle optimiste (mise à jour locale immédiate) + persistance Supabase — la mise à

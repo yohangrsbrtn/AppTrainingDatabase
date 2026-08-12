@@ -1152,23 +1152,18 @@ function _chatCoachOuvrirPicker(messageId) {
 document.addEventListener('pointerdown', e => {
   if (!e.target.closest('[id^="chatCoachPicker-"]')) document.querySelectorAll('[id^="chatCoachPicker-"]').forEach(el => el.remove());
 });
+// Un simple clic sur une bulle de message ouvre le picker de réaction (ignore les clics
+// venant de la barre de réactions déjà affichée ou du picker lui-même, qui gèrent leur
+// propre onclick).
 function _chatCoachBindLongPress(container) {
   if (!container || container._longPressBound) return;
   container._longPressBound = true;
-  let timer = null, startX = 0, startY = 0;
-  const annuler = () => { clearTimeout(timer); timer = null; };
-  container.addEventListener('pointerdown', e => {
+  container.addEventListener('click', e => {
+    if (e.target.closest('[id^="chatCoachPicker-"]') || e.target.closest('[id^="chatCoachReact-"]')) return;
     const bulle = e.target.closest('[data-msg-id]');
     if (!bulle) return;
-    const id = Number(bulle.dataset.msgId);
-    startX = e.clientX; startY = e.clientY;
-    timer = setTimeout(() => { timer = null; _chatCoachOuvrirPicker(id); }, 420);
+    _chatCoachOuvrirPicker(Number(bulle.dataset.msgId));
   });
-  container.addEventListener('pointermove', e => {
-    if (timer && (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8)) annuler();
-  });
-  container.addEventListener('pointerup', annuler);
-  container.addEventListener('pointercancel', annuler);
 }
 async function _chatCoachToggleReaction(messageId, emoji) {
   const map = _chatCoachReactions[messageId] = _chatCoachReactions[messageId] || {};
