@@ -9588,10 +9588,29 @@ function retourDepuisEditeurDiete() {
   else { setNav(_dietNavBack || 'dietes'); }
 }
 
+// Renomme chaque repas "Repas N" (+ suffixe préservé : " (équivalent)", " (variante)"...)
+// pour refléter sa position réelle après glisser-déposer/ajout/suppression — même principe
+// que _renumeroterSeances côté programmes. Un repas et TOUS ses équivalents (même `ordre`)
+// reçoivent le même numéro N, puisqu'ils représentent le même emplacement. Un nom qui ne
+// suit pas ce motif (renommé librement par le coach) est laissé intact.
+function _renumeroterRepas(tpl){
+  const grouped = {};
+  tpl.repas.forEach((r,ri) => { const o = r.ordre != null ? r.ordre : ri; (grouped[o]=grouped[o]||[]).push(ri); });
+  const ordres = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
+  ordres.forEach((o, i) => {
+    grouped[o].forEach(ri => {
+      const r = tpl.repas[ri];
+      const m = /^Repas\s+\d+(.*)$/i.exec((r.nom||'').trim());
+      if (m) r.nom = 'Repas ' + (i+1) + (m[1]||'');
+    });
+  });
+}
+
 function ajouterRepas(slot){
   const tpl = _dieteEnEdition(slot);
   const maxOrdre = tpl.repas.reduce((m,r) => Math.max(m, r.ordre != null ? r.ordre : 0), -1);
   tpl.repas.push({ nom:`Repas ${maxOrdre+2}`, ordre:maxOrdre+1, variante_index:0, aliments:[] });
+  _renumeroterRepas(tpl);
   _reRenderDieteEditeur(slot);
 }
 
@@ -9640,6 +9659,7 @@ function supprimerRepas(ri, slot){
       .sort((a,b) => (a.variante_index||0) - (b.variante_index||0));
     siblings.forEach((r, i) => { r.variante_index = i; });
   }
+  _renumeroterRepas(tpl);
   _reRenderDieteEditeur(slot);
 }
 
@@ -9665,6 +9685,7 @@ function repasOnDrop(e, targetGi, slot){
   // Renumérote 0..N-1 dans le nouvel ordre — tous les repas d'un même groupe
   // (variantes incluses) reçoivent le même nouvel ordre pour rester ensemble.
   ordres.forEach((oldOrdre, i) => { grouped[oldOrdre].forEach(ri => { tpl.repas[ri].ordre = i; }); });
+  _renumeroterRepas(tpl);
   _reRenderDieteEditeur(slot);
 }
 
