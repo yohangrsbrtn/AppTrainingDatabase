@@ -8739,6 +8739,11 @@ async function sauvegarderFicheSandbox(clientId){
       cSync.mode_paiement = ficheData.profil.mode_paiement || null;
       cSync.banque_paiement = ficheData.profil.banque_paiement || null;
     }
+    // ficheData.xpData est un cache calculé une fois (date_debut/date_debut_suivi/
+    // seances_cible y entrent) — sans ce recalcul, changer date_debut ici laissait
+    // l'onglet Progression afficher les anciens séances/bilans "attendus" tant que la
+    // fiche n'était pas totalement rechargée (bug signalé par le coach, 2026-08-13).
+    if (ficheData.xpData) ficheData.xpData = await chargerClientProgressionXP(clientId);
     if (btn){ btn.textContent='Enregistré ✓'; setTimeout(()=>{ btn.textContent='Enregistrer les informations'; btn.disabled=false; },2000); }
   } catch(e){ alert('Erreur : '+e.message); if (btn){ btn.textContent='Enregistrer les informations'; btn.disabled=false; } }
 }
