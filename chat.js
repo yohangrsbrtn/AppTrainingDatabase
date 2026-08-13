@@ -28,6 +28,19 @@ const _CHAT_FAB_HIDDEN_KEY = 'at_chat_fab_hidden';
 // par client_id, localStorage) ─────────────────────────────────────────────
 function _chatLastReadKey() { return 'at_chat_dernier_lu_' + (S.client || ''); }
 
+// Scrolle sur le premier message non lu (repère lu AVANT que _chatMarquerToutLu n'écrase
+// le localStorage) plutôt que systématiquement tout en bas — sert notamment au clic sur
+// une notification de chat : on arrive au début de ce qu'on a manqué, pas à la toute fin
+// de la conversation si plusieurs messages ont été envoyés depuis.
+function _chatScrollVersNonLu(dernierLuAvant){
+  const premierNonLu = _chatMessages.find(m => m.id > dernierLuAvant && m.client_id !== S.client);
+  if (premierNonLu) {
+    const bulle = document.querySelector(`#chatMessages [data-msg-id="${premierNonLu.id}"]`);
+    if (bulle) { bulle.scrollIntoView({ block: 'start' }); return; }
+  }
+  _chatScrollBas();
+}
+
 // Calcule le nombre de messages non lus au démarrage (pas seulement ceux reçus
 // pendant que l'app est ouverte, cf. _chatSubscribe) : compare le dernier id lu
 // stocké pour CE client à ceux réellement en base, en excluant ses propres
@@ -222,7 +235,12 @@ function _chatTogglePanel(forceOpen) {
   // fond), donc se fier au seul cache en mémoire après la 1ère ouverture laissait un
   // message reçu pendant que le téléphone était verrouillé invisible jusqu'à un
   // rechargement complet de la page (bug vécu, 2026-08-05).
-  if (_chatLoaded) { _chatRenderMessages(); setTimeout(_chatScrollBas, 30); _chatMarquerToutLu(); }
+  if (_chatLoaded) {
+    _chatRenderMessages();
+    const dernierLuAvant = parseInt(localStorage.getItem(_chatLastReadKey()) || '0', 10);
+    setTimeout(() => _chatScrollVersNonLu(dernierLuAvant), 30);
+    _chatMarquerToutLu();
+  }
   _chatCharger();
 }
 
@@ -302,8 +320,9 @@ async function _chatCharger() {
       (map[r.emoji] = map[r.emoji] || new Set()).add(r.client_id);
     });
     _chatLoaded = true;
+    const dernierLuAvant = parseInt(localStorage.getItem(_chatLastReadKey()) || '0', 10);
     _chatRenderMessages();
-    setTimeout(_chatScrollBas, 50);
+    setTimeout(() => _chatScrollVersNonLu(dernierLuAvant), 50);
     _chatMarquerToutLu();
   } catch(e) {
     const el = document.getElementById('chatMessages');

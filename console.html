@@ -1101,6 +1101,20 @@ let _chatCoachReactions = {}; // message_id -> { emoji: Set(client_id) }
 let _chatCoachChannel = null;
 let _chatCoachLoaded = false;
 const _CHAT_REACT_EMOJIS = ['👍','❤️','😂','😮','😢','🙏'];
+// Capturé une seule fois au boot (_chatCoachInitNonLus), AVANT que _chatCoachMarquerLu
+// n'écrase chat_lecture.dernier_lu_id côté serveur — sert de repère pour scroller sur le
+// premier message non lu à la 1ère ouverture du chat plutôt que systématiquement tout en
+// bas (une fois marqué lu dans la session, les ouvertures suivantes vont en bas normalement).
+let _chatCoachDernierLuAuBoot = 0;
+function _chatCoachScrollVersNonLu(containerId){
+  const premierNonLu = _chatCoachMessages.find(m => m.id > _chatCoachDernierLuAuBoot && m.client_id !== CHAT_COACH_ID);
+  if (premierNonLu) {
+    const bulle = document.querySelector(`#${containerId} [data-msg-id="${premierNonLu.id}"]`);
+    if (bulle) { bulle.scrollIntoView({ block: 'start' }); return; }
+  }
+  const cont = document.getElementById(containerId);
+  if (cont) cont.scrollTop = cont.scrollHeight;
+}
 
 async function chargerChatCoach() {
   const [msgRes, profilRes, reactRes] = await Promise.all([
@@ -1243,6 +1257,9 @@ function _chatCoachMarquerLu() {
   const maxId = Math.max(..._chatCoachMessages.map(m => m.id));
   if (maxId <= _chatCoachDerniereMaj) return;
   _chatCoachDerniereMaj = maxId;
+  // Une fois lu dans cette session, une ré-ouverture ultérieure du chat doit scroller en
+  // bas normalement, pas revenir indéfiniment sur le même premier message capturé au boot.
+  _chatCoachDernierLuAuBoot = maxId;
   fetch(`${SUPABASE_URL}/rest/v1/chat_lecture?on_conflict=client_id`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
     body: JSON.stringify({ client_id: CHAT_COACH_ID, dernier_lu_id: maxId, updated_at: new Date().toISOString() })
@@ -1307,7 +1324,7 @@ function renderChatCoachPage(el) {
         msgEl.innerHTML = _chatCoachMessages.length
           ? _chatCoachMessages.map(_chatCoachBulle).join('')
           : `<div style="text-align:center;color:var(--text-faint);padding:40px;">Aucun message pour l'instant.</div>`;
-        msgEl.scrollTop = msgEl.scrollHeight;
+        _chatCoachScrollVersNonLu('chatCoachMessages');
       }
       _chatCoachSubscribe();
       _chatCoachMarquerLu();
@@ -1319,7 +1336,7 @@ function renderChatCoachPage(el) {
       msgEl.innerHTML = _chatCoachMessages.length
         ? _chatCoachMessages.map(_chatCoachBulle).join('')
         : `<div style="text-align:center;color:var(--text-faint);padding:40px;">Aucun message pour l'instant.</div>`;
-      msgEl.scrollTop = msgEl.scrollHeight;
+      _chatCoachScrollVersNonLu('chatCoachMessages');
     }
     _chatCoachSubscribe();
     _chatCoachMarquerLu();
@@ -1438,6 +1455,7 @@ async function _chatCoachInitNonLus() {
       _chatCoachNonLus = 0;
     } else {
       const dernierLu = lecArr[0].dernier_lu_id || 0;
+      _chatCoachDernierLuAuBoot = dernierLu;
       const res = await fetch(`${SUPABASE_URL}/rest/v1/chat_messages?id=gt.${dernierLu}&client_id=neq.${encodeURIComponent(CHAT_COACH_ID)}&select=id`, { headers: supaHeaders() });
       const arr = res.ok ? await res.json() : [];
       _chatCoachNonLus = arr.length;
@@ -1458,7 +1476,7 @@ function toggleChatCoachFab() {
         el.innerHTML = _chatCoachMessages.length
           ? _chatCoachMessages.map(_chatCoachBulle).join('')
           : `<div style="text-align:center;color:var(--text-faint);padding:40px 10px;">Aucun message pour l'instant.</div>`;
-        el.scrollTop = el.scrollHeight;
+        _chatCoachScrollVersNonLu('chatCoachFabMessages');
       }
     };
     if (!_chatCoachLoaded) chargerChatCoach().then(() => { render(); _chatCoachSubscribe(); _chatCoachMarquerLu(); _chatCoachBindLongPress(document.getElementById('chatCoachFabMessages')); });
@@ -12559,6 +12577,21 @@ function _restoreNavState() {
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
+// Deep-link depuis une notification push (sw.js, notificationclick) : ?openPage=chat en
+// premier chargement, ou postMessage {type:'openPage'} si la fenêtre console était déjà
+// ouverte (sw.js fait focus()+postMessage plutôt que rouvrir). Absent avant ce fix : la
+// console ignorait totalement ?openPage, une notif de chat se contentait de refocus/
+// recharger la console sans jamais amener le coach sur la page Chat.
+window.addEventListener('message', e => {
+  if (e.data && e.data.type === 'openPage' && e.data.page) setNav(e.data.page);
+});
+function _applyDeepLinkNav(){
+  const page = new URLSearchParams(location.search).get('openPage');
+  if (!page) return;
+  history.replaceState(null, '', location.pathname);
+  setNav(page);
+}
+
 (async function boot(){
   // Le bouton flottant 📌 (#todoFab) vit hors du shell (#shell reste caché
   // derrière #loading jusqu'à _showShell) mais reste cliquable dès le premier
@@ -12581,6 +12614,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
     _showShell();
     if (!_restoreNavState()) { renderSidebar(); renderMain(); }
     renderNotifMenu();
+    _applyDeepLinkNav();
     // Mise à jour silencieuse en fond — ne bloque jamais l'UI. Timeout de secours :
     // chargerDonnees() fait des dizaines d'appels GAS en parallèle (un par client pour
     // verifierRetardBilan) sans AbortController côté api.js — si un seul reste bloqué
@@ -12611,6 +12645,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
   _showShell();
   if (!_restoreNavState()) { renderSidebar(); renderMain(); }
   renderNotifMenu();
+  _applyDeepLinkNav();
 })();
 </script>
 </body>
