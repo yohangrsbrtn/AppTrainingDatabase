@@ -4475,7 +4475,7 @@ function renderBlocsTemplate(){
           </div>
           <div style="display:${collapsed?'none':'block'};">
             ${seance.exercices.map((ex, ei) => `
-            <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropExo(event,${bi},${si},${ei})">
+            <div class="exo-row" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="ouvrirPickerExercice(${bi},${si},${ei})">${esc(ex.nom)}</span>
@@ -8419,7 +8419,7 @@ function renderBlocsClientProg(){
           </div>
           <div style="display:${collapsed?'none':'block'};">
             ${seance.exercices.map((ex,ei)=>`
-            <div class="exo-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropExo(event,${bi},${si},${ei})">
+            <div class="exo-row" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();cpOnDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="cpOuvrirPicker(${bi},${si},${ei})">${esc(ex.nom)}</span>
