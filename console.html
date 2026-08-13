@@ -4754,7 +4754,7 @@ async function assignerTemplateAuClient(templateId, clientId){
 
   const resCp = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, {
     method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
-    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, actif: true, source_template_id: templateId })
+    body: JSON.stringify({ client_id: clientId, nom: tpl.nom, actif: true, source_template_id: templateId, brouillon: true })
   });
   if (!resCp.ok) throw new Error('supabase_' + resCp.status);
   const cp = (await resCp.json())[0];
@@ -7096,10 +7096,12 @@ function _ficheProgRow(p, c, archived){
           </div>` : ''}
           ${p.objectif ? `<div class="p-meta" style="color:var(--text-muted);font-style:italic;margin-top:5px;">🎯 ${esc(p.objectif)}</div>` : ''}
         </div>
+        ${p.brouillon ? '<span class="chip" style="flex-shrink:0;background:#f5a62318;color:#f5a623;border:1px solid #f5a62340;">🟡 Brouillon</span>' : ''}
         ${archived ? '<span class="chip off" style="flex-shrink:0;">Archivé</span>' : (p.actif ? '<span class="chip ok" style="flex-shrink:0;"><span class="dot"></span>Actif</span>' : '<span class="chip off" style="flex-shrink:0;">Inactif</span>')}
         ${archived
           ? `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();desarchiverProgrammeClient(${p.id},'${c.id}')">↩ Désarchiver</button>`
-          : `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
+          : `${p.brouillon ? `<button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();publierProgrammeClient(${p.id},'${c.id}')" title="Rend ce programme visible pour le client">✅ Publier</button>` : ''}
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ton nouveau programme est disponible !','Ton programme « ${esc(p.nom).replace(/'/g, "\\'")} » vient d\\'être mis à jour, va y jeter un œil.')" title="Notifier">🔔</button>
         <button class="icon-btn del" onclick="event.stopPropagation();archiverProgrammeClient(${p.id},'${c.id}')" title="Archiver">${iTrash()}</button>`}
@@ -7188,9 +7190,10 @@ function renderFicheDieteTab(c){
     ${actives.length ? actives.map(d=>`
       <div class="prog-row" style="cursor:default;margin-bottom:8px;">
         <div style="flex:1;min-width:0;">
-          <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
+          <div class="p-nom">${esc(d.nom||'Diète sans nom')} ${d.brouillon ? '<span class="chip" style="font-size:9.5px;padding:1px 6px;background:#f5a62318;color:#f5a623;border:1px solid #f5a62340;">🟡 Brouillon</span>' : ''}</div>
           <div class="p-meta">Assignée le ${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
         </div>
+        ${d.brouillon ? `<button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="publierDieteClient(${d.id},'${c.id}')" title="Rend cette diète visible pour le client">✅ Publier</button>` : ''}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="dupliquerDieteClient(${d.id},'${c.id}')" title="Créer une copie indépendante de cette diète pour ce client">Dupliquer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d\\'être mise à jour.')" title="Notifier">🔔</button>
@@ -7935,6 +7938,14 @@ async function archiverProgrammeClient(progId, clientId){
     await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ archive:true, actif:false }) });
     ficheData.tous_programmes = await chargerTousProgrammes(clientId);
     ficheData.programme = ficheData.tous_programmes.find(p=>p.actif) || null;
+    setFicheTab('programmes');
+  } catch(e){ alert('Erreur : ' + e.message); }
+}
+
+async function publierProgrammeClient(progId, clientId){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ brouillon:false }) });
+    ficheData.tous_programmes = await chargerTousProgrammes(clientId);
     setFicheTab('programmes');
   } catch(e){ alert('Erreur : ' + e.message); }
 }
@@ -10161,7 +10172,7 @@ async function assignerDieteAuClient(templateId, templateNom, clientId){
   // Plusieurs diètes simultanées autorisées — pas de désactivation des autres
   const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`, {
     method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
-    body:JSON.stringify({ client_id:clientId, nom:templateNom, diete_template_id:dieteTemplateId, actif:true })
+    body:JSON.stringify({ client_id:clientId, nom:templateNom, diete_template_id:dieteTemplateId, actif:true, brouillon:true })
   });
   if (!res.ok) throw new Error('supabase_'+res.status);
   return (await res.json())[0];
@@ -10231,6 +10242,14 @@ async function dupliquerDieteClient(clientDieteId, clientId){
       method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }),
       body: JSON.stringify({ client_id: clientId, nom: nomCopie, diete_template_id: newTplId, actif: true })
     });
+    ficheData.tous_dietes = await chargerTousDietes(clientId);
+    setFicheTab('diete');
+  } catch(e){ alert('Erreur : '+e.message); }
+}
+
+async function publierDieteClient(dieteId, clientId){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${dieteId}`, { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ brouillon:false }) });
     ficheData.tous_dietes = await chargerTousDietes(clientId);
     setFicheTab('diete');
   } catch(e){ alert('Erreur : '+e.message); }
@@ -12287,7 +12306,7 @@ async function sauvegarderDietePourClient() {
     await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(_ficheCreateClientId)}`,
       { method:'PATCH', headers:supaHeaders(), body:JSON.stringify({ actif: false }) });
     await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`,
-      { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: _ficheCreateClientId, nom: tpl.nom, diete_template_id: tpl.id, actif: true }) });
+      { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ client_id: _ficheCreateClientId, nom: tpl.nom, diete_template_id: tpl.id, actif: true, brouillon: true }) });
     dieteTemplatesData = null;
     const cid = _ficheCreateClientId;
     _ficheCreateClientId = null;

@@ -2,6 +2,7 @@
 
 let _dSubPage = 'list'; // 'list' | 'detail' | 'menus' | 'journal'
 let _dDietes  = [];
+let _dBrouillonEnAttente = false; // true : aucune diète publiée, mais au moins une existe encore en brouillon côté coach
 let _dDetail  = null;
 let _dNom     = '';
 
@@ -81,11 +82,21 @@ async function loadDieteSupabase() {
   setPage('diete-loading');
   try {
     const cdRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&order=created_at.asc&select=id,nom`,
+      `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&brouillon=eq.false&order=created_at.asc&select=id,nom`,
       { headers: supaHeaders() }
     );
     const clientDietes = cdRes.ok ? await cdRes.json() : [];
     _dDietes = clientDietes.map(d => ({ id: d.id, nom: d.nom, _supabase: true }));
+    _dBrouillonEnAttente = false;
+    if (!_dDietes.length) {
+      try {
+        const brRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/client_dietes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&brouillon=eq.true&select=id&limit=1`,
+          { headers: supaHeaders() }
+        );
+        _dBrouillonEnAttente = brRes.ok && (await brRes.json()).length > 0;
+      } catch(e) {}
+    }
     _dSubPage = 'list';
     setPage('diete');
   } catch(e) { setPage('home'); }
@@ -476,7 +487,9 @@ function renderDieteTabs(actif) {
 
 function renderDieteList() {
   const body = (!_dDietes || _dDietes.length === 0)
-    ? `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">Aucune diète trouvée.</div></div>`
+    ? (_dBrouillonEnAttente
+        ? `<div class="empty"><div class="empty-icon">🛠️</div><div class="empty-text">Ton coach prépare ta diète, reviens bientôt !</div></div>`
+        : `<div class="empty"><div class="empty-icon">🥗</div><div class="empty-text">Aucune diète trouvée.</div></div>`)
     : _dDietes.map(d => {
       const nom = (d.nom||'').replace(/'/g,"\\'");
       return `<div class="diete-item" onclick="ouvrirDieteSupabase('${nom}',${d.id})">

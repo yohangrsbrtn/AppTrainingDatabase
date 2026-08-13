@@ -49,13 +49,27 @@ async function loadProgrammeClient(deepLink) {
     const [, res] = await Promise.all([
       _chargerObjectifsClient(),
       fetch(
-        `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&order=created_at.desc&limit=1`,
+        `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&brouillon=eq.false&order=created_at.desc&limit=1`,
         { headers: supaHeaders() }
       )
     ]);
     if (!res.ok) throw new Error('supabase_' + res.status);
     const rows = await res.json();
-    if (!rows.length) { _pcClientProgramme = null; setPage('programme-client'); return; }
+    if (!rows.length) {
+      // Aucun programme publié — un programme actif encore en brouillon (coach en train de le
+      // préparer) donne un message d'attente distinct du "rien du tout" générique.
+      let brouillonEnAttente = false;
+      try {
+        const resB = await fetch(
+          `${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(S.client)}&actif=eq.true&brouillon=eq.true&select=id&limit=1`,
+          { headers: supaHeaders() }
+        );
+        brouillonEnAttente = resB.ok && (await resB.json()).length > 0;
+      } catch(e) {}
+      _pcClientProgramme = brouillonEnAttente ? 'brouillon' : null;
+      setPage('programme-client');
+      return;
+    }
     const cp = rows[0];
     const resArbo = await fetch(
       `${SUPABASE_URL}/rest/v1/client_programme_blocs?client_programme_id=eq.${cp.id}&order=ordre.asc` +
@@ -297,6 +311,11 @@ function renderProgrammeClientPage() {
     return `<div id="app">${renderHeader('Programme','',false)}<div class="page">
       <div class="empty"><div class="empty-text">Erreur de chargement.</div>
       <button class="btn-secondary" style="margin-top:12px;" onclick="loadProgrammeClient()">Réessayer</button></div>
+    </div>${renderNavBar('training')}</div>`;
+  }
+  if (_pcClientProgramme === 'brouillon') {
+    return `<div id="app">${renderHeader('Programme','',false)}<div class="page">
+      <div class="empty"><div class="empty-text">🛠️ Ton coach prépare ton programme, reviens bientôt !</div></div>
     </div>${renderNavBar('training')}</div>`;
   }
   if (!_pcClientProgramme) {

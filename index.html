@@ -182,14 +182,14 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=17"></script>
 <script src="bilan.js?v=27"></script>
-<script src="diete.js?v=25"></script>
+<script src="diete.js?v=26"></script>
 <script src="mensurations.js?v=9"></script>
 <script src="recettes.js?v=4"></script>
 <script src="progression.js?v=8"></script>
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=19"></script>
+<script src="programme-client.js?v=20"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=23"></script>
@@ -750,7 +750,7 @@ let _homeV2Data = null;
 async function _chargerHomeV2Extra() {
   const clientId = getClient();
   const [progRes, roadmapRes, mensRes, bilanCourant] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&brouillon=eq.false&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
     _supaGetOrCreateBilanCourant(clientId).catch(() => null),
