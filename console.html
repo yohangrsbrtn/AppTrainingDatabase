@@ -9389,7 +9389,7 @@ async function ouvrirEditeurDiete(id){
   _dietNavBack = 'dietes';
   if (id) {
     const tpl = dieteTemplatesData.find(t=>t.id===id);
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers:supaHeaders() });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)&repas_aliments.order=ordre.asc`, { headers:supaHeaders() });
     const repasRaw = res.ok ? await res.json() : tpl.repas||[];
     dieteTplEnEdition = {
       id: tpl.id, nom: tpl.nom, description: tpl.description||'',
@@ -10110,7 +10110,7 @@ async function _chargerDieteTplPourCompare(clientDieteId){
     if (!tpls.length) throw new Error(`Aucun template trouvé pour "${cd[0].nom}"`);
     tpl = tpls[0];
   }
-  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers: supaHeaders() });
+  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)&repas_aliments.order=ordre.asc`, { headers: supaHeaders() });
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   const obj = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
@@ -10334,7 +10334,7 @@ async function _dupliquerTemplateDiete(sourceTemplateId, nom){
   const newTpl = (await newTplRes.json())[0];
 
   const repasRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${sourceTemplateId}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`,
+    `${SUPABASE_URL}/rest/v1/repas?template_id=eq.${sourceTemplateId}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)&repas_aliments.order=ordre.asc`,
     { headers: supaHeaders() });
   const repasArr = repasRes.ok ? await repasRes.json() : [];
   for (const r of repasArr) {
@@ -12481,7 +12481,7 @@ async function editerDieteClient(nomDiete, clientId, clientDieteId) {
     if (!tpls.length) { alert(`Aucun template trouvé pour la diète "${nomDiete}"`); _ficheEditClientId = null; _ficheEditClientDieteId = null; return; }
     tpl = tpls[0];
   }
-  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)`, { headers: supaHeaders() });
+  const repasRes = await fetch(`${SUPABASE_URL}/rest/v1/repas?template_id=eq.${tpl.id}&order=ordre.asc,variante_index.asc&select=*,repas_aliments(*)&repas_aliments.order=ordre.asc`, { headers: supaHeaders() });
   const repasRaw = repasRes.ok ? await repasRes.json() : [];
   dieteTplEnEdition = {
     id: tpl.id, nom: tpl.nom, description: tpl.description||'',
