@@ -4465,7 +4465,7 @@ function renderBlocsTemplate(){
         const collapsed = !_tplCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div class="seance-drop" style="border-top:1px solid var(--hairline);" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="onDropSeance(event,${bi},${si})">
+        <div class="seance-drop" style="border-top:1px solid var(--hairline);border-left:4px solid ${_seanceColor(si)};background:${_seanceColor(si)}0d;" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="onDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="tplToggleSeance(${bi},${si})">
             <span class="drag-handle" draggable="true" ondragstart="onDragStartSeance(event,${bi},${si})" ondragend="onDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
@@ -4513,6 +4513,11 @@ let _repartitionCpBlocIdx  = 0;
 let _tplCollapsed = new Set();
 let _cpCollapsed  = new Set();
 const BLOC_COLOR = { metabolique:'#1D9E75', mecanique:'#378ADD', force:'#D85A30' };
+// Couleur par séance (pas par bloc) — repère visuel pour se retrouver instantanément en
+// scrollant une liste de séances repliées dans l'éditeur, distincte de BLOC_COLOR (celle-ci
+// colore le bloc entier, celle-là chaque séance individuellement à l'intérieur).
+const SEANCE_COLOR_PALETTE = ['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#06b6d4','#ef4444','#84cc16'];
+function _seanceColor(si){ return SEANCE_COLOR_PALETTE[si % SEANCE_COLOR_PALETTE.length]; }
 function tplToggleSeance(bi,si){ const k=bi+'-'+si; _tplCollapsed.has(k)?_tplCollapsed.delete(k):_tplCollapsed.add(k); renderBlocsTemplate(); }
 function cpToggleSeance(bi,si){  const k=bi+'-'+si; _cpCollapsed.has(k)?_cpCollapsed.delete(k):_cpCollapsed.add(k);  renderBlocsClientProg(); }
 
@@ -8403,7 +8408,7 @@ function renderBlocsClientProg(){
         const collapsed = !_cpCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div class="seance-drop" style="border-top:1px solid var(--hairline);" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="cpOnDropSeance(event,${bi},${si})">
+        <div class="seance-drop" style="border-top:1px solid var(--hairline);border-left:4px solid ${_seanceColor(si)};background:${_seanceColor(si)}0d;" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="cpOnDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="cpToggleSeance(${bi},${si})">
             <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartSeance(event,${bi},${si})" ondragend="cpOnDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
