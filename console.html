@@ -4463,8 +4463,9 @@ function renderBlocsTemplate(){
         const collapsed = !_tplCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div style="border-top:1px solid var(--hairline);">
+        <div style="border-top:1px solid var(--hairline);" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="tplToggleSeance(${bi},${si})">
+            <span class="drag-handle" draggable="true" ondragstart="onDragStartSeance(event,${bi},${si})" ondragend="onDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
             <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();tplEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
             ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);">${exoCount} exo${exoCount>1?'s':''}</span>` : ''}
@@ -4617,6 +4618,26 @@ function onDropExo(e, bi, si, ei){
   const arr = tplEnEdition.blocs[bi].seances[si].exercices;
   const [moved] = arr.splice(src.ei, 1);
   const cible = src.ei < ei ? ei - 1 : ei;
+  arr.splice(cible, 0, moved);
+  renderBlocsTemplate();
+}
+
+let dragSeanceSource = null;
+function onDragStartSeance(e, bi, si){
+  dragSeanceSource = { bi, si };
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragEndSeance(){
+  dragSeanceSource = null;
+}
+function onDropSeance(e, bi, si){
+  e.preventDefault();
+  const src = dragSeanceSource;
+  dragSeanceSource = null;
+  if (!src || src.bi !== bi || src.si === si) { renderBlocsTemplate(); return; }
+  const arr = tplEnEdition.blocs[bi].seances;
+  const [moved] = arr.splice(src.si, 1);
+  const cible = src.si < si ? si - 1 : si;
   arr.splice(cible, 0, moved);
   renderBlocsTemplate();
 }
@@ -8343,8 +8364,9 @@ function renderBlocsClientProg(){
         const collapsed = !_cpCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div style="border-top:1px solid var(--hairline);">
+        <div style="border-top:1px solid var(--hairline);" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="cpToggleSeance(${bi},${si})">
+            <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartSeance(event,${bi},${si})" ondragend="cpOnDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
             <input type="text" value="${esc(seance.titre)}" oninput="event.stopPropagation();clientProgEnEdition.blocs[${bi}].seances[${si}].titre=this.value" onclick="event.stopPropagation()" placeholder="ex: Séance 1 — Push" style="flex:1 1 auto;min-width:80px;background:transparent;border:none;color:var(--text);font-size:13px;font-weight:700;padding:0;cursor:text;">
             ${_cpSeanceVolumeLabel(seance) ? `<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px;">${_cpSeanceVolumeLabel(seance)}</span>` : ''}
@@ -8499,6 +8521,19 @@ function cpOnDropExo(e,bi,si,ei){
   const arr=clientProgEnEdition.blocs[bi].seances[si].exercices;
   const [moved]=arr.splice(src.ei,1);
   arr.splice(src.ei<ei?ei-1:ei,0,moved);
+  renderBlocsClientProg();
+}
+
+let _cpDragSeanceSource = null;
+function cpOnDragStartSeance(e,bi,si){ _cpDragSeanceSource={bi,si}; e.dataTransfer.effectAllowed='move'; }
+function cpOnDragEndSeance(){ _cpDragSeanceSource=null; }
+function cpOnDropSeance(e,bi,si){
+  e.preventDefault();
+  const src=_cpDragSeanceSource; _cpDragSeanceSource=null;
+  if(!src||src.bi!==bi||src.si===si){ renderBlocsClientProg(); return; }
+  const arr=clientProgEnEdition.blocs[bi].seances;
+  const [moved]=arr.splice(src.si,1);
+  arr.splice(src.si<si?si-1:si,0,moved);
   renderBlocsClientProg();
 }
 
