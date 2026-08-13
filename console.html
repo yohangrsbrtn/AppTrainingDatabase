@@ -286,6 +286,8 @@
   .drag-handle { cursor: grab; color: var(--text-faint); font-size: 14px; padding: 0 2px; flex-shrink: 0; user-select: none; }
   .drag-handle:active { cursor: grabbing; }
   .exo-row.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+  .seance-drop.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+  .seance-drop.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
   .tpl-card { background: var(--surface); border-radius: var(--radius); padding: 16px; cursor: pointer; box-shadow: var(--shadow-sm); }
   .tpl-card .nom { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
   .tpl-card .meta { font-size: 11.5px; color: var(--text-faint); }
@@ -4463,7 +4465,7 @@ function renderBlocsTemplate(){
         const collapsed = !_tplCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div style="border-top:1px solid var(--hairline);" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onDropSeance(event,${bi},${si})">
+        <div class="seance-drop" style="border-top:1px solid var(--hairline);" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="onDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="tplToggleSeance(${bi},${si})">
             <span class="drag-handle" draggable="true" ondragstart="onDragStartSeance(event,${bi},${si})" ondragend="onDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
@@ -4588,6 +4590,19 @@ function retirerBlocTemplate(bi){
   tplEnEdition.blocs.splice(bi,1);
   renderBlocsTemplate();
 }
+// Renomme chaque séance "Séance N" (+ suffixe éventuel après un tiret, ex: "Séance 2 —
+// Dos, Biceps") pour refléter sa position réelle après un réordonnancement/ajout/
+// suppression — ne touche que le numéro, jamais le suffixe personnalisé du coach. Un titre
+// qui ne suit pas du tout ce motif (renommé librement, "Push Day"...) est laissé intact.
+function _renumeroterSeances(seances){
+  (seances||[]).forEach((s, i) => {
+    const m = /^Séance\s+\d+\s*(?:[—–-]\s*(.*))?$/i.exec((s.titre||'').trim());
+    if (!m) return;
+    const suffixe = (m[1]||'').trim();
+    s.titre = 'Séance ' + (i+1) + (suffixe ? ' — ' + suffixe : '');
+  });
+}
+
 function ajouterSeanceTemplate(bi){
   const seances = tplEnEdition.blocs[bi].seances;
   seances.push({ titre: 'Séance ' + (seances.length+1), exercices: [] });
@@ -4595,6 +4610,7 @@ function ajouterSeanceTemplate(bi){
 }
 function retirerSeanceTemplate(bi, si){
   tplEnEdition.blocs[bi].seances.splice(si,1);
+  _renumeroterSeances(tplEnEdition.blocs[bi].seances);
   renderBlocsTemplate();
 }
 function retirerExoDeSeance(bi, si, ei){
@@ -4622,6 +4638,27 @@ function onDropExo(e, bi, si, ei){
   renderBlocsTemplate();
 }
 
+// Repère d'insertion précis (ligne en haut ou en bas de la séance survolée, selon la
+// moitié où se trouve le curseur) — partagé par l'éditeur template et l'éditeur client,
+// sans quoi le drop insérait toujours "avant" la séance survolée, peu importe où on
+// relâchait, ce qui rendait le point d'insertion exact difficile à prévoir.
+function _dragOverInsertionLine(e, el){
+  e.preventDefault();
+  const r = el.getBoundingClientRect();
+  const after = (e.clientY - r.top) > r.height / 2;
+  el.classList.toggle('drag-over-top', !after);
+  el.classList.toggle('drag-over-bottom', after);
+}
+function _dragOverInsertionLineOut(el){
+  el.classList.remove('drag-over-top', 'drag-over-bottom');
+}
+// Position d'insertion finale, en tenant compte du décalage causé par le retrait de
+// l'élément déplacé (splice) — cible = index d'insertion DANS LE TABLEAU D'ORIGINE
+// (avant/après la séance survolée), reconverti pour le tableau une fois l'élément retiré.
+function _dragInsertionIndex(arr, srcIdx, cible){
+  arr.splice(srcIdx < cible ? cible - 1 : cible, 0, arr.splice(srcIdx, 1)[0]);
+}
+
 let dragSeanceSource = null;
 function onDragStartSeance(e, bi, si){
   dragSeanceSource = { bi, si };
@@ -4632,13 +4669,15 @@ function onDragEndSeance(){
 }
 function onDropSeance(e, bi, si){
   e.preventDefault();
+  const el = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  const after = (e.clientY - r.top) > r.height / 2;
+  _dragOverInsertionLineOut(el);
   const src = dragSeanceSource;
   dragSeanceSource = null;
-  if (!src || src.bi !== bi || src.si === si) { renderBlocsTemplate(); return; }
-  const arr = tplEnEdition.blocs[bi].seances;
-  const [moved] = arr.splice(src.si, 1);
-  const cible = src.si < si ? si - 1 : si;
-  arr.splice(cible, 0, moved);
+  if (!src || src.bi !== bi) { renderBlocsTemplate(); return; }
+  _dragInsertionIndex(tplEnEdition.blocs[bi].seances, src.si, si + (after ? 1 : 0));
+  _renumeroterSeances(tplEnEdition.blocs[bi].seances);
   renderBlocsTemplate();
 }
 
@@ -8364,7 +8403,7 @@ function renderBlocsClientProg(){
         const collapsed = !_cpCollapsed.has(bi+'-'+si);
         const exoCount = seance.exercices.length;
         return `
-        <div style="border-top:1px solid var(--hairline);" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="cpOnDropSeance(event,${bi},${si})">
+        <div class="seance-drop" style="border-top:1px solid var(--hairline);" ondragover="_dragOverInsertionLine(event,this)" ondragleave="_dragOverInsertionLineOut(this)" ondrop="cpOnDropSeance(event,${bi},${si})">
           <div class="day-head" style="cursor:pointer;" onclick="cpToggleSeance(${bi},${si})">
             <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartSeance(event,${bi},${si})" ondragend="cpOnDragEndSeance()" onclick="event.stopPropagation()" title="Glisser pour réordonner les séances">⠿</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
@@ -8510,7 +8549,7 @@ function cpDescendreBloc(bi){ const b=clientProgEnEdition.blocs; if(bi>=b.length
 function cpAjouterBloc(){ clientProgEnEdition.blocs.push(blocVide()); renderBlocsClientProg(); }
 function cpRetirerBloc(bi){ clientProgEnEdition.blocs.splice(bi,1); renderBlocsClientProg(); }
 function cpAjouterSeance(bi){ const s=clientProgEnEdition.blocs[bi].seances; s.push({id:null,titre:'Séance '+(s.length+1),exercices:[]}); renderBlocsClientProg(); }
-function cpRetirerSeance(bi,si){ clientProgEnEdition.blocs[bi].seances.splice(si,1); renderBlocsClientProg(); }
+function cpRetirerSeance(bi,si){ clientProgEnEdition.blocs[bi].seances.splice(si,1); _renumeroterSeances(clientProgEnEdition.blocs[bi].seances); renderBlocsClientProg(); }
 function cpRetirerExo(bi,si,ei){ clientProgEnEdition.blocs[bi].seances[si].exercices.splice(ei,1); renderBlocsClientProg(); }
 function cpOnDragStartExo(e,bi,si,ei){ _cpDragExoSource={bi,si,ei}; e.dataTransfer.effectAllowed='move'; }
 function cpOnDragEndExo(){ _cpDragExoSource=null; }
@@ -8529,11 +8568,14 @@ function cpOnDragStartSeance(e,bi,si){ _cpDragSeanceSource={bi,si}; e.dataTransf
 function cpOnDragEndSeance(){ _cpDragSeanceSource=null; }
 function cpOnDropSeance(e,bi,si){
   e.preventDefault();
+  const el = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  const after = (e.clientY - r.top) > r.height / 2;
+  _dragOverInsertionLineOut(el);
   const src=_cpDragSeanceSource; _cpDragSeanceSource=null;
-  if(!src||src.bi!==bi||src.si===si){ renderBlocsClientProg(); return; }
-  const arr=clientProgEnEdition.blocs[bi].seances;
-  const [moved]=arr.splice(src.si,1);
-  arr.splice(src.si<si?si-1:si,0,moved);
+  if(!src||src.bi!==bi){ renderBlocsClientProg(); return; }
+  _dragInsertionIndex(clientProgEnEdition.blocs[bi].seances, src.si, si + (after ? 1 : 0));
+  _renumeroterSeances(clientProgEnEdition.blocs[bi].seances);
   renderBlocsClientProg();
 }
 
