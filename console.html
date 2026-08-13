@@ -4710,6 +4710,7 @@ function ouvrirPickerExercice(bi, si, ei){
     </div>`;
   document.body.appendChild(overlay);
   renderPickerListe();
+  document.getElementById('pickerSearch')?.focus();
 }
 function renderPickerListe(){
   // Re-rendre tout le modal pour que les chips actifs restent en phase avec pickerGroupeFiltre,
@@ -8602,6 +8603,7 @@ function cpOuvrirPicker(bi,si,ei){
     </div>`;
   document.body.appendChild(overlay);
   cpRenderPickerListe();
+  document.getElementById('cpPickerSearch')?.focus();
 }
 
 function cpRenderPickerListe(){
