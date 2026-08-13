@@ -9553,12 +9553,13 @@ function renderEditeurDietePage(el) {
         <div class="eyebrow">${isClient ? 'Diète client' : 'Template diète'}</div>
         <div style="font-weight:700;font-size:15px;">${titre}</div>
       </div>
+      ${_ficheEditClientId ? `<button class="btn" onclick="creerTemplateDepuisDieteClient()" title="Crée une copie indépendante de cette diète dans Diètes → Templates, sans toucher à la diète du client">📋 Créer un template</button>` : ''}
       <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
     </div>
     <div style="max-width:720px;padding:20px 24px;">
       <div class="field-row"><label>Nom</label><input id="dNom" type="text" value="${esc(tpl.nom)}" placeholder="ex: Prise de masse – 3000 kcal"></div>
       <div class="field-row"><label>Commentaire (visible par le client)</label><textarea id="dDesc" rows="1" oninput="rmAutoGrow(this)" placeholder="ex: à suivre pendant la sèche, bien s'hydrater…" style="resize:none;overflow:hidden;min-height:38px;">${esc(tpl.description||'')}</textarea></div>
-      ${isClient ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" ${!_ficheCreateClientId?'':'checked'}> Enregistrer comme template réutilisable</label>` : ''}
+      ${_ficheCreateClientId ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:16px;cursor:pointer;"><input type="checkbox" id="cbDieteCommeTemplate" checked> Enregistrer comme template réutilisable</label>` : ''}
       <div id="ed-total-macros" style="background:var(--accent-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;position:sticky;z-index:9;box-shadow:0 8px 12px -6px rgba(0,0,0,.35);${totalM.kcal?'':'display:none;'}">
         ${totalM.kcal ? `
         <div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);">${totalM.kcal}</div><div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;">kcal</div></div>
@@ -9983,6 +9984,41 @@ async function sauvegarderDieteTemplate(){
     } else {
       setNav('dietes');
     }
+  } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
+}
+
+// Crée une COPIE indépendante (client_only:false, donc listée dans Diètes → Templates) à
+// partir de la diète d'un client actuellement ouverte dans l'éditeur — jamais un lien vers
+// la diète du client (même logique que _dupliquerTemplateDiete, mais destination "template
+// réutilisable" au lieu de "diète client"). Ne modifie ni ne supprime rien côté client :
+// simple export. Remplace la case à cocher "Enregistrer comme template réutilisable" qui
+// n'avait aucun effet dans ce contexte (elle ne s'appliquait qu'à la création d'une toute
+// nouvelle diète client, `sauvegarderDietePourClient` — jamais lue en édition d'une diète
+// déjà assignée, `sauvegarderDieteTemplate` — bug signalé par le coach, 2026-08-11).
+async function creerTemplateDepuisDieteClient(){
+  const nom = document.getElementById('dNom').value.trim();
+  const errEl = document.getElementById('dErr');
+  if (!nom){ errEl.textContent='Le nom est obligatoire.'; errEl.style.display='block'; return; }
+  const desc = document.getElementById('dDesc').value.trim();
+  try {
+    const tplRes = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates`, {
+      method:'POST', headers:supaHeaders({ Prefer:'return=representation' }),
+      body: JSON.stringify({ nom, description: desc || null, client_only: false })
+    });
+    if (!tplRes.ok) throw new Error('supabase_'+tplRes.status);
+    const newTpl = (await tplRes.json())[0];
+    for (let ri=0; ri<dieteTplEnEdition.repas.length; ri++){
+      const r = dieteTplEnEdition.repas[ri];
+      const rRes = await fetch(`${SUPABASE_URL}/rest/v1/repas`, { method:'POST', headers:supaHeaders({ Prefer:'return=representation' }), body:JSON.stringify({ template_id:newTpl.id, nom:r.nom, ordre:r.ordre!=null?r.ordre:ri, variante_index:r.variante_index||0, commentaire:r.commentaire||null }) });
+      if (!rRes.ok) continue;
+      const savedR = (await rRes.json())[0];
+      if (r.aliments.length){
+        const alimPayload = r.aliments.map((a,ai)=>({ repas_id:savedR.id, nom:a.nom, unite:a.unite||'g', quantite_g:a.quantite_g, kcal_par_100g:a.kcal_par_100g, prot_par_100g:a.prot_par_100g, glu_par_100g:a.glu_par_100g, lip_par_100g:a.lip_par_100g, ordre:ai, modifie:!!a.modifie }));
+        await fetch(`${SUPABASE_URL}/rest/v1/repas_aliments`, { method:'POST', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify(alimPayload) });
+      }
+    }
+    dieteTemplatesData = null;
+    alert(`Template "${nom}" créé — visible dans Diètes → Templates.`);
   } catch(e){ errEl.textContent='Erreur : '+e.message; errEl.style.display='block'; }
 }
 
