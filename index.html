@@ -749,11 +749,15 @@ function _homeV2Actif() { return S.client === 'yohanp'; }
 let _homeV2Data = null;
 async function _chargerHomeV2Extra() {
   const clientId = getClient();
-  const [progRes, roadmapRes, mensRes, bilanCourant] = await Promise.all([
+  const chimieActif = !!(S.data.profil && S.data.profil.chimie_actif);
+  const [progRes, roadmapRes, mensRes, bilanCourant, protocoleRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&brouillon=eq.false&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
     _supaGetOrCreateBilanCourant(clientId).catch(() => null),
+    chimieActif
+      ? fetch(`${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=date_debut,duree_semaines,objectif`, { headers: supaHeaders() })
+      : Promise.resolve(null),
   ]);
   const progArr = progRes.ok ? await progRes.json() : [];
   const roadmapArr = roadmapRes.ok ? await roadmapRes.json() : [];
@@ -767,7 +771,9 @@ async function _chargerHomeV2Extra() {
     semaineLabel: bilanCourant.row.semaine_label,
     deadline: _bilanDeadline(bilanCourant.jourBilanNom, new Date(bilanCourant.row.created_at)).toISOString(),
   } : null;
-  _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr, bilan };
+  const protocoleArr = (protocoleRes && protocoleRes.ok) ? await protocoleRes.json() : [];
+  const protocole = chimieActif ? { row: protocoleArr[0] || null } : null;
+  _homeV2Data = { programme: prog, blocActif, roadmapPhases: roadmapArr, mensurations: mensArr, bilan, protocole };
 }
 
 function renderHomeSupabaseV2() {
@@ -786,6 +792,8 @@ function renderHomeSupabaseV2() {
       ${_homeV2ActiviteHtml(d)}
       ${_homeV2RoadmapHtml(d)}
     </div>
+
+    ${_homeV2ProtocoleHtml(d)}
 
     ${_homeV2BilanHtml(d)}
 
@@ -839,6 +847,32 @@ function _homeV2RoadmapHtml(d) {
   return `
     <div onclick="goTo('roadmap')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #8b5cf6;-webkit-tap-highlight-color:transparent;min-height:112px;box-sizing:border-box;">
       <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Roadmap</div>
+      ${body}
+    </div>`;
+}
+
+function _homeV2ProtocoleHtml(d) {
+  const proto = d && d.protocole;
+  if (!proto) return ''; // chimie_actif désactivé pour ce client
+  const row = proto.row;
+  let body;
+  if (row && row.date_debut && row.duree_semaines) {
+    const debut = new Date(row.date_debut + 'T00:00:00');
+    const fin = new Date(debut.getTime() + row.duree_semaines * 7 * 86400000);
+    const joursRestants = Math.ceil((fin - new Date()) / 86400000);
+    if (joursRestants > 0) {
+      body = `
+        ${row.objectif ? `<div style="font-size:12px;color:#c8d0e0;margin-bottom:6px;">${esc(row.objectif)}</div>` : ''}
+        <div style="font-size:20px;font-weight:700;color:#e8eaf0;">${joursRestants}<span style="font-size:12px;color:#8892a4;font-weight:600;"> j restant${joursRestants>1?'s':''}</span></div>`;
+    } else {
+      body = `<div style="font-size:12px;color:#555e7a;">Cycle terminé</div>`;
+    }
+  } else {
+    body = `<div style="font-size:12px;color:#555e7a;">Aucun cycle en cours</div>`;
+  }
+  return `
+    <div onclick="loadProtocole()" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #a78bfa;margin-top:10px;-webkit-tap-highlight-color:transparent;">
+      <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">🧬 Protocole</div>
       ${body}
     </div>`;
 }
