@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=13"></script>
+<script src="api.js?v=14"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -5199,6 +5199,7 @@ async function changerStatutClient(clientId, statut) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const c = data.clients.find(x => x.id === clientId);
     if (c) c.statut = statut;
+    if (c) syncClientVersCompta(clientId, c.prenom || '', c.nom, statut);
     document.querySelectorAll('.menu').forEach(m => m.classList.remove('open'));
     renderTable();
   } catch(e) { alert('Erreur : ' + e.message); }
@@ -9125,6 +9126,7 @@ async function confirmerNouveauClient(){
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('supabase_' + res.status);
+    syncClientVersCompta(body.client_id, body.prenom, body.nom, 'actif');
     document.getElementById('modal-nouveau-client').remove();
     await rafraichir();
   } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }

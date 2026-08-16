@@ -37,6 +37,19 @@ function supaHeaders(extra) {
   return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
 }
 
+// ── Synchro identité client -> ComptaApp (projet Supabase séparé) ──────
+// Répercute création/statut vers compta_clients (fiche facturation), jamais l'inverse.
+// Ne bloque jamais le flux coach : une erreur réseau ici est avalée (best-effort).
+const COMPTAAPP_SYNC_URL = 'https://hvcerfxcfzoktzslqaqu.supabase.co/functions/v1/sync-client-from-training';
+const COMPTAAPP_SYNC_SECRET = 'H15Mzf-78UIOvdDywQYzxNOvy1mPstbJhac_r1-tbIE';
+function syncClientVersCompta(clientId, prenom, nom, statut) {
+  fetch(COMPTAAPP_SYNC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-sync-secret': COMPTAAPP_SYNC_SECRET },
+    body: JSON.stringify({ client_id: clientId, prenom, nom, statut }),
+  }).catch(() => {});
+}
+
 // ── Semaine de bilan — source unique partagée client (bilan.js) + coach
 // (console.html). Une semaine de bilan se termine la VEILLE du jour assigné au
 // client (client_profils.jour_bilan), pas le jour même (2026-08-03, demande coach) :
