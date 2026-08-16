@@ -5199,7 +5199,7 @@ async function changerStatutClient(clientId, statut) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const c = data.clients.find(x => x.id === clientId);
     if (c) c.statut = statut;
-    if (c) syncClientVersCompta(clientId, c.prenom || '', c.nom, statut);
+    if (c && clientId !== COACH_CLIENT_ID) syncClientVersCompta(clientId, c.prenom || '', c.nom, statut);
     document.querySelectorAll('.menu').forEach(m => m.classList.remove('open'));
     renderTable();
   } catch(e) { alert('Erreur : ' + e.message); }
