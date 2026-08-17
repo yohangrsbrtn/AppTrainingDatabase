@@ -23,6 +23,16 @@ const _pcEquivSaveQueues = {};
 let _pcExercicesLib    = null; // cache bibliothèque exercices (lazy)
 let _pcEquivCibleId    = null; // exercice prévu ciblé par la modale de création en cours
 
+// ── Auto-édition du programme (réservée client par client, voir auto_edition_programme) ──
+// Contrairement aux logs (sauvegarde immédiate par série), chaque action ici
+// (remplacer/ajouter/supprimer/réordonner) écrit directement en base sans
+// bouton "Enregistrer" séparé — même logique que la création d'équivalent
+// ci-dessus, juste étendue au contenu de la séance elle-même.
+let _pcEditMode        = false;
+let _pcExoPickerMode   = null; // {type:'remplacer', exId} | {type:'ajouter', seanceId, ordreInsertion}
+function _pcAutoEdition() { return !!(S.data.profil && S.data.profil.auto_edition_programme); }
+function pcToggleEdition() { _pcEditMode = !_pcEditMode; setPage('programme-client'); }
+
 // ── Chargement ─────────────────────────────────────────────────────────
 
 async function _chargerObjectifsClient() {
@@ -301,6 +311,183 @@ async function pcSupprimerEquivalent(programmeExerciceId, equivalentId) {
   } catch(e) { showToast('Erreur : ' + e.message, '#c0392b'); }
 }
 
+// ── Auto-édition — picker exercice (remplacer ou ajouter) ────────────────
+async function pcOuvrirPickerExo(mode) {
+  _pcExoPickerMode = mode;
+  await _pcChargerExercicesLib();
+  const overlay = document.createElement('div');
+  overlay.id = 'pcExoPickerOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
+  const titre = mode.type === 'remplacer' ? '🔁 Remplacer l\'exercice' : '➕ Ajouter un exercice';
+  overlay.innerHTML = `
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+      <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">${titre}</div>
+      <div style="padding:0 20px 10px;">
+        <input id="pcExoPickerSearch" type="text" placeholder="Chercher un exercice…" oninput="_pcFiltrerExoPicker()" style="width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid #2d3142;background:#0f1117;color:#fff;">
+      </div>
+      <div id="pcExoPickerList" style="flex:1;overflow-y:auto;padding:0 20px 12px;"></div>
+      <div style="padding:12px 20px calc(12px + env(safe-area-inset-bottom));">
+        <button onclick="document.getElementById('pcExoPickerOverlay').remove()" style="width:100%;padding:12px;background:#2d3142;border:none;border-radius:10px;color:#fff;font-size:14px;cursor:pointer;">Annuler</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  attacherSwipeFermeture(overlay);
+  _pcFiltrerExoPicker();
+  setTimeout(() => document.getElementById('pcExoPickerSearch')?.focus(), 100);
+}
+
+function _pcFiltrerExoPicker() {
+  const q = (document.getElementById('pcExoPickerSearch')?.value || '').trim().toLowerCase();
+  const list = document.getElementById('pcExoPickerList');
+  if (!list) return;
+  const items = !q ? [] : (_pcExercicesLib || []).filter(e => e.nom.toLowerCase().includes(q)).slice(0, 30);
+  list.innerHTML = items.map(e => `
+    <div onclick="pcChoisirExoPicker(${e.id}, '${esc(e.nom).replace(/'/g, "\\'")}')" style="padding:11px 12px;border-bottom:1px solid #1e2235;cursor:pointer;font-size:14px;color:#e8eaf0;">
+      ${esc(e.nom)}${e.groupe_musculaire ? `<span style="font-size:11px;color:#8892a4;margin-left:6px;">${esc(e.groupe_musculaire)}</span>` : ''}
+    </div>`).join('') || (q ? `<div onclick="pcChoisirExoPicker(null, null)" style="padding:12px;font-size:13px;color:#378ADD;cursor:pointer;">➕ Utiliser « ${esc(q)} »</div>` : '');
+}
+
+async function pcChoisirExoPicker(exerciceLibId, nom) {
+  const mode = _pcExoPickerMode;
+  if (!mode) return;
+  const nomFinal = nom || (document.getElementById('pcExoPickerSearch')?.value || '').trim();
+  if (!nomFinal) return;
+  document.getElementById('pcExoPickerOverlay')?.remove();
+  if (mode.type === 'remplacer') await pcRemplacerExo(mode.exId, exerciceLibId || null, nomFinal);
+  else await pcAjouterExoDansSeance(mode.seanceId, mode.ordreInsertion, exerciceLibId || null, nomFinal);
+}
+
+async function pcRemplacerExo(exId, exerciceLibId, nom) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${exId}`, {
+      method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ nom, exercice_id: exerciceLibId })
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const seance = _pcAllSeances().find(s => (s.client_programme_exercices || []).some(e => e.id === exId));
+    const ex = seance && seance.client_programme_exercices.find(e => e.id === exId);
+    if (ex) { ex.nom = nom; ex.exercice_id = exerciceLibId; }
+    setPage('programme-client');
+  } catch (e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+}
+
+async function pcAjouterExoDansSeance(seanceId, ordreInsertion, exerciceLibId, nom) {
+  const seance = _pcAllSeances().find(s => s.id === seanceId);
+  if (!seance) return;
+  const exos = (seance.client_programme_exercices || []).slice().sort((a, b) => a.ordre - b.ordre);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+      body: JSON.stringify({ seance_id: seanceId, nom, exercice_id: exerciceLibId, ordre: ordreInsertion, series: 3, reps: '10-12', repos: "1'30", rir: '2-3' })
+    });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const nouvelle = (await res.json())[0];
+    exos.splice(ordreInsertion, 0, nouvelle);
+    await _pcRenumeroterExos(seance, exos);
+  } catch (e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+}
+
+async function _pcRenumeroterExos(seance, exosOrdonnes) {
+  const updates = [];
+  exosOrdonnes.forEach((ex, i) => {
+    if (ex.ordre !== i) {
+      ex.ordre = i;
+      updates.push(fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`, { method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ ordre: i }) }));
+    }
+  });
+  await Promise.all(updates);
+  seance.client_programme_exercices = exosOrdonnes;
+  setPage('programme-client');
+}
+
+async function pcSupprimerExo(exId) {
+  if (!confirm('Supprimer cet exercice de la séance ? Les charges loguées dessus seront perdues.')) return;
+  const seance = _pcAllSeances().find(s => (s.client_programme_exercices || []).some(e => e.id === exId));
+  if (!seance) return;
+  try {
+    const equiv = _pcEquivalents[exId];
+    if (equiv) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?equivalent_id=eq.${equiv.id}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents?id=eq.${equiv.id}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+      delete _pcEquivalents[exId];
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=eq.${exId}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${exId}`, { method: 'DELETE', headers: supaHeaders({ Prefer: 'return=minimal' }) });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    const exos = (seance.client_programme_exercices || []).filter(e => e.id !== exId);
+    await _pcRenumeroterExos(seance, exos);
+  } catch (e) { showToast('Erreur : ' + e.message, '#c0392b'); }
+}
+
+async function pcDeplacerExo(exId, direction) {
+  const seance = _pcAllSeances().find(s => (s.client_programme_exercices || []).some(e => e.id === exId));
+  if (!seance) return;
+  const exos = (seance.client_programme_exercices || []).slice().sort((a, b) => a.ordre - b.ordre);
+  const idx = exos.findIndex(e => e.id === exId);
+  const cible = idx + direction;
+  if (cible < 0 || cible >= exos.length) return;
+  [exos[idx], exos[cible]] = [exos[cible], exos[idx]];
+  await _pcRenumeroterExos(seance, exos);
+}
+
+// ── Auto-édition — réordonner les séances du bloc ─────────────────────────
+async function pcDeplacerSeance(blocId, seanceId, direction) {
+  const bloc = (_pcClientProgramme?.blocs || []).find(b => b.id === blocId);
+  if (!bloc) return;
+  const seances = (bloc.client_programme_seances || []).slice().sort((a, b) => a.ordre - b.ordre);
+  const idx = seances.findIndex(s => s.id === seanceId);
+  const cible = idx + direction;
+  if (cible < 0 || cible >= seances.length) return;
+  [seances[idx], seances[cible]] = [seances[cible], seances[idx]];
+  const updates = [];
+  seances.forEach((s, i) => {
+    if (s.ordre !== i) {
+      s.ordre = i;
+      updates.push(fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${s.id}`, { method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ ordre: i }) }));
+    }
+  });
+  await Promise.all(updates);
+  bloc.client_programme_seances = seances;
+  setPage('programme-client');
+}
+
+function pcOuvrirReorganiserSeances() {
+  const overlay = document.createElement('div');
+  overlay.id = 'pcReorderSeancesOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
+  overlay.innerHTML = `
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+      <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+      <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">↕️ Réorganiser mes séances</div>
+      <div id="pcReorderSeancesList" style="flex:1;overflow-y:auto;padding:8px 20px 12px;"></div>
+      <div style="padding:12px 20px calc(12px + env(safe-area-inset-bottom));">
+        <button onclick="document.getElementById('pcReorderSeancesOverlay').remove()" style="width:100%;padding:12px;background:#378ADD;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Terminé</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  attacherSwipeFermeture(overlay);
+  _pcRenderReorderSeancesList();
+}
+
+function _pcRenderReorderSeancesList() {
+  const list = document.getElementById('pcReorderSeancesList');
+  if (!list) return;
+  const seances = _pcSeancesForBloc(_pcBlocId);
+  list.innerHTML = seances.map((s, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #1e2235;">
+      <div style="flex:1;font-size:14px;color:#e8eaf0;">${esc(s.titre)}</div>
+      <button onclick="pcDeplacerSeanceUI(${s.id},-1)" ${i === 0 ? 'disabled' : ''} style="width:34px;height:34px;border-radius:8px;background:#2d3142;border:none;color:#fff;font-size:15px;cursor:pointer;${i === 0 ? 'opacity:.35;' : ''}">▲</button>
+      <button onclick="pcDeplacerSeanceUI(${s.id},1)" ${i === seances.length - 1 ? 'disabled' : ''} style="width:34px;height:34px;border-radius:8px;background:#2d3142;border:none;color:#fff;font-size:15px;cursor:pointer;${i === seances.length - 1 ? 'opacity:.35;' : ''}">▼</button>
+    </div>`).join('');
+}
+
+async function pcDeplacerSeanceUI(seanceId, direction) {
+  await pcDeplacerSeance(_pcBlocId, seanceId, direction);
+  _pcRenderReorderSeancesList();
+}
+
 // ── Rendu ──────────────────────────────────────────────────────────────
 
 function renderProgrammeClientPage() {
@@ -404,6 +591,7 @@ function renderPcSelectorPage() {
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSeance(this.value)">${optsSeances || '<option>—</option>'}</select>
       </div>
       <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>${isReadonly ? '👁 Voir la séance' : 'Commencer →'}</button>
+      ${(_pcAutoEdition() && !isReadonly && seances.length > 1) ? `<button class="btn-secondary" onclick="pcOuvrirReorganiserSeances()" style="margin-top:8px;width:100%;">↕️ Réorganiser mes séances</button>` : ''}
       ${(typeof tpAccesAutorise === 'function' && tpAccesAutorise()) ? `<button class="btn-secondary" onclick="loadTrainingPerso()" style="margin-top:8px;width:100%;">📓 Mes séances perso</button>` : ''}
     </div>
     ${renderNavBar('training')}
@@ -612,6 +800,15 @@ function renderPcSeancePage() {
       bodyHtml = panelPrevu;
     }
 
+    const editerActif = _pcEditMode && !isReadonly && _pcAutoEdition();
+    const editToolbar = editerActif ? `
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button onclick="pcDeplacerExo(${ex.id},-1)" style="padding:7px 10px;background:#2d3142;border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;">▲</button>
+        <button onclick="pcDeplacerExo(${ex.id},1)" style="padding:7px 10px;background:#2d3142;border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;">▼</button>
+        <button onclick="pcOuvrirPickerExo({type:'remplacer',exId:${ex.id}})" style="flex:1;padding:7px;background:#378ADD22;border:1px solid #378ADD55;border-radius:8px;color:#378ADD;font-size:12px;font-weight:600;cursor:pointer;">🔁 Remplacer</button>
+        <button onclick="pcSupprimerExo(${ex.id})" style="padding:7px 10px;background:#e05c5c22;border:1px solid #e05c5c55;border-radius:8px;color:#e05c5c;font-size:13px;cursor:pointer;">🗑</button>
+      </div>` : '';
+
     return `<div class="card" style="padding:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         <div style="flex:1;min-width:0;">
@@ -625,8 +822,22 @@ function renderPcSeancePage() {
         ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
       </div>
       ${bodyHtml}
+      ${editToolbar}
     </div>`;
-  }).join('') || `<div class="empty"><div class="empty-text">Aucun exercice dans cette séance.</div></div>`;
+  });
+
+  const editerActifGlobal = _pcEditMode && !isReadonly && _pcAutoEdition();
+  const inserter = ordreInsertion => `<div style="display:flex;justify-content:center;margin:2px 0;">
+    <button onclick="pcOuvrirPickerExo({type:'ajouter',seanceId:${seance.id},ordreInsertion:${ordreInsertion}})" style="width:32px;height:32px;border-radius:50%;background:#378ADD22;border:1px dashed #378ADD66;color:#378ADD;font-size:17px;line-height:1;cursor:pointer;">+</button>
+  </div>`;
+  let exosHtmlFinal;
+  if (editerActifGlobal) {
+    const blocks = [inserter(0)];
+    exosHtml.forEach((block, i) => { blocks.push(block); blocks.push(inserter(i + 1)); });
+    exosHtmlFinal = blocks.join('');
+  } else {
+    exosHtmlFinal = exosHtml.join('') || `<div class="empty"><div class="empty-text">Aucun exercice dans cette séance.</div></div>`;
+  }
 
   setTimeout(() => {
     exercicesAvecEquiv.forEach(exId => {
@@ -661,8 +872,9 @@ function renderPcSeancePage() {
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSemaineNav(this.value)">${optsSemaines}</select>
       </div>
       ${isReadonly ? `<div style="font-size:12px;color:var(--text-muted);background:var(--surface-2);border-radius:8px;padding:8px 12px;margin-bottom:12px;">👁 Lecture seule — ce bloc n'est pas actif. Aucune saisie possible.</div>` : ''}
+      ${(_pcAutoEdition() && !isReadonly) ? `<button class="btn-secondary" onclick="pcToggleEdition()" style="margin-bottom:12px;width:100%;">${_pcEditMode ? '✅ Terminer la modification' : '✏️ Modifier cette séance'}</button>` : ''}
       ${rightPanel ? `<div style="margin-bottom:12px;">${rightPanel}</div>` : ''}
-      ${exosHtml}
+      ${exosHtmlFinal}
       ${!isReadonly ? `<button id="pcValiderSeanceBtn" class="btn-primary" onclick="pcValiderSeance()" style="margin-top:8px;width:100%;">✅ Valider la séance</button>` : ''}
       <button class="btn-secondary" onclick="pcRetourSelector()" style="margin-top:8px;width:100%;">← Retour</button>
     </div>

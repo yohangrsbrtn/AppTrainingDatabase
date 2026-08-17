@@ -189,7 +189,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="collection.js?v=3"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=20"></script>
+<script src="programme-client.js?v=21"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=23"></script>
@@ -715,7 +715,7 @@ async function _completerConnexionSupabase(session) {
 async function loadHomeSupabase(){
   try {
     const [profils, prog, journee] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_paiement,jour_bilan,mode_simplifie,steps_cible,seances_cible,cardio_consigne`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(S.client)}&select=prenom,nom,pseudo,photo_url,chimie_actif,email,email_confirme,date_naissance,taille_cm,date_debut,jour_paiement,mode_paiement,jour_bilan,mode_simplifie,steps_cible,seances_cible,cardio_consigne,auto_edition_programme`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
       chargerProgressionSupabase().catch(() => null),
       _loadJourneeDataSupabase().catch(() => ({ aucun: true }))
     ]);
