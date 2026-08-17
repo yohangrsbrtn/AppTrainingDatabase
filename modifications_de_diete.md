@@ -19,6 +19,8 @@ Ces règles s'appliquent à chaque fois que je (Claude) modifie une diète exist
 - Repérer les repas qui sont **structurellement les mêmes** entre les deux diètes (même base d'aliments, ex : "poulet + riz + huile + légumes" en repas 2, "poulet + pomme de terre + huile + légumes" en repas 3) → sur ces repas-là, **utiliser exactement les mêmes grammages des deux côtés** (même quantité de poulet, de riz, d'huile…). Pas de raison qu'ils diffèrent.
 - Concentrer la différenciation calorique entre les diètes (le delta de calories voulu) sur les repas qui sont **déjà différents dans leur nature** (ex : petit-déj œufs/muffin vs whey/avoine) — c'est là qu'on peut jouer sur les quantités sans que ça saute aux yeux comme une incohérence.
 - Ne jamais laisser deux repas "censés être les mêmes" avec un écart de plus d'une vingtaine de kcal entre jour ON et jour OFF — si c'est le cas, revoir les grammages pour les aligner.
+- **Option structurelle à considérer en priorité** : si jour ON et jour OFF n'ont pas le même nombre de repas (ex : un pré-workout ou post-workout qui n'existe que les jours d'entraînement), c'est souvent LÀ qu'il faut aller chercher l'écart calorique voulu entre les deux journées — plutôt que de gonfler/dégonfler artificiellement un repas commun aux deux jours. Un repas qui "disparaît" logiquement un jour de repos (parce qu'il n'y a pas d'entraînement à préparer/récupérer) est plus cohérent qu'un ajustement arbitraire sur un repas partagé. Toujours vérifier la structure des repas des deux diètes avant de décider où faire porter la différenciation.
+- **Cohérence "recette réelle"** : avant de composer/modifier un repas (surtout un porridge ou une recette avec plusieurs ingrédients), se demander si la combinaison a du sens dans la vraie vie (ex : œufs + muffin + flocons d'avoine dans le même petit-déj = bizarre, personne ne mange ça ; un porridge doit avoir largement plus de flocons que de whey, pas des quantités quasi égales). Préférer jouer sur la quantité d'un aliment déjà présent dans un repas structurellement cohérent (ex : passer de 1 à 2 muffins) plutôt que d'ajouter un ingrédient étranger au repas pour gonfler les calories.
 
 ## Équivalents / repas alternatifs (variantes au sein d'un même repas)
 
@@ -37,3 +39,7 @@ Ces règles s'appliquent à chaque fois que je (Claude) modifie une diète exist
 3. Définir les cibles macros exactes (grammes absolus de protéines/lipides, le reste en glucides) à partir des consignes du coach.
 4. Distribuer les ajustements sur les aliments existants (pas de nouveaux aliments sauf demande explicite), en respectant toutes les règles ci-dessus (arrondi, cohérence ON/OFF, équivalents proches).
 5. Vérifier les totaux finaux par un recalcul direct depuis Supabase (pas de confiance aveugle dans le calcul manuel) avant de considérer la tâche terminée.
+
+## En cas de doute
+
+Si un ajustement pose une question d'arbitrage (ex : privilégier la précision des macros vs. le nombre de repas, où faire porter un écart calorique, quelle quantité "a du sens" pour un aliment) → **poser la question au coach plutôt que de trancher seul silencieusement.** Ce fichier grandit au fil des sessions : après chaque série d'ajustements, en tirer les principes généraux et les ajouter ici pour la prochaine fois.
