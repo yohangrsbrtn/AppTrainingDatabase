@@ -374,6 +374,26 @@ function attacherSwipeFermeture(overlayEl, onClose) {
   zone.addEventListener('touchcancel', finDrag);
 }
 
+// ── Lightbox photo plein écran (client mobile) — partagé bilan.js/mensurations.js ──
+// `window.open(url,'_blank')` sur une PWA installée sur l'écran d'accueil ne se comporte
+// pas comme un "nouvel onglet" normal (souvent bloqué ou perçu comme un échec silencieux
+// par le client) — ceci ouvre un vrai overlay plein écran dans l'app, tap n'importe où
+// pour fermer.
+function ouvrirImagePleinEcran(url) {
+  if (!url) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'imgLightboxOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(5,6,10,.96);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <button onclick="fermerImagePleinEcran()" style="position:absolute;top:calc(16px + env(safe-area-inset-top));right:20px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:18px;cursor:pointer;z-index:1;">✕</button>
+    <img src="${esc(url)}" style="max-width:94vw;max-height:90vh;object-fit:contain;border-radius:4px;">`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) fermerImagePleinEcran(); });
+  document.body.appendChild(overlay);
+}
+function fermerImagePleinEcran() {
+  document.getElementById('imgLightboxOverlay')?.remove();
+}
+
 // ── GIFs dans le chat (Giphy) — partagé chat.js (mobile) + console.html ────────────
 // Clé gratuite obtenue sur https://developers.giphy.com ("Create an App", instantané,
 // sans CB). Exposée côté client comme SUPABASE_ANON_KEY juste au-dessus — pas un secret
