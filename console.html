@@ -6749,7 +6749,7 @@ function renderFicheMensurationsTab(c){
     const dateFr = (r.date||'').split('-').reverse().join('/');
     const aPhoto = _ficheMensPhotosIds && _ficheMensPhotosIds.has(r.id);
     return `<tr>
-      <td class="mono">${esc(dateFr)}${aPhoto ? ' <span title="Photo liée">📷</span>' : ''}</td>
+      <td class="mono">${esc(dateFr)}${aPhoto ? ' <span title="Photo liée">📷</span>' : ''}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}</td>
       <td onclick="event.stopPropagation();">${_mensPhaseSelectHtml(r.id, c.id, r.phase)}</td>
       <td>${kg(r.poids)}</td>
       <td>${cm(r.mesure)}</td>
@@ -10675,6 +10675,10 @@ function ouvrirModalMensuration(clientId, rowId) {
         ${field('epaules','Épaules (cm)',row.epaules,'number','step="0.5" min="0"')}
         ${field('bras','Bras (cm)',row.bras,'number','step="0.5" min="0"')}
       </div>
+      <div class="fiche-field" style="margin-top:10px;">
+        <label>Note (ex: départ en vacances, retour de vacances…)</label>
+        <input id="mm-note" type="text" value="${esc(row.note||'')}" style="font-size:16px;width:100%;" placeholder="Note visible dans le tableau">
+      </div>
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
         <button class="btn primary" onclick="sauvegarderMensuration('${clientId}',${rowId||'null'})">Enregistrer</button>
@@ -10694,6 +10698,7 @@ async function sauvegarderMensuration(clientId, rowId) {
     poids: num(v('poids')), mesure: num(v('mesure')),
     fessiers: num(v('fessiers')), cuisses: num(v('cuisses')), mollets: num(v('mollets')),
     poitrine: num(v('poitrine')), epaules: num(v('epaules')), bras: num(v('bras')),
+    note: (v('note')||'').trim() || null,
   };
   if (!body.date) { alert('La date est obligatoire.'); return; }
   try {
@@ -10911,7 +10916,7 @@ async function chargerMensurationsSupabase(clientId) {
       <div class="table-scroll" style="margin-top:20px;"><table class="alim-table">
         <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th><th></th></tr></thead>
         <tbody>${rows.map(r=>`<tr>
-          <td class="mono">${esc(r.date||'')}</td>
+          <td class="mono">${esc(r.date||'')}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}</td>
           <td>${_mensPhaseSelectHtml(r.id, mensurationsClientId, r.phase)}</td>
           <td>${r.poids!=null?r.poids+' kg':'—'}</td>
           <td>${r.mesure!=null?r.mesure+' cm':'—'}</td>
