@@ -2979,6 +2979,10 @@ function renderBilanDetailPage(el) {
       }).map(p => ({ ...p, _source:'mensuration', _date: p.mensurations.date })) : [];
       const bilanPhotosArr = (bilanDetailState.photos||[]).map(p => ({ ...p, _source:'bilan' }));
       const allPhotos = [...bilanPhotosArr, ...mensPhotosSemaine];
+      // Exposée sur bilanDetailState (global) car l'onclick ci-dessous est évalué dans le
+      // scope global — une const locale à cette IIFE lui serait invisible (ReferenceError
+      // silencieuse au clic, la lightbox ne s'ouvrait jamais).
+      bilanDetailState._photosLightbox = allPhotos;
       return `<div class="table-card" style="margin-bottom:16px;">
         <div class="table-toolbar">
           <div class="title">Photos</div>
@@ -2994,7 +2998,7 @@ function renderBilanDetailPage(el) {
                 ${allPhotos.map((p, idx) => `
                   <div style="width:100px;">
                     <div style="position:relative;width:100px;aspect-ratio:9/16;">
-                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(allPhotos,${idx})">
+                      <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm);cursor:pointer;" onclick="ouvrirPhotoLightbox(bilanDetailState._photosLightbox,${idx})">
                       ${p._source==='mensuration'
                         ? `<span style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.65);color:#fff;font-size:8.5px;padding:2px 5px;border-radius:999px;">📏 ${esc((p._date||'').split('-').reverse().join('/'))}</span>`
                         : `<button class="icon-btn del" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.6);" onclick="supprimerBilanDetailPhoto(${p.id},'${esc(p.url)}')" title="Supprimer">${iTrash()}</button>`}
