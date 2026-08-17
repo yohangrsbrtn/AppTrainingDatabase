@@ -22,7 +22,9 @@ Ces règles s'appliquent à chaque fois que je (Claude) modifie une diète exist
 
 ## Équivalents / repas alternatifs (variantes au sein d'un même repas)
 
-- Quand un repas a un "repas alternatif" (équivalent, `variante_index` différent), **les deux versions doivent avoir un total calorique très proche** (écart de moins de 15-20 kcal idéalement, viser 0 si possible). Les macros (P/G/L) peuvent différer un peu plus (nature différente des aliments), mais le total calorique doit rester cohérent puisque le client peut swiper entre les deux versions indifféremment.
+- Quand un repas a un "repas alternatif" (équivalent, `variante_index` différent), **la priorité absolue est l'écart de macronutriments, PAS l'écart calorique.** Un écart de calories de 8-15 kcal entre les deux versions est totalement acceptable ; un écart de 6g de lipides (ou de protéines/glucides) entre les deux versions est "énorme" et inacceptable, même si les calories totales tombent pile.
+- Cible : écart de lipides/protéines/glucides entre le repas officiel et son équivalent **sous les 2g si possible**, quitte à laisser un écart de calories de quelques kcal en échappement (le corps s'en fiche de 8 kcal, il ne s'en fiche pas de 6g de lipides en plus ou en moins selon le jour).
+- Méthode : si l'écart vient d'un excès de protéines sur l'équivalent → réduire la source de protéines (whey, etc.). Si l'écart vient d'un déficit de glucides → réduire les glucides (flocons d'avoine, etc.). Si l'écart vient d'un déficit de lipides → augmenter la matière grasse (beurre de cacahuètes, toujours par paliers de 5g, jamais en dessous de 10g). Ajuster les 2-3 leviers ensemble jusqu'à ce que les 3 macros collent, sans se soucier si le total calorique dérive légèrement de quelques kcal.
 
 ## Sauvegarde avant modification
 
