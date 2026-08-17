@@ -397,7 +397,12 @@ async function _pcRenumeroterExos(seance, exosOrdonnes) {
     }
   });
   await Promise.all(updates);
-  seance.client_programme_exercices = exosOrdonnes;
+  // seance provient de _pcAllSeances() (copie superficielle) — réassigner sa
+  // propriété ne toucherait pas l'objet réel dans _pcClientProgramme.blocs.
+  // On mute le tableau EN PLACE (même référence partagée par la copie et
+  // l'original) pour que le nouvel ordre survive au prochain rendu.
+  seance.client_programme_exercices.length = 0;
+  seance.client_programme_exercices.push(...exosOrdonnes);
   setPage('programme-client');
 }
 
