@@ -90,6 +90,10 @@ async function loadProgrammeClient(deepLink) {
     if (!resArbo.ok) throw new Error('supabase_' + resArbo.status);
     const blocs = await resArbo.json();
     _pcClientProgramme = Object.assign({}, cp, { blocs });
+    // Logs chargés AVANT la sélection par défaut de semaine/séance — la détection du "premier
+    // créneau vide" (_pcTrouverPremierTrou) en a besoin pour savoir ce qui est déjà rempli.
+    const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
+    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds)]);
     // Retrouve le BLOC qui contient la séance ciblée — peut différer du bloc_actif_id du coach
     // si celui-ci a changé de bloc actif entre-temps ; sans ce garde-fou, le bloc "par défaut"
     // écraserait _pcBlocId juste après et la séance ciblée ne serait plus trouvable dedans.
@@ -102,20 +106,52 @@ async function loadProgrammeClient(deepLink) {
         _pcSubPage = 'seance';
       }
     }
-    if (!_pcSemaine) _pcSemaine = 1;
     // Sélection du bloc : bloc_actif_id défini par le coach, sinon premier bloc
     const defaultBlocId = cp.bloc_actif_id || (blocs[0]?.id ?? null);
     if (!_pcBlocId || !blocs.find(b => b.id === _pcBlocId)) _pcBlocId = defaultBlocId;
-    // Sélection par défaut : première séance du bloc sélectionné
+    // Sélection par défaut "bétonnée" : propose directement la semaine/séance qui n'a encore
+    // aucun log, dans l'ordre chronologique (Sem1-Séance1, Sem1-Séance2, … Sem2-Séance1…) —
+    // le client n'a jamais à se demander "où j'en suis". Un trou plus tôt dans la séquence
+    // prime toujours sur des séances remplies plus tard (séance sautée puis rattrapée plus
+    // loin) : on cherche le PREMIER trou, jamais "après la dernière chose remplie". Ne
+    // s'applique qu'à la toute première visite de la session (_pcSeanceId encore vide) — un
+    // deep-link ou une sélection manuelle déjà faite ne sont jamais écrasés.
+    if (!_pcSeanceId) {
+      const trou = _pcTrouverPremierTrou(_pcBlocId);
+      if (trou) { _pcSemaine = trou.semaine; _pcSeanceId = trou.seanceId; }
+    }
+    if (!_pcSemaine) _pcSemaine = 1;
+    // Filet de sécurité : première séance du bloc sélectionné si rien d'autre n'a tranché
     const firstSeance = _pcSeancesForBloc(_pcBlocId)[0];
     if (!_pcSeanceId && firstSeance) _pcSeanceId = firstSeance.id;
-    const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
-    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds)]);
     setPage('programme-client');
   } catch(e) {
     _pcClientProgramme = 'error';
     setPage('programme-client');
   }
+}
+
+// Cherche le premier (semaine, séance) sans aucun log, en parcourant strictement dans l'ordre
+// chronologique du bloc (semaine puis ordre des séances). Une séance sautée reste le premier
+// trou trouvé même si des séances plus tardives ont, elles, été remplies — on ne se base jamais
+// sur "la dernière chose remplie + 1". Retourne null si tout est déjà rempli sur tout le bloc.
+function _pcTrouverPremierTrou(blocId) {
+  const seances = _pcSeancesForBloc(blocId);
+  if (!seances.length) return null;
+  const totalSem = _pcSemainesForBloc(blocId);
+  const remplis = new Set(); // `${exerciceId}|${semaine}`
+  Object.keys(_pcLogs).forEach(k => {
+    const [exId, sem] = k.split('|');
+    remplis.add(exId + '|' + sem);
+  });
+  for (let sem = 1; sem <= totalSem; sem++) {
+    for (const s of seances) {
+      const exos = s.client_programme_exercices || [];
+      const rempli = exos.length > 0 && exos.some(ex => remplis.has(ex.id + '|' + sem));
+      if (!rempli) return { semaine: sem, seanceId: s.id };
+    }
+  }
+  return null;
 }
 
 function _pcAllSeances() {
