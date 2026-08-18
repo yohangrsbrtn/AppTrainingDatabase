@@ -780,7 +780,9 @@ function renderPcSeancePage() {
   const optsSeances = blocSeances.map(s => `<option value="${s.id}" ${s.id === _pcSeanceId ? 'selected' : ''}>${esc(s.titre)}</option>`).join('');
 
   const exercicesAvecEquiv = [];
+  const ssInfos = _supersetInfos(seance.client_programme_exercices || []);
   const exosHtml = (seance.client_programme_exercices || []).map((ex, idx) => {
+    const ss = ssInfos[idx];
     const nbSeries = parseInt(ex.series) || 3;
     const equiv = _pcEquivalents[ex.id];
     const setsHtml = _pcSetsHtml(nbSeries, _pcSemaine,
@@ -850,10 +852,11 @@ function renderPcSeancePage() {
         <button onclick="pcSupprimerExo(${ex.id})" style="padding:7px 10px;background:#e05c5c22;border:1px solid #e05c5c55;border-radius:8px;color:#e05c5c;font-size:13px;cursor:pointer;">🗑</button>
       </div>` : '';
 
-    return `<div class="card" style="padding:10px;">
+    return `<div class="card" style="padding:10px;${ss?`border-left:3px solid ${ss.couleur};`:''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:7px;">
+            ${ss ? `<span style="font-size:10px;font-weight:700;color:#fff;background:${ss.couleur};border-radius:5px;padding:2px 6px;flex-shrink:0;" title="Superset — à enchaîner avec l'autre exercice ${ss.label[0]}">${ss.label}</span>` : ''}
             <div style="font-size:14px;font-weight:600;line-height:1.3;">${idx + 1}. ${esc(ex.nom)}</div>
             ${ex.notes ? `<button onclick="pcAfficherNoteCoach(${idx})" style="background:#4f8ef722;border:1px solid #4f8ef755;border-radius:50%;width:24px;height:24px;padding:0;font-size:13px;cursor:pointer;line-height:24px;text-align:center;flex-shrink:0;">💬</button>` : ''}
           </div>

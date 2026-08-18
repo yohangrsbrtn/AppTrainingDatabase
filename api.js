@@ -400,6 +400,32 @@ function fermerImagePleinEcran() {
 // sensible pour ce type de clé (rate-limitée par Giphy, prévue pour un usage front-end).
 const GIPHY_API_KEY = 'a50U1v0QkxxwknXkjP4AeyxSF12jKFft';
 
+// ── Supersets (exercices liés à faire l'un après l'autre) — partagé console.html (édition)
+// et programme-client.js (affichage client). `superset_groupe` est un entier partagé entre
+// plusieurs exercices d'une même séance ; le label affiché (A1/A2, B1/B2...) n'est jamais
+// stocké, toujours recalculé ici à partir de l'ordre d'apparition des groupes dans la séance.
+const SUPERSET_COLOR_PALETTE = ['#f59e0b','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#ef4444'];
+function _supersetInfos(exercices) {
+  const LETTERS = 'ABCDEFGHIJ';
+  const groupLettre = {};
+  const groupCouleur = {};
+  const compte = {};
+  let nextLetterIdx = 0;
+  const out = {}; // index dans `exercices` -> { label, couleur, groupe }
+  (exercices || []).forEach((ex, i) => {
+    const g = ex.superset_groupe;
+    if (g == null) return;
+    if (!(g in groupLettre)) {
+      groupLettre[g] = LETTERS[nextLetterIdx % LETTERS.length] || '?';
+      groupCouleur[g] = SUPERSET_COLOR_PALETTE[nextLetterIdx % SUPERSET_COLOR_PALETTE.length];
+      nextLetterIdx++;
+    }
+    compte[g] = (compte[g] || 0) + 1;
+    out[i] = { label: groupLettre[g] + compte[g], couleur: groupCouleur[g], groupe: g };
+  });
+  return out;
+}
+
 // Un message GIF est stocké tel quel dans chat_messages.texte (juste l'URL de l'image) —
 // pas de nouvelle colonne : on distingue au rendu via ce détecteur, réutilisé pour l'envoi
 // ET l'affichage. Évite une migration SQL pour une fonctionnalité par ailleurs simple.

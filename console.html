@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=14"></script>
+<script src="api.js?v=15"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -4020,7 +4020,7 @@ async function sauvegarderTemplateComplet(tpl){
     b.seances.forEach((s, si) => {
       const seanceId = seanceIdByBlocOrdre[blocId + '|' + si];
       s.exercices.forEach((ex, ei) => {
-        exercicesPayload.push({ seance_id: seanceId, exercice_id: ex.exercice_id, ordre: ei, series: parseInt(ex.series) || null, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '' });
+        exercicesPayload.push({ seance_id: seanceId, exercice_id: ex.exercice_id, ordre: ei, series: parseInt(ex.series) || null, reps: ex.reps || '', repos: ex.repos || '', tempo: ex.tempo || '', rir: ex.rir || '', notes: ex.notes || '', superset_groupe: ex.superset_groupe ?? null });
       });
     });
   });
@@ -4408,7 +4408,7 @@ async function ouvrirEditeurTemplate(id){
           titre: s.titre,
           exercices: (s.programme_seance_exercices || []).map(l => {
             const ex = exercicesData.find(e=>e.id===l.exercice_id);
-            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir, notes: l.notes || '' };
+            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir, notes: l.notes || '', superset_groupe: l.superset_groupe ?? null };
           })
         }))
       }))
@@ -4478,9 +4478,10 @@ function renderBlocsTemplate(){
             <button class="icon-btn del" onclick="event.stopPropagation();retirerSeanceTemplate(${bi},${si})">${iTrash()}</button>
           </div>
           <div style="display:${collapsed?'none':'block'};">
-            ${seance.exercices.map((ex, ei) => `
-            <div class="exo-row" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();onDropExo(event,${bi},${si},${ei})">
+            ${(() => { const ssInfos = _supersetInfos(seance.exercices); const pend = _tplSupersetPending && _tplSupersetPending.bi===bi && _tplSupersetPending.si===si ? _tplSupersetPending.ei : null; return seance.exercices.map((ex, ei) => { const ss = ssInfos[ei]; return `
+            <div class="exo-row" style="${ss?`border-left:3px solid ${ss.couleur};`:''}${pend===ei?'background:var(--accent-soft);':''}" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
+              <button class="mini-btn" style="${ss?`background:${ss.couleur};color:#fff;`:(pend===ei?'background:var(--accent);color:#fff;':'')}" title="${ss?'Superset '+ss.label+' — cliquer pour délier':(pend===ei?'Cliquer pour annuler':'Lier en superset à un autre exercice')}" onclick="event.stopPropagation();tplToggleSuperset(${bi},${si},${ei})">${ss?ss.label:'🔗'}</button>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="ouvrirPickerExercice(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire ? `<span style="font-size:10px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(ex.groupe_musculaire)}</span>` : ''}
@@ -4497,7 +4498,7 @@ function renderBlocsTemplate(){
               <input type="text" value="${esc(ex.notes||'')}" placeholder="Note coach pour le client…"
                 oninput="tplEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
                 style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
-            </div>`).join('')}
+            </div>`; }).join(''); })()}
             <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
               <button class="btn" style="width:100%;justify-content:center;" onclick="ouvrirPickerExercice(${bi},${si})">+ Ajouter un exercice</button>
             </div>
@@ -4516,6 +4517,51 @@ let _repartitionTplBlocIdx = 0;
 let _repartitionCpBlocIdx  = 0;
 let _tplCollapsed = new Set();
 let _cpCollapsed  = new Set();
+// ── Supersets ─────────────────────────────────────────────────────────
+let _tplSupersetPending = null; // {bi,si,ei} en attente de liaison (template)
+let _cpSupersetPending  = null; // idem, éditeur programme client
+let _supersetIdCounter  = Date.now(); // id de groupe interne, jamais affiché tel quel
+
+// Clic sur 🔗 : délie si déjà lié, sinon entre/sort du mode "choisir le partenaire", sinon lie
+// à l'exercice en attente (même séance uniquement). `edition`/`get`/`render` abstraient template vs client.
+function _toggleSupersetGenerique(bi, si, ei, get, render, pendingGetSet) {
+  const seance = get(bi, si);
+  const ex = seance.exercices[ei];
+  if (ex.superset_groupe != null) {
+    const g = ex.superset_groupe;
+    ex.superset_groupe = null;
+    const reste = seance.exercices.filter(e => e.superset_groupe === g);
+    if (reste.length === 1) reste[0].superset_groupe = null;
+    pendingGetSet(null);
+    render();
+    return;
+  }
+  const pend = pendingGetSet();
+  if (pend && pend.bi === bi && pend.si === si) {
+    if (pend.ei === ei) { pendingGetSet(null); render(); return; }
+    const partenaire = seance.exercices[pend.ei];
+    let groupe = partenaire.superset_groupe;
+    if (groupe == null) { groupe = _supersetIdCounter++; partenaire.superset_groupe = groupe; }
+    ex.superset_groupe = groupe;
+    pendingGetSet(null);
+    render();
+    return;
+  }
+  pendingGetSet({ bi, si, ei });
+  render();
+}
+function tplToggleSuperset(bi, si, ei) {
+  _toggleSupersetGenerique(bi, si, ei,
+    (bi, si) => tplEnEdition.blocs[bi].seances[si],
+    renderBlocsTemplate,
+    (v) => { if (v === undefined) return _tplSupersetPending; _tplSupersetPending = v; });
+}
+function cpToggleSuperset(bi, si, ei) {
+  _toggleSupersetGenerique(bi, si, ei,
+    (bi, si) => clientProgEnEdition.blocs[bi].seances[si],
+    renderBlocsClientProg,
+    (v) => { if (v === undefined) return _cpSupersetPending; _cpSupersetPending = v; });
+}
 const BLOC_COLOR = { metabolique:'#1D9E75', mecanique:'#378ADD', force:'#D85A30' };
 // Couleur par séance (pas par bloc) — repère visuel pour se retrouver instantanément en
 // scrollant une liste de séances repliées dans l'éditeur, distincte de BLOC_COLOR (celle-ci
@@ -4623,8 +4669,17 @@ function retirerSeanceTemplate(bi, si){
   renderBlocsTemplate();
 }
 function retirerExoDeSeance(bi, si, ei){
-  tplEnEdition.blocs[bi].seances[si].exercices.splice(ei,1);
+  const seance = tplEnEdition.blocs[bi].seances[si];
+  _nettoyerSupersetOrphelin(seance, seance.exercices[ei].superset_groupe);
+  seance.exercices.splice(ei,1);
   renderBlocsTemplate();
+}
+// Si un exercice retiré/déplacé laisse son groupe superset à un seul membre, on délie ce
+// dernier aussi — un "superset" à un seul exercice n'a pas de sens.
+function _nettoyerSupersetOrphelin(seance, groupe){
+  if (groupe == null) return;
+  const membres = seance.exercices.filter(e => e.superset_groupe === groupe);
+  if (membres.length <= 2) membres.forEach(e => { e.superset_groupe = null; });
 }
 
 let dragExoSource = null;
@@ -4747,9 +4802,9 @@ function ajouterExerciceASeance(exerciceId){
     series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo, rir: rir || RIR_PAR_TYPE[blocType] || '', notes: '',
   };
   if (ei !== undefined && ei !== null) {
-    // Remplacement en place (clic sur le nom) : on garde séries + note coach, tout le reste vient du nouvel exercice.
+    // Remplacement en place (clic sur le nom) : on garde séries + note coach + lien superset, tout le reste vient du nouvel exercice.
     const cible = tplEnEdition.blocs[bi].seances[si].exercices[ei];
-    nouveau.series = cible.series; nouveau.notes = cible.notes;
+    nouveau.series = cible.series; nouveau.notes = cible.notes; nouveau.superset_groupe = cible.superset_groupe ?? null;
     tplEnEdition.blocs[bi].seances[si].exercices[ei] = nouveau;
   } else {
     tplEnEdition.blocs[bi].seances[si].exercices.push(nouveau);
@@ -4861,6 +4916,7 @@ async function assignerTemplateAuClient(templateId, clientId){
         exercicesPayload.push({
           seance_id: seanceId, exercice_id: ex.exercice_id, nom: source ? source.nom : '(exercice supprimé)',
           ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || null,
+          superset_groupe: ex.superset_groupe ?? null,
         });
       });
     });
@@ -8318,7 +8374,7 @@ async function ouvrirEditeurProgrammeClient(progId){
         exercices: (s.client_programme_exercices||[]).map(ex => {
           const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id) ||
                          (exercicesData||[]).find(e=>e.nom.toLowerCase()===(ex.nom||'').toLowerCase());
-          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || '' };
+          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || '', superset_groupe: ex.superset_groupe ?? null };
         })
       }))
     }))
@@ -8424,9 +8480,10 @@ function renderBlocsClientProg(){
             <button class="icon-btn del" onclick="event.stopPropagation();cpRetirerSeance(${bi},${si})">${iTrash()}</button>
           </div>
           <div style="display:${collapsed?'none':'block'};">
-            ${seance.exercices.map((ex,ei)=>`
-            <div class="exo-row" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();cpOnDropExo(event,${bi},${si},${ei})">
+            ${(() => { const ssInfos = _supersetInfos(seance.exercices); const pend = _cpSupersetPending && _cpSupersetPending.bi===bi && _cpSupersetPending.si===si ? _cpSupersetPending.ei : null; return seance.exercices.map((ex,ei)=>{ const ss = ssInfos[ei]; return `
+            <div class="exo-row" style="${ss?`border-left:3px solid ${ss.couleur};`:''}${pend===ei?'background:var(--accent-soft);':''}" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();cpOnDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
+              <button class="mini-btn" style="${ss?`background:${ss.couleur};color:#fff;`:(pend===ei?'background:var(--accent);color:#fff;':'')}" title="${ss?'Superset '+ss.label+' — cliquer pour délier':(pend===ei?'Cliquer pour annuler':'Lier en superset à un autre exercice')}" onclick="event.stopPropagation();cpToggleSuperset(${bi},${si},${ei})">${ss?ss.label:'🔗'}</button>
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="cpOuvrirPicker(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire?`<span style="font-size:10px;color:var(--text-faint);">${esc(ex.groupe_musculaire)}</span>`:''}
@@ -8443,7 +8500,7 @@ function renderBlocsClientProg(){
               <input type="text" value="${esc(ex.notes||'')}" placeholder="Note coach pour le client…"
                 oninput="clientProgEnEdition.blocs[${bi}].seances[${si}].exercices[${ei}].notes=this.value"
                 style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--hairline);color:var(--accent);font-size:11.5px;font-family:inherit;padding:2px 0;outline:none;box-sizing:border-box;">
-            </div>`).join('')}
+            </div>`; }).join(''); })()}
             <div style="padding:10px 16px;border-top:1px solid var(--hairline);">
               <button class="btn" style="width:100%;justify-content:center;" onclick="cpOuvrirPicker(${bi},${si})">+ Ajouter un exercice</button>
             </div>
@@ -8561,7 +8618,12 @@ function cpAjouterBloc(){ clientProgEnEdition.blocs.push(blocVide()); renderBloc
 function cpRetirerBloc(bi){ clientProgEnEdition.blocs.splice(bi,1); renderBlocsClientProg(); }
 function cpAjouterSeance(bi){ const s=clientProgEnEdition.blocs[bi].seances; s.push({id:null,titre:'Séance '+(s.length+1),exercices:[]}); renderBlocsClientProg(); }
 function cpRetirerSeance(bi,si){ clientProgEnEdition.blocs[bi].seances.splice(si,1); _renumeroterSeances(clientProgEnEdition.blocs[bi].seances); renderBlocsClientProg(); }
-function cpRetirerExo(bi,si,ei){ clientProgEnEdition.blocs[bi].seances[si].exercices.splice(ei,1); renderBlocsClientProg(); }
+function cpRetirerExo(bi,si,ei){
+  const seance = clientProgEnEdition.blocs[bi].seances[si];
+  _nettoyerSupersetOrphelin(seance, seance.exercices[ei].superset_groupe);
+  seance.exercices.splice(ei,1);
+  renderBlocsClientProg();
+}
 function cpOnDragStartExo(e,bi,si,ei){ _cpDragExoSource={bi,si,ei}; e.dataTransfer.effectAllowed='move'; }
 function cpOnDragEndExo(){ _cpDragExoSource=null; }
 function cpOnDropExo(e,bi,si,ei){
@@ -8636,9 +8698,9 @@ function cpAjouterExo(exerciceId){
     rir:(blocType&&ex['rir_'+blocType]?ex['rir_'+blocType]:'')||(RIR_PAR_TYPE[blocType]||''), notes:''
   };
   if(ei!==undefined&&ei!==null){
-    // Remplacement en place (clic sur le nom) : garde le même id (préserve les logs déjà saisis par le client) + séries/note.
+    // Remplacement en place (clic sur le nom) : garde le même id (préserve les logs déjà saisis par le client) + séries/note/lien superset.
     const cible=clientProgEnEdition.blocs[bi].seances[si].exercices[ei];
-    nouveau.id=cible.id; nouveau.series=cible.series; nouveau.notes=cible.notes;
+    nouveau.id=cible.id; nouveau.series=cible.series; nouveau.notes=cible.notes; nouveau.superset_groupe=cible.superset_groupe??null;
     clientProgEnEdition.blocs[bi].seances[si].exercices[ei]=nouveau;
   } else {
     clientProgEnEdition.blocs[bi].seances[si].exercices.push(nouveau);
@@ -8678,9 +8740,9 @@ async function sauvegarderProgrammeClient(){
         for(let ei=0;ei<s.exercices.length;ei++){
           const ex=s.exercices[ei];
           if(ex.id){
-            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
+            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})});
           } else {
-            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null})});
+            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})});
             ex.id=(await r.json())[0].id;
           }
           newExoIds.push(ex.id);
