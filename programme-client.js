@@ -21,6 +21,7 @@ let _pcEquivalents     = {}; // `${client_programme_exercice_id}` → { id, nom,
 let _pcEquivLogs       = {}; // `${equivalentId}|${semaine}|${serie}` → log
 const _pcEquivSaveQueues = {};
 let _pcExercicesLib    = null; // cache bibliothèque exercices (lazy)
+let _pcGifMap          = null; // `${exercice_id}` → gif_url (cache, lazy)
 let _pcEquivCibleId    = null; // exercice prévu ciblé par la modale de création en cours
 
 // ── Auto-édition du programme (réservée client par client, voir auto_edition_programme) ──
@@ -93,7 +94,7 @@ async function loadProgrammeClient(deepLink) {
     // Logs chargés AVANT la sélection par défaut de semaine/séance — la détection du "premier
     // créneau vide" (_pcTrouverPremierTrou) en a besoin pour savoir ce qui est déjà rempli.
     const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
-    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds)]);
+    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds), _pcChargerGifMap()]);
     // Retrouve le BLOC qui contient la séance ciblée — peut différer du bloc_actif_id du coach
     // si celui-ci a changé de bloc actif entre-temps ; sans ce garde-fou, le bloc "par défaut"
     // écraserait _pcBlocId juste après et la séance ciblée ne serait plus trouvable dedans.
@@ -235,6 +236,16 @@ async function _pcChargerExercicesLib() {
     _pcExercicesLib = res.ok ? await res.json() : [];
   } catch(e) { _pcExercicesLib = []; }
   return _pcExercicesLib;
+}
+
+async function _pcChargerGifMap() {
+  if (_pcGifMap) return _pcGifMap;
+  _pcGifMap = {};
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?select=id,gif_url&gif_url=not.is.null`, { headers: supaHeaders() });
+    if (res.ok) (await res.json()).forEach(e => { _pcGifMap[e.id] = e.gif_url; });
+  } catch(e) {}
+  return _pcGifMap;
 }
 
 async function pcOuvrirCreerEquivalent(exerciceId) {
@@ -852,8 +863,12 @@ function renderPcSeancePage() {
         <button onclick="pcSupprimerExo(${ex.id})" style="padding:7px 10px;background:#e05c5c22;border:1px solid #e05c5c55;border-radius:8px;color:#e05c5c;font-size:13px;cursor:pointer;">🗑</button>
       </div>` : '';
 
+    const gifUrl = ex.exercice_id != null ? (_pcGifMap || {})[ex.exercice_id] : null;
+    const gifThumb = gifUrl ? `<div onclick="ouvrirImagePleinEcran('${esc(gifUrl)}')" style="width:44px;height:44px;background:#eef1f8;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;"><img src="${esc(gifUrl)}" style="width:38px;height:38px;object-fit:contain;" alt="" /></div>` : '';
+
     return `<div class="card" style="padding:10px;${ss?`border-left:3px solid ${ss.couleur};`:''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
+        ${gifThumb}
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:7px;">
             ${ss ? `<span style="font-size:10px;font-weight:700;color:#fff;background:${ss.couleur};border-radius:5px;padding:2px 6px;flex-shrink:0;" title="Superset — à enchaîner avec l'autre exercice ${ss.label[0]}">${ss.label}</span>` : ''}
