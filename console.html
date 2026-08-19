@@ -4244,7 +4244,7 @@ function ouvrirFormExercice(id){
         <div style="display:flex;gap:8px;align-items:center;">
           <input id="fExoGif" type="text" value="${esc(ex.gif_url||'')}" placeholder="https://…" style="flex:1;" oninput="_refreshGifPreview()">
           <img id="fExoGifPreview" src="${esc(ex.gif_url||'')}" style="width:32px;height:32px;object-fit:contain;background:#eef1f8;border-radius:6px;flex-shrink:0;${ex.gif_url?'':'display:none;'}" alt="">
-          <button type="button" class="btn" style="flex-shrink:0;white-space:nowrap;" onclick="ouvrirPickerGif()">🔍 Chercher</button>
+          <button type="button" class="btn" style="flex-shrink:0;white-space:nowrap;" onclick="ouvrirPickerGifExo()">🔍 Chercher</button>
         </div>
       </div>
       <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos / RIR / tempo par bloc</label>
@@ -4315,57 +4315,58 @@ function _refreshGifPreview(){
 
 // Recherche visuelle dans le dépôt gratuit de gifs (ExerciseGymGifsDB, hébergé CDN jsDelivr).
 // Le fichier tree.json est chargé une seule fois par session console (~1300 entrées, mis en cache).
-const GIF_CDN_BASE = 'https://cdn.jsdelivr.net/gh/JahelCuadrado/ExerciseGymGifsDB@main/';
-const GIF_CATEGORIES = ['abductors','abs','adductors','biceps','calves','cardio','delts','forearms','glutes','hamstrings','lats','levator-scapulae','pectorals','quads','serratus-anterior','spine','traps','triceps','upper-back'];
-let _gifCatalogCache = null;
-let _gifPickerCategorie = 'all';
-let _gifPickerRecherche = '';
+// Préfixe ExoGif dédié pour ne pas entrer en collision avec le picker GIF du chat (Giphy, plus haut dans le fichier).
+const EXO_GIF_CDN_BASE = 'https://cdn.jsdelivr.net/gh/JahelCuadrado/ExerciseGymGifsDB@main/';
+const EXO_GIF_CATEGORIES = ['abductors','abs','adductors','biceps','calves','cardio','delts','forearms','glutes','hamstrings','lats','levator-scapulae','pectorals','quads','serratus-anterior','spine','traps','triceps','upper-back'];
+let _exoGifCatalogCache = null;
+let _exoGifCategorie = 'all';
+let _exoGifRecherche = '';
 
-async function _chargerGifCatalog(){
-  if (_gifCatalogCache) return _gifCatalogCache;
+async function _chargerExoGifCatalog(){
+  if (_exoGifCatalogCache) return _exoGifCatalogCache;
   const res = await fetch('https://api.github.com/repos/JahelCuadrado/ExerciseGymGifsDB/git/trees/main?recursive=1');
   if (!res.ok) throw new Error('github_' + res.status);
   const data = await res.json();
-  _gifCatalogCache = (data.tree || []).filter(t => t.path.endsWith('.gif')).map(t => t.path);
-  return _gifCatalogCache;
+  _exoGifCatalogCache = (data.tree || []).filter(t => t.path.endsWith('.gif')).map(t => t.path);
+  return _exoGifCatalogCache;
 }
 
-async function ouvrirPickerGif(){
+async function ouvrirPickerGifExo(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.id = 'modal-gif-picker';
+  overlay.id = 'modal-exo-gif-picker';
   overlay.style.zIndex = 2000;
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:640px;">
       <h3>Chercher un gif d'exercice</h3>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-        <input id="gifPickerSearch" type="text" placeholder="Rechercher (ex: squat, curl, presse…)" oninput="_gifPickerRecherche=this.value;_renderGifPickerGrid()" style="flex:1;min-width:180px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
-        <select id="gifPickerCategorie" onchange="_gifPickerCategorie=this.value;_renderGifPickerGrid()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+        <input id="exoGifSearch" type="text" placeholder="Rechercher (ex: squat, curl, presse…)" oninput="_exoGifRecherche=this.value;_renderExoGifPickerGrid()" style="flex:1;min-width:180px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+        <select id="exoGifCategorie" onchange="_exoGifCategorie=this.value;_renderExoGifPickerGrid()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
           <option value="all">Tous les groupes</option>
-          ${GIF_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+          ${EXO_GIF_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
       </div>
-      <div id="gifPickerGrid" style="min-height:120px;max-height:420px;overflow-y:auto;">Chargement du catalogue…</div>
+      <div id="exoGifGrid" style="min-height:120px;max-height:420px;overflow-y:auto;">Chargement du catalogue…</div>
       <div class="modal-actions">
-        <button class="btn" onclick="document.getElementById('modal-gif-picker').remove()">Fermer</button>
+        <button class="btn" onclick="document.getElementById('modal-exo-gif-picker').remove()">Fermer</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   try {
-    await _chargerGifCatalog();
-    _renderGifPickerGrid();
+    await _chargerExoGifCatalog();
+    _renderExoGifPickerGrid();
   } catch(e) {
-    document.getElementById('gifPickerGrid').innerHTML = `<div style="color:var(--critical);font-size:13px;">Erreur de chargement du catalogue (limite GitHub atteinte ?). Réessaie dans quelques minutes.</div>`;
+    document.getElementById('exoGifGrid').innerHTML = `<div style="color:var(--critical);font-size:13px;">Erreur de chargement du catalogue (limite GitHub atteinte ?). Réessaie dans quelques minutes.</div>`;
   }
 }
 
-function _renderGifPickerGrid(){
-  const grid = document.getElementById('gifPickerGrid');
-  if (!grid || !_gifCatalogCache) return;
-  const q = _gifPickerRecherche.trim().toLowerCase();
-  let list = _gifCatalogCache;
-  if (_gifPickerCategorie !== 'all') list = list.filter(p => p.startsWith(_gifPickerCategorie + '/'));
+function _renderExoGifPickerGrid(){
+  const grid = document.getElementById('exoGifGrid');
+  if (!grid || !_exoGifCatalogCache) return;
+  const q = _exoGifRecherche.trim().toLowerCase();
+  let list = _exoGifCatalogCache;
+  if (_exoGifCategorie !== 'all') list = list.filter(p => p.startsWith(_exoGifCategorie + '/'));
   if (q) list = list.filter(p => p.replace(/[-/]/g, ' ').toLowerCase().includes(q));
   const total = list.length;
   const shown = list.slice(0, 60);
@@ -4373,8 +4374,8 @@ function _renderGifPickerGrid(){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;">
       ${shown.map(path => {
         const nom = path.split('/')[1].replace('.gif','').replace(/-/g,' ');
-        const url = GIF_CDN_BASE + path;
-        return `<div onclick="choisirGifPicker('${esc(url)}')" style="cursor:pointer;text-align:center;background:var(--surface-2);border-radius:8px;padding:6px;" title="${esc(nom)}">
+        const url = EXO_GIF_CDN_BASE + path;
+        return `<div onclick="choisirExoGifPicker('${esc(url)}')" style="cursor:pointer;text-align:center;background:var(--surface-2);border-radius:8px;padding:6px;" title="${esc(nom)}">
           <img src="${esc(url)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">
           <div style="font-size:10px;color:var(--text-faint);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(nom)}</div>
         </div>`;
@@ -4383,10 +4384,10 @@ function _renderGifPickerGrid(){
     ${total > 60 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:10px;text-align:center;">${total} résultats — affine ta recherche pour en voir plus.</div>` : ''}`;
 }
 
-function choisirGifPicker(url){
+function choisirExoGifPicker(url){
   document.getElementById('fExoGif').value = url;
   _refreshGifPreview();
-  document.getElementById('modal-gif-picker').remove();
+  document.getElementById('modal-exo-gif-picker').remove();
 }
 
 async function retirerExercice(id){
