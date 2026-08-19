@@ -4321,6 +4321,8 @@ const EXO_GIF_CATEGORIES = ['abductors','abs','adductors','biceps','calves','car
 let _exoGifCatalogCache = null;
 let _exoGifCategorie = 'all';
 let _exoGifRecherche = '';
+let _exoImgSource = 'gif'; // 'gif' (ExerciseGymGifsDB, animé) | 'wger' (photos, catalogue plus large mais couverture image partielle)
+let _wgerCatalogCache = null;
 
 async function _chargerExoGifCatalog(){
   if (_exoGifCatalogCache) return _exoGifCatalogCache;
@@ -4331,6 +4333,31 @@ async function _chargerExoGifCatalog(){
   return _exoGifCatalogCache;
 }
 
+// wger : catalogue communautaire plus large (belt squat, hip thrust, bulgares…) mais sans gif animé
+// et avec une couverture image partielle (beaucoup d'exercices du dataset n'ont aucune photo).
+async function _chargerWgerCatalog(){
+  if (_wgerCatalogCache) return _wgerCatalogCache;
+  const out = [];
+  let url = 'https://wger.de/api/v2/exerciseinfo/?limit=100&format=json';
+  while (url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('wger_' + res.status);
+    const data = await res.json();
+    for (const item of data.results) {
+      const img = (item.images || []).find(im => im.is_main) || (item.images || [])[0];
+      if (!img) continue;
+      const trFr = (item.translations || []).find(t => t.language === 12);
+      const trEn = (item.translations || []).find(t => t.language === 2);
+      const nom = (trFr || trEn || item.translations[0] || {}).name;
+      if (!nom) continue;
+      out.push({ nom, url: img.image });
+    }
+    url = data.next;
+  }
+  _wgerCatalogCache = out;
+  return _wgerCatalogCache;
+}
+
 async function ouvrirPickerGifExo(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -4339,10 +4366,14 @@ async function ouvrirPickerGifExo(){
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:640px;">
-      <h3>Chercher un gif d'exercice</h3>
+      <h3>Chercher une démo d'exercice</h3>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <select id="exoGifSource" onchange="_exoImgSource=this.value;_exoGifRecherche='';document.getElementById('exoGifSearch').value='';_chargerEtRenderExoGifPicker()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+          <option value="gif" ${_exoImgSource==='gif'?'selected':''}>🎞️ Gifs animés (~1300)</option>
+          <option value="wger" ${_exoImgSource==='wger'?'selected':''}>🖼️ Photos wger (catalogue plus large)</option>
+        </select>
         <input id="exoGifSearch" type="text" placeholder="Rechercher (ex: squat, curl, presse…)" oninput="_exoGifRecherche=this.value;_renderExoGifPickerGrid()" style="flex:1;min-width:180px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
-        <select id="exoGifCategorie" onchange="_exoGifCategorie=this.value;_renderExoGifPickerGrid()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+        <select id="exoGifCategorie" onchange="_exoGifCategorie=this.value;_renderExoGifPickerGrid()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;display:${_exoImgSource==='gif'?'':'none'};">
           <option value="all">Tous les groupes</option>
           ${EXO_GIF_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
@@ -4353,18 +4384,46 @@ async function ouvrirPickerGifExo(){
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  await _chargerEtRenderExoGifPicker();
+}
+
+async function _chargerEtRenderExoGifPicker(){
+  const catSel = document.getElementById('exoGifCategorie');
+  if (catSel) catSel.style.display = _exoImgSource === 'gif' ? '' : 'none';
+  const grid = document.getElementById('exoGifGrid');
+  if (grid) grid.innerHTML = 'Chargement du catalogue…';
   try {
-    await _chargerExoGifCatalog();
+    if (_exoImgSource === 'gif') await _chargerExoGifCatalog();
+    else await _chargerWgerCatalog();
     _renderExoGifPickerGrid();
   } catch(e) {
-    document.getElementById('exoGifGrid').innerHTML = `<div style="color:var(--critical);font-size:13px;">Erreur de chargement du catalogue (limite GitHub atteinte ?). Réessaie dans quelques minutes.</div>`;
+    if (grid) grid.innerHTML = `<div style="color:var(--critical);font-size:13px;">Erreur de chargement du catalogue. Réessaie dans quelques minutes.</div>`;
   }
 }
 
 function _renderExoGifPickerGrid(){
   const grid = document.getElementById('exoGifGrid');
-  if (!grid || !_exoGifCatalogCache) return;
+  if (!grid) return;
   const q = _exoGifRecherche.trim().toLowerCase();
+
+  if (_exoImgSource === 'wger') {
+    if (!_wgerCatalogCache) return;
+    let list = _wgerCatalogCache;
+    if (q) list = list.filter(e => e.nom.toLowerCase().includes(q));
+    const total = list.length;
+    const shown = list.slice(0, 60);
+    grid.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;">
+        ${shown.map(e => `<div onclick="choisirExoGifPicker('${esc(e.url)}')" style="cursor:pointer;text-align:center;background:var(--surface-2);border-radius:8px;padding:6px;" title="${esc(e.nom)}">
+          <img src="${esc(e.url)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">
+          <div style="font-size:10px;color:var(--text-faint);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.nom)}</div>
+        </div>`).join('') || '<div style="grid-column:1/-1;color:var(--text-faint);font-size:13px;padding:20px;text-align:center;">Aucun résultat.</div>'}
+      </div>
+      ${total > 60 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:10px;text-align:center;">${total} résultats — affine ta recherche pour en voir plus.</div>` : ''}`;
+    return;
+  }
+
+  if (!_exoGifCatalogCache) return;
   let list = _exoGifCatalogCache;
   if (_exoGifCategorie !== 'all') list = list.filter(p => p.startsWith(_exoGifCategorie + '/'));
   if (q) list = list.filter(p => p.replace(/[-/]/g, ' ').toLowerCase().includes(q));
