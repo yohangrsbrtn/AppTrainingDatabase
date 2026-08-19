@@ -3778,7 +3778,7 @@ async function chargerExercices(){
 async function sauvegarderExercice(ex){
   const method = ex.id ? 'PATCH' : 'POST';
   const url = ex.id ? `${SUPABASE_URL}/rest/v1/exercices?id=eq.${ex.id}` : `${SUPABASE_URL}/rest/v1/exercices`;
-  const body = { nom: ex.nom, groupe_musculaire: ex.groupe_musculaire || null, groupe_secondaire: ex.groupe_secondaire || null, equipement: ex.equipement || null, video_url: ex.video_url || null, notes: ex.notes || null,
+  const body = { nom: ex.nom, groupe_musculaire: ex.groupe_musculaire || null, groupe_secondaire: ex.groupe_secondaire || null, equipement: ex.equipement || null, video_url: ex.video_url || null, gif_url: ex.gif_url || null, notes: ex.notes || null,
     reps_metabolique: ex.reps_metabolique || null, repos_metabolique: ex.repos_metabolique || null,
     reps_mecanique: ex.reps_mecanique || null, repos_mecanique: ex.repos_mecanique || null,
     reps_force: ex.reps_force || null, repos_force: ex.repos_force || null };
@@ -4080,17 +4080,18 @@ function renderExercicesSub(){
         <button class="btn primary" onclick="ouvrirFormExercice(null)">+ Nouvel exercice</button>
       </div>
       <div class="table-scroll"><table class="clients">
-        <thead><tr><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
+        <thead><tr><th>Démo</th><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
         <tbody>
           ${list.map(e => `
             <tr onclick="ouvrirFormExercice(${e.id})">
+              <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">` : '—'}</td>
               <td style="font-weight:600;">${esc(e.nom)}</td>
               <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
               <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
               <td>${_exoResumeBlocsHtml(e)}</td>
               <td>${e.video_url ? `<a href="${esc(e.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);">▶ Voir</a>` : '—'}</td>
               <td class="row-actions"><button class="icon-btn" onclick="event.stopPropagation();retirerExercice(${e.id})">${iTrash()}</button></td>
-            </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
         </tbody>
       </table></div>
     </div>`;
@@ -4212,7 +4213,7 @@ function _exoResumeBlocsHtml(e){
 }
 
 function ouvrirFormExercice(id){
-  const ex = id ? exercicesData.find(e => e.id === id) : { nom:'', groupe_musculaire:'', groupe_secondaire:'', equipement:'', video_url:'', notes:'',
+  const ex = id ? exercicesData.find(e => e.id === id) : { nom:'', groupe_musculaire:'', groupe_secondaire:'', equipement:'', video_url:'', gif_url:'', notes:'',
     reps_metabolique:'', repos_metabolique:'', reps_mecanique:'', repos_mecanique:'', reps_force:'', repos_force:'',
     rir_metabolique:'', rir_mecanique:'', rir_force:'', tempo_metabolique:'', tempo_mecanique:'', tempo_force:'' };
   const overlay = document.createElement('div');
@@ -4239,6 +4240,13 @@ function ouvrirFormExercice(id){
       </div>
       <div class="field-row"><label>Équipement</label><input id="fExoEquip" type="text" value="${esc(ex.equipement||'')}" placeholder="ex: Barre, haltères, machine…"></div>
       <div class="field-row"><label>Lien vidéo (YouTube, Instagram…)</label><input id="fExoVideo" type="text" value="${esc(ex.video_url||'')}" placeholder="https://…"></div>
+      <div class="field-row"><label>Gif de démo (miniature affichée au client)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="fExoGif" type="text" value="${esc(ex.gif_url||'')}" placeholder="https://…" style="flex:1;" oninput="_refreshGifPreview()">
+          <img id="fExoGifPreview" src="${esc(ex.gif_url||'')}" style="width:32px;height:32px;object-fit:contain;background:#eef1f8;border-radius:6px;flex-shrink:0;${ex.gif_url?'':'display:none;'}" alt="">
+          <button type="button" class="btn" style="flex-shrink:0;white-space:nowrap;" onclick="ouvrirPickerGif()">🔍 Chercher</button>
+        </div>
+      </div>
       <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos / RIR / tempo par bloc</label>
       <div class="field-grid" style="grid-template-columns:repeat(3,1fr);">
         <div class="field-row"><label>Métabolique — reps</label><input id="fExoRepsMeta" type="text" value="${esc(ex.reps_metabolique||'')}" placeholder="15-20"></div>
@@ -4275,6 +4283,7 @@ async function confirmerFormExercice(id){
     groupe_secondaire: document.getElementById('fExoGroupeSec').value,
     equipement: document.getElementById('fExoEquip').value.trim(),
     video_url: document.getElementById('fExoVideo').value.trim(),
+    gif_url: document.getElementById('fExoGif').value.trim(),
     notes: document.getElementById('fExoNotes').value.trim(),
     reps_metabolique: document.getElementById('fExoRepsMeta').value.trim(),
     repos_metabolique: document.getElementById('fExoReposMeta').value.trim(),
@@ -4296,6 +4305,88 @@ async function confirmerFormExercice(id){
     document.getElementById('modal-exercice').remove();
     renderExercicesSub();
   } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
+}
+
+function _refreshGifPreview(){
+  const url = document.getElementById('fExoGif').value.trim();
+  const img = document.getElementById('fExoGifPreview');
+  if (url) { img.src = url; img.style.display = ''; } else { img.style.display = 'none'; }
+}
+
+// Recherche visuelle dans le dépôt gratuit de gifs (ExerciseGymGifsDB, hébergé CDN jsDelivr).
+// Le fichier tree.json est chargé une seule fois par session console (~1300 entrées, mis en cache).
+const GIF_CDN_BASE = 'https://cdn.jsdelivr.net/gh/JahelCuadrado/ExerciseGymGifsDB@main/';
+const GIF_CATEGORIES = ['abductors','abs','adductors','biceps','calves','cardio','delts','forearms','glutes','hamstrings','lats','levator-scapulae','pectorals','quads','serratus-anterior','spine','traps','triceps','upper-back'];
+let _gifCatalogCache = null;
+let _gifPickerCategorie = 'all';
+let _gifPickerRecherche = '';
+
+async function _chargerGifCatalog(){
+  if (_gifCatalogCache) return _gifCatalogCache;
+  const res = await fetch('https://api.github.com/repos/JahelCuadrado/ExerciseGymGifsDB/git/trees/main?recursive=1');
+  if (!res.ok) throw new Error('github_' + res.status);
+  const data = await res.json();
+  _gifCatalogCache = (data.tree || []).filter(t => t.path.endsWith('.gif')).map(t => t.path);
+  return _gifCatalogCache;
+}
+
+async function ouvrirPickerGif(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-gif-picker';
+  overlay.style.zIndex = 2000;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:640px;">
+      <h3>Chercher un gif d'exercice</h3>
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <input id="gifPickerSearch" type="text" placeholder="Rechercher (ex: squat, curl, presse…)" oninput="_gifPickerRecherche=this.value;_renderGifPickerGrid()" style="flex:1;min-width:180px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+        <select id="gifPickerCategorie" onchange="_gifPickerCategorie=this.value;_renderGifPickerGrid()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;">
+          <option value="all">Tous les groupes</option>
+          ${GIF_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+      <div id="gifPickerGrid" style="min-height:120px;max-height:420px;overflow-y:auto;">Chargement du catalogue…</div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('modal-gif-picker').remove()">Fermer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  try {
+    await _chargerGifCatalog();
+    _renderGifPickerGrid();
+  } catch(e) {
+    document.getElementById('gifPickerGrid').innerHTML = `<div style="color:var(--critical);font-size:13px;">Erreur de chargement du catalogue (limite GitHub atteinte ?). Réessaie dans quelques minutes.</div>`;
+  }
+}
+
+function _renderGifPickerGrid(){
+  const grid = document.getElementById('gifPickerGrid');
+  if (!grid || !_gifCatalogCache) return;
+  const q = _gifPickerRecherche.trim().toLowerCase();
+  let list = _gifCatalogCache;
+  if (_gifPickerCategorie !== 'all') list = list.filter(p => p.startsWith(_gifPickerCategorie + '/'));
+  if (q) list = list.filter(p => p.replace(/[-/]/g, ' ').toLowerCase().includes(q));
+  const total = list.length;
+  const shown = list.slice(0, 60);
+  grid.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;">
+      ${shown.map(path => {
+        const nom = path.split('/')[1].replace('.gif','').replace(/-/g,' ');
+        const url = GIF_CDN_BASE + path;
+        return `<div onclick="choisirGifPicker('${esc(url)}')" style="cursor:pointer;text-align:center;background:var(--surface-2);border-radius:8px;padding:6px;" title="${esc(nom)}">
+          <img src="${esc(url)}" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">
+          <div style="font-size:10px;color:var(--text-faint);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(nom)}</div>
+        </div>`;
+      }).join('') || '<div style="grid-column:1/-1;color:var(--text-faint);font-size:13px;padding:20px;text-align:center;">Aucun résultat.</div>'}
+    </div>
+    ${total > 60 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:10px;text-align:center;">${total} résultats — affine ta recherche pour en voir plus.</div>` : ''}`;
+}
+
+function choisirGifPicker(url){
+  document.getElementById('fExoGif').value = url;
+  _refreshGifPreview();
+  document.getElementById('modal-gif-picker').remove();
 }
 
 async function retirerExercice(id){
@@ -4408,7 +4499,7 @@ async function ouvrirEditeurTemplate(id){
           titre: s.titre,
           exercices: (s.programme_seance_exercices || []).map(l => {
             const ex = exercicesData.find(e=>e.id===l.exercice_id);
-            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir, notes: l.notes || '', superset_groupe: l.superset_groupe ?? null };
+            return { exercice_id: l.exercice_id, nom: ex ? ex.nom : '(exercice supprimé)', groupe_musculaire: ex ? (ex.groupe_musculaire||null) : null, gif_url: ex ? (ex.gif_url||null) : null, series: l.series, reps: l.reps, repos: l.repos, tempo: l.tempo, rir: l.rir, notes: l.notes || '', superset_groupe: l.superset_groupe ?? null };
           })
         }))
       }))
@@ -4482,6 +4573,7 @@ function renderBlocsTemplate(){
             <div class="exo-row" style="${ss?`border-left:3px solid ${ss.couleur};`:''}${pend===ei?'background:var(--accent-soft);':''}" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();onDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="onDragStartExo(event,${bi},${si},${ei})" ondragend="onDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <button class="mini-btn" style="${ss?`background:${ss.couleur};color:#fff;`:(pend===ei?'background:var(--accent);color:#fff;':'')}" title="${ss?'Superset '+ss.label+' — cliquer pour délier':(pend===ei?'Cliquer pour annuler':'Lier en superset à un autre exercice')}" onclick="event.stopPropagation();tplToggleSuperset(${bi},${si},${ei})">${ss?ss.label:'🔗'}</button>
+              ${ex.gif_url ? `<img src="${esc(ex.gif_url)}" onclick="event.stopPropagation();ouvrirPhotoLightbox([{url:'${esc(ex.gif_url)}'}],0)" style="width:28px;height:28px;object-fit:contain;background:#eef1f8;border-radius:6px;flex-shrink:0;cursor:pointer;" alt="">` : ''}
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="ouvrirPickerExercice(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire ? `<span style="font-size:10px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(ex.groupe_musculaire)}</span>` : ''}
@@ -4798,7 +4890,7 @@ function ajouterExerciceASeance(exerciceId){
   const rir   = blocType && ex['rir_'+blocType]   ? ex['rir_'+blocType]   : '';
   const tempo = blocType && ex['tempo_'+blocType] ? ex['tempo_'+blocType] : '';
   const nouveau = {
-    exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null,
+    exercice_id: exerciceId, nom: ex.nom, groupe_musculaire: ex.groupe_musculaire||null, gif_url: ex.gif_url||null,
     series: null, reps: reps || REPS_PAR_TYPE[blocType] || '', repos: repos || REPOS_PAR_TYPE[blocType] || '', tempo, rir: rir || RIR_PAR_TYPE[blocType] || '', notes: '',
   };
   if (ei !== undefined && ei !== null) {
@@ -8374,7 +8466,7 @@ async function ouvrirEditeurProgrammeClient(progId){
         exercices: (s.client_programme_exercices||[]).map(ex => {
           const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id) ||
                          (exercicesData||[]).find(e=>e.nom.toLowerCase()===(ex.nom||'').toLowerCase());
-          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || '', superset_groupe: ex.superset_groupe ?? null };
+          return { id: ex.id, exercice_id: ex.exercice_id, nom: ex.nom||(exData?exData.nom:'?'), groupe_musculaire: exData?(exData.groupe_musculaire||null):null, gif_url: exData?(exData.gif_url||null):null, series: ex.series, reps: ex.reps, repos: ex.repos, tempo: ex.tempo, rir: ex.rir, notes: ex.notes || '', superset_groupe: ex.superset_groupe ?? null };
         })
       }))
     }))
@@ -8484,6 +8576,7 @@ function renderBlocsClientProg(){
             <div class="exo-row" style="${ss?`border-left:3px solid ${ss.couleur};`:''}${pend===ei?'background:var(--accent-soft);':''}" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-over')" ondragleave="event.stopPropagation();this.classList.remove('drag-over')" ondrop="event.stopPropagation();cpOnDropExo(event,${bi},${si},${ei})">
               <span class="drag-handle" draggable="true" ondragstart="cpOnDragStartExo(event,${bi},${si},${ei})" ondragend="cpOnDragEndExo()" title="Glisser pour réordonner">⠿</span>
               <button class="mini-btn" style="${ss?`background:${ss.couleur};color:#fff;`:(pend===ei?'background:var(--accent);color:#fff;':'')}" title="${ss?'Superset '+ss.label+' — cliquer pour délier':(pend===ei?'Cliquer pour annuler':'Lier en superset à un autre exercice')}" onclick="event.stopPropagation();cpToggleSuperset(${bi},${si},${ei})">${ss?ss.label:'🔗'}</button>
+              ${ex.gif_url ? `<img src="${esc(ex.gif_url)}" onclick="event.stopPropagation();ouvrirPhotoLightbox([{url:'${esc(ex.gif_url)}'}],0)" style="width:28px;height:28px;object-fit:contain;background:#eef1f8;border-radius:6px;flex-shrink:0;cursor:pointer;" alt="">` : ''}
               <div style="display:flex;flex-direction:column;flex:1 1 110px;min-width:80px;overflow:hidden;">
                 <span class="nom" style="flex:unset;cursor:pointer;" title="Cliquer pour remplacer l'exercice" onclick="cpOuvrirPicker(${bi},${si},${ei})">${esc(ex.nom)}</span>
                 ${ex.groupe_musculaire?`<span style="font-size:10px;color:var(--text-faint);">${esc(ex.groupe_musculaire)}</span>`:''}
@@ -8691,7 +8784,7 @@ function cpAjouterExo(exerciceId){
   const {bi,si,ei}=_cpPickerCible;
   const blocType=clientProgEnEdition.blocs[bi].type;
   const nouveau={
-    id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null,
+    id:null, exercice_id:exerciceId, nom:ex.nom, groupe_musculaire:ex.groupe_musculaire||null, gif_url:ex.gif_url||null,
     series:null, reps:(blocType&&ex['reps_'+blocType]?ex['reps_'+blocType]:'')||(REPS_PAR_TYPE[blocType]||''),
     repos:(blocType&&ex['repos_'+blocType]?ex['repos_'+blocType]:'')||(REPOS_PAR_TYPE[blocType]||''),
     tempo:(blocType&&ex['tempo_'+blocType]?ex['tempo_'+blocType]:''),
