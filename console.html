@@ -8965,6 +8965,7 @@ async function sauvegarderFicheSandbox(clientId){
         jour_paiement: body.jour_paiement,
         mode_paiement: MODE_PAIEMENT_COMPTA[body.mode_paiement] || null,
         moy_paiement: body.banque_paiement,
+        date_fin: body.date_fin_coaching,
       });
     }
     // ficheData.xpData est un cache calculé une fois (date_debut/date_debut_suivi/
