@@ -42,11 +42,11 @@ function supaHeaders(extra) {
 // Ne bloque jamais le flux coach : une erreur réseau ici est avalée (best-effort).
 const COMPTAAPP_SYNC_URL = 'https://hvcerfxcfzoktzslqaqu.supabase.co/functions/v1/sync-client-from-training';
 const COMPTAAPP_SYNC_SECRET = 'H15Mzf-78UIOvdDywQYzxNOvy1mPstbJhac_r1-tbIE';
-function syncClientVersCompta(clientId, prenom, nom, statut) {
+function syncClientVersCompta(clientId, prenom, nom, statut, facturation) {
   fetch(COMPTAAPP_SYNC_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-sync-secret': COMPTAAPP_SYNC_SECRET },
-    body: JSON.stringify({ client_id: clientId, prenom, nom, statut }),
+    body: JSON.stringify({ client_id: clientId, prenom, nom, statut, ...(facturation || {}) }),
   }).catch(() => {});
 }
 

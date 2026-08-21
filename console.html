@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=15"></script>
+<script src="api.js?v=16"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -8958,6 +8958,14 @@ async function sauvegarderFicheSandbox(clientId){
       cSync.jour_paiement = ficheData.profil.jour_paiement || null;
       cSync.mode_paiement = ficheData.profil.mode_paiement || null;
       cSync.banque_paiement = ficheData.profil.banque_paiement || null;
+    }
+    if (clientId !== COACH_CLIENT_ID) {
+      const MODE_PAIEMENT_COMPTA = { virement: 'Virement', espece: 'ESP', gocardless: 'Gocardless' };
+      syncClientVersCompta(clientId, body.prenom, body.nom, (data.clients.find(x => x.id === clientId) || {}).statut, {
+        jour_paiement: body.jour_paiement,
+        mode_paiement: MODE_PAIEMENT_COMPTA[body.mode_paiement] || null,
+        moy_paiement: body.banque_paiement,
+      });
     }
     // ficheData.xpData est un cache calculé une fois (date_debut/date_debut_suivi/
     // seances_cible y entrent) — sans ce recalcul, changer date_debut ici laissait
