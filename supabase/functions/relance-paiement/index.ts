@@ -36,10 +36,12 @@ Deno.serve(async (req) => {
       .select('id').single();
     if (errEnvoi) throw errEnvoi;
 
-    await Promise.all([
+    const [rDest, rNotif] = await Promise.all([
       supabase.from('notif_envoi_destinataires').insert({ envoi_id: envoi.id, client_id }),
-      supabase.from('client_notifications').insert({ client_id, title: titre, body: corps, envoi_id: envoi.id, plein_ecran: false }),
+      supabase.from('client_notifications').insert({ client_id, title: titre, body: corps, envoi_id: envoi.id, plein_ecran: false, source: 'rappel_paiement' }),
     ]);
+    if (rDest.error) throw rDest.error;
+    if (rNotif.error) throw rNotif.error;
 
     const resPush = await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
       method: 'POST',
