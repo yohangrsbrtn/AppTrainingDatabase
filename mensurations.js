@@ -261,7 +261,7 @@ function renderSaisieFormSupabase() {
       </div>
       <div class="card">
         <div class="field-label">💬 NOTE (optionnel)</div>
-        <textarea placeholder="Ex : période de règles, voyage, alimentation perturbée…"
+        <textarea placeholder="Ajouter une note…"
           class="bilan-input" style="font-size:16px;min-height:64px;resize:vertical;"
           onchange="sauverMensurationSupa('commentaire', this.value)">${esc(d.commentaire || '')}</textarea>
       </div>
