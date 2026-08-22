@@ -24,7 +24,7 @@ async function loadMensurationsSupabase() {
   setPage('mens-loading');
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,poids,mesure,phase,fessiers,cuisses,mollets,poitrine,epaules,bras`,
+      `${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(S.client)}&order=date.asc&select=id,date,poids,mesure,phase,fessiers,cuisses,mollets,poitrine,epaules,bras,commentaire`,
       { headers: supaHeaders() }
     );
     const data = res.ok ? await res.json() : [];
@@ -39,7 +39,8 @@ async function loadMensurationsSupabase() {
       poitrine: r.poitrine,
       epaules:  r.epaules,
       bras:     r.bras,
-      phase:    r.phase || ''
+      phase:    r.phase || '',
+      commentaire: r.commentaire || ''
     }));
     _mSubPage = 'historique';
     try {
@@ -80,7 +81,8 @@ function ouvrirSaisieMensurationSupabase(dateISO) {
     poitrine: e ? e.poitrine : null,
     epaules:  e ? e.epaules  : null,
     bras:     e ? e.bras     : null,
-    phase:    e ? e.phase    : ''
+    phase:    e ? e.phase    : '',
+    commentaire: e ? (e.commentaire || '') : ''
   };
   _mPhotos = null;
   _mSubPage = 'saisie-form';
@@ -257,6 +259,12 @@ function renderSaisieFormSupabase() {
         ${numInput('Épaules', 'epaules', 'au plus gros, décontracté')}
         ${numInput('Bras', 'bras', 'au plus gros, contracté')}
       </div>
+      <div class="card">
+        <div class="field-label">💬 NOTE (optionnel)</div>
+        <textarea placeholder="Ex : période de règles, voyage, alimentation perturbée…"
+          class="bilan-input" style="font-size:16px;min-height:64px;resize:vertical;"
+          onchange="sauverMensurationSupa('commentaire', this.value)">${esc(d.commentaire || '')}</textarea>
+      </div>
       ${d.id ? `<div class="card">
         <div class="field-label">📸 PHOTOS</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;">
@@ -312,6 +320,7 @@ async function sauverMensurationSupa(field, value) {
     poitrine: nn(f.poitrine),
     epaules:  nn(f.epaules),
     bras:     nn(f.bras),
+    commentaire: f.commentaire ? f.commentaire.trim() : null,
   };
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
@@ -322,7 +331,7 @@ async function sauverMensurationSupa(field, value) {
     if (!res.ok) return;
     const saved = (await res.json())[0];
     f.id = saved.id;
-    const updated = { ...body, id: saved.id, taille: f.taille, phase: f.phase || '' };
+    const updated = { ...body, id: saved.id, taille: f.taille, phase: f.phase || '', commentaire: f.commentaire || '' };
     const idx = _mReleves.findIndex(r => r.date === f.date);
     if (idx >= 0) _mReleves[idx] = updated;
     else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }

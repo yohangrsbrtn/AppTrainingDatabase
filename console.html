@@ -6945,7 +6945,7 @@ function renderFicheMensurationsTab(c){
     const dateFr = (r.date||'').split('-').reverse().join('/');
     const aPhoto = _ficheMensPhotosIds && _ficheMensPhotosIds.has(r.id);
     return `<tr>
-      <td class="mono">${esc(dateFr)}${aPhoto ? ' <span title="Photo liée">📷</span>' : ''}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}</td>
+      <td class="mono">${esc(dateFr)}${aPhoto ? ' <span title="Photo liée">📷</span>' : ''}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}${r.commentaire ? `<div style="font-size:10px;color:var(--text-muted);white-space:normal;margin-top:2px;font-style:italic;">💬 ${esc(r.commentaire)}</div>` : ''}</td>
       <td onclick="event.stopPropagation();">${_mensPhaseSelectHtml(r.id, c.id, r.phase)}</td>
       <td>${kg(r.poids)}</td>
       <td>${cm(r.mesure)}</td>
@@ -10861,7 +10861,7 @@ async function chargerMensurationsSupabase(clientId) {
       <div class="table-scroll" style="margin-top:20px;"><table class="alim-table">
         <thead><tr><th>Date</th><th>Phase</th><th>Poids</th><th>Tour taille</th><th>Fessiers</th><th>Cuisses</th><th>Mollets</th><th>Poitrine</th><th>Épaules</th><th>Bras</th><th></th></tr></thead>
         <tbody>${rows.map(r=>`<tr>
-          <td class="mono">${esc(r.date||'')}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}</td>
+          <td class="mono">${esc(r.date||'')}${r.note ? `<div style="font-size:10px;font-weight:600;color:var(--accent);white-space:normal;margin-top:2px;">📝 ${esc(r.note)}</div>` : ''}${r.commentaire ? `<div style="font-size:10px;color:var(--text-muted);white-space:normal;margin-top:2px;font-style:italic;">💬 ${esc(r.commentaire)}</div>` : ''}</td>
           <td>${_mensPhaseSelectHtml(r.id, mensurationsClientId, r.phase)}</td>
           <td>${r.poids!=null?r.poids+' kg':'—'}</td>
           <td>${r.mesure!=null?r.mesure+' cm':'—'}</td>
