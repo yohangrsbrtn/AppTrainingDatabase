@@ -391,13 +391,28 @@ async function _supaUpdateBilan(patch) {
 // Réécriture idempotente du tableau jours[] d'un bilan donné — réutilisable
 // hors du contexte de la page Bilan (ex: carte "Journée en cours" de l'accueil).
 // Cliquer plusieurs fois de suite ne fait que réécrire les mêmes valeurs.
+//
+// Verrou anti-ré-édition (2026-08-24) : `envoye_coach=eq.false` dans le filtre de la requête —
+// un bilan déjà envoyé au coach ne matche plus 0 ligne, le PATCH ne fait rien silencieusement
+// côté serveur. Avant ce fix, un bilan restait "toujours modifiable" indéfiniment après envoi
+// (cf. `_supaGetOrCreateBilanCourant` qui continue de le renvoyer comme "courant" tant que sa
+// semaine n'est pas terminée) — ce qui permettait à un client de retaper de mémoire toute une
+// semaine passée dans un bilan que le coach avait déjà lu et traité, sans que ni l'un ni l'autre
+// ne s'en rende compte (bug vécu, Hugo Bonnet : semaine "9→15 Août" envoyée le 9 dès l'ouverture,
+// puis re-remplie API par API le 16 dans ce qui était en réalité déjà le bilan de la semaine
+// suivante). Renvoie `true` si la ligne a bien été mise à jour, `false` si le bilan était
+// verrouillé (0 ligne modifiée) — les appelants doivent vérifier ce retour avant de considérer
+// leur mise à jour optimiste locale comme acquise.
 async function _supaPatchJoursBilan(bilanId, jours) {
-  if (!bilanId) return;
-  await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
+  if (!bilanId) return true;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}&envoye_coach=eq.false`, {
     method: 'PATCH',
-    headers: supaHeaders({ Prefer: 'return=minimal' }),
+    headers: supaHeaders({ Prefer: 'return=representation' }),
     body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, commentaire: j.commentaire || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }),
   });
+  if (!res.ok) return false;
+  const arr = await res.json().catch(() => []);
+  return Array.isArray(arr) && arr.length > 0;
 }
 
 // Refetch + merge juste avant patch (jamais un PATCH du tableau jours[] tel
@@ -405,13 +420,21 @@ async function _supaPatchJoursBilan(bilanId, jours) {
 // autre point d'entrée (accueil, Mon programme) serait écrasé silencieusement.
 async function sauverJourBilanSupa(jourIdx, field, value) {
   if (!_bilanData || !_bilanId) return;
+  const ancienneValeur = _bilanData.jours[jourIdx][field];
   _bilanData.jours[jourIdx][field] = value; // réactivité UI immédiate
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${_bilanId}&select=jours`, { headers: supaHeaders() });
     const arr = res.ok ? await res.json() : [];
     const jours = (arr[0] && arr[0].jours) || _bilanData.jours;
     jours[jourIdx] = { ...(jours[jourIdx] || {}), nom: _bilanData.jours[jourIdx].nom, [field]: value };
-    await _supaPatchJoursBilan(_bilanId, jours);
+    const ok = await _supaPatchJoursBilan(_bilanId, jours);
+    if (!ok) {
+      // Bilan verrouillé (déjà envoyé) — annule la mise à jour optimiste et prévient le client
+      // au lieu de le laisser croire que sa modification a été enregistrée.
+      _bilanData.jours[jourIdx][field] = ancienneValeur;
+      showToast('Ce bilan a déjà été envoyé au coach — modification impossible.', '#c0392b');
+      setPage('bilan');
+    }
   } catch(e) {}
 }
 
@@ -640,8 +663,14 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
       ⚠️ ${_bilanAutresEnAttente > 1 ? `${_bilanAutresEnAttente} anciens bilans n'ont pas été envoyés` : "Un ancien bilan n'a pas été envoyé"} — vérifie avant de resaisir cette semaine →
     </div>`;
   }
+  // Verrouillé dès l'envoi (2026-08-24, revenu sur "toujours modifiable") — un client qui
+  // continue de modifier un bilan après coup peut réécrire un bilan que le coach a déjà lu et
+  // traité, à son insu (voir _supaPatchJoursBilan). Ne s'applique qu'à la Semaine/jour par jour
+  // (source du bug d'origine) — repas/fatigue/sommeil restent éditables (moins sensible, pas de
+  // notion de "jour" pouvant être confondu avec une autre semaine).
+  const semaineVerrouillee = !!data.dejaEnvoye;
   if (data.dejaEnvoye) {
-    html += `<div class="bilan-banner">Bilan envoyé au coach — toujours modifiable</div>`;
+    html += `<div class="bilan-banner">Bilan envoyé au coach — le détail jour par jour n'est plus modifiable</div>`;
   } else if (attenteMode) {
     html += `<div class="bilan-banner">Bilan resté non-envoyé — une semaine plus récente est maintenant en cours</div>`;
   }
@@ -683,26 +712,26 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
         <div>
           <div class="field-label">POIDS (kg)</div>
-          <input class="bilan-input" type="text" inputmode="decimal" value="${fmtFR(j.poids)}" placeholder="—"
+          <input class="bilan-input" type="text" inputmode="decimal" value="${fmtFR(j.poids)}" placeholder="—" ${semaineVerrouillee?'disabled style="opacity:.55;"':''}
             onchange="sauverJourBilanSupa(${j.idx}, 'poids', parsePoids(this.value))">
         </div>
         <div>
           <div class="field-label">EAU (L)</div>
-          <input class="bilan-input" type="text" inputmode="decimal" value="${fmtFR(j.eau)}" placeholder="—"
+          <input class="bilan-input" type="text" inputmode="decimal" value="${fmtFR(j.eau)}" placeholder="—" ${semaineVerrouillee?'disabled style="opacity:.55;"':''}
             onchange="sauverJourBilanSupa(${j.idx}, 'eau', parseEau(this.value))">
         </div>
         <div>
           <div class="field-label">STEPS</div>
-          <input class="bilan-input" id="step_${j.idx}" type="text" inputmode="numeric" value="${fmtFR(j.steps)}" placeholder="0"
+          <input class="bilan-input" id="step_${j.idx}" type="text" inputmode="numeric" value="${fmtFR(j.steps)}" placeholder="0" ${semaineVerrouillee?'disabled style="opacity:.55;"':''}
             onchange="sauverJourBilanSupa(${j.idx}, 'steps', parseSteps(this.value))">
         </div>
       </div>
-      <div style="display:flex;gap:6px;">
+      <div style="display:flex;gap:6px;${semaineVerrouillee?'opacity:.55;pointer-events:none;':''}">
         ${_renderToggleSupa(j.idx, 'diete',    'tog_diet_'+j.idx,   j.diete,    'Diète')}
         ${_renderToggleSupa(j.idx, 'training', 'tog_train_'+j.idx,  j.training, 'Training')}
         ${_renderToggleSupa(j.idx, 'cardio',   'tog_cardio_'+j.idx, j.cardio,   'Cardio')}
       </div>
-      <textarea class="bilan-textarea" placeholder="Diète : ...&#10;Entraînement : ...&#10;Ressenti et contexte de la journée..." style="margin-top:10px;"
+      <textarea class="bilan-textarea" placeholder="Diète : ...&#10;Entraînement : ...&#10;Ressenti et contexte de la journée..." style="margin-top:10px;${semaineVerrouillee?'opacity:.55;':''}" ${semaineVerrouillee?'disabled':''}
         onchange="sauverJourBilanSupa(${j.idx}, 'commentaire', this.value)"
       >${esc(j.commentaire||'')}</textarea>
     </div>`;
@@ -918,6 +947,12 @@ async function _ouvrirRecapBilanSupa() {
   const mensurationWarn = mensurationManquante
     ? `<div style="background:#332200;border:1px solid #f0a500;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#f0c040;text-align:left;">⚠️ Aucune mensuration remplie à cette date. Renseigne tes mensurations avant d'envoyer ton bilan.</div>`
     : '';
+  // Bloque l'envoi si la semaine de ce bilan vient tout juste de commencer — voir
+  // _bilanEnvoiTropTot (api.js) pour le contexte complet du bug que ça corrige.
+  const tropTot = _bilanEnvoiTropTot(data.createdAt, _bilanJourBilanNom);
+  const tropTotWarn = tropTot
+    ? `<div style="background:#3a1414;border:1px solid #e05555;border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;color:#ff8a8a;text-align:left;">⏳ Ta semaine (${esc(data.semaineLabel||'')}) vient de commencer — attends d'avoir vécu plus de jours avant d'envoyer ce bilan.</div>`
+    : '';
 
   const modal = document.createElement('div');
   modal.id = 'recap-bilan-modal';
@@ -926,12 +961,13 @@ async function _ouvrirRecapBilanSupa() {
     <div style="font-size:19px;font-weight:700;color:#e8eaf0;margin-bottom:3px;">Récap de ta semaine</div>
     <div style="font-size:12px;color:#8892a4;margin-bottom:16px;">${esc(data.semaineLabel || '')}</div>
     <div style="background:#0f1117;border-radius:12px;padding:4px 14px;margin-bottom:10px;">${statsHtml}</div>
+    ${tropTotWarn}
     ${retardWarn}
     ${mensurationWarn}
     ${noteWarn}
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:#2d3142;margin:0;padding:12px;font-size:14px;border:none;border-radius:10px;color:#e8eaf0;cursor:pointer;">Modifier</button>
-      <button onclick="_validerEtEnvoyerSupa();document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:linear-gradient(135deg,#1D9E75,#167a5a);margin:0;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:10px;color:#fff;cursor:pointer;">Envoyer au coach ✓</button>
+      ${tropTot ? '' : `<button onclick="_validerEtEnvoyerSupa();document.getElementById('recap-bilan-modal').remove();" style="flex:1;background:linear-gradient(135deg,#1D9E75,#167a5a);margin:0;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:10px;color:#fff;cursor:pointer;">Envoyer au coach ✓</button>`}
     </div>
   </div>`;
   document.body.appendChild(modal);
@@ -942,6 +978,12 @@ async function _ouvrirRecapBilanSupa() {
 }
 
 async function _validerEtEnvoyerSupa() {
+  // Garde-fou défensif (le bouton "Envoyer" est déjà masqué dans ce cas par
+  // _ouvrirRecapBilanSupa) — voir _bilanEnvoiTropTot (api.js).
+  if (_bilanData && _bilanEnvoiTropTot(_bilanData.createdAt, _bilanJourBilanNom)) {
+    showToast('Ta semaine vient de commencer — attends encore avant d\'envoyer ce bilan.', '#f0a500');
+    return;
+  }
   setPage('bilan-loading');
   try {
     const now = new Date();

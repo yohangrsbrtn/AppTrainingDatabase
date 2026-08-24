@@ -180,8 +180,8 @@ input[type="number"] { -moz-appearance:textfield; }
 <body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=21"></script>
-<script src="bilan.js?v=32"></script>
+<script src="api.js?v=22"></script>
+<script src="bilan.js?v=33"></script>
 <script src="diete.js?v=26"></script>
 <script src="mensurations.js?v=14"></script>
 <script src="recettes.js?v=4"></script>
@@ -189,7 +189,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="collection.js?v=4"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=27"></script>
+<script src="programme-client.js?v=28"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=23"></script>
@@ -2399,13 +2399,22 @@ async function _loadJourneeDataSupabase() {
 }
 async function _sauverJourneeSupabase(field, value) {
   if (!_journeeData || !_journeeData.bilanId) return;
+  const ancienneValeur = _journeeData[field];
   _journeeData[field] = value;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${_journeeData.bilanId}&select=jours`, { headers: supaHeaders() });
   const arr = res.ok ? await res.json() : [];
   const jours = (arr[0] && arr[0].jours) || [];
   const idx = _journeeData.jourIdx;
   jours[idx] = { ...(jours[idx] || {}), diete: _journeeData.diete, training: _journeeData.training, cardio: _journeeData.cardio, steps: _journeeData.steps || null, poids: _journeeData.poids || null, eau: _journeeData.eau || null, commentaire: _journeeData.commentaire || null, valide: !!_journeeData.valide };
-  await _supaPatchJoursBilan(_journeeData.bilanId, jours);
+  const ok = await _supaPatchJoursBilan(_journeeData.bilanId, jours);
+  if (!ok) {
+    // Bilan de la semaine déjà envoyé au coach — verrouillé (voir _supaPatchJoursBilan).
+    _journeeData[field] = ancienneValeur;
+    showToast('Ce bilan a déjà été envoyé au coach — modification impossible.', '#c0392b');
+    document.getElementById('modalJournee')?.remove();
+    _majCarteJournee();
+  }
+  return ok;
 }
 function _afficherModalJourneeSupabase() {
   const existant = document.getElementById('modalJournee');
@@ -2522,7 +2531,12 @@ async function validerJourneeClientSupabase() {
   if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Validation…'; }
   try {
     const dejaValideAvant = !!_journeeData.valide;
-    await _sauverJourneeSupabase('valide', true);
+    const ok = await _sauverJourneeSupabase('valide', true);
+    if (!ok) {
+      // _sauverJourneeSupabase a déjà affiché le toast + fermé la modale.
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '✅ Valider ma journée'; }
+      return;
+    }
     const xpGagne = await _crediterXpJournee(dejaValideAvant, _journeeData.steps, getClient());
     const modal = document.getElementById('modalJournee');
     if (modal) modal.remove();

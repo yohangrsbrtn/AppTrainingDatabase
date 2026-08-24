@@ -996,7 +996,14 @@ async function pcValiderSeance() {
       return;
     }
     jours[idx] = { ...jourAuj, training: true, seance_validee: true };
-    await _supaPatchJoursBilan(id, jours);
+    const ok = await _supaPatchJoursBilan(id, jours);
+    if (!ok) {
+      // Bilan de la semaine déjà envoyé au coach — verrouillé (voir _supaPatchJoursBilan). Les
+      // séries loggées restent bien enregistrées (client_programme_logs, table séparée), seul
+      // le décompte "séance validée"/l'XP de la journée ne peut plus être crédité pour cette semaine.
+      showToast('Bilan de la semaine déjà envoyé — séance non comptée dans le suivi hebdo.', '#f0a500');
+      return;
+    }
     const xpGagne = await _supaIncrementerXpTotal(clientId, XP_SEANCE_VALIDEE);
     _pcFlashSeanceValidee(xpGagne);
     if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();

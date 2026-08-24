@@ -116,6 +116,22 @@ function _bilanEstPonctuel(bilanCreatedAt, envoyeAtStr, jourBilanNom) {
   return new Date(envoyeAtStr) <= limite;
 }
 
+// Bloque l'envoi d'un bilan dont la semaine vient tout juste de commencer (moins de 5 jours
+// écoulés depuis son début) — sans jour_bilan assigné, jamais bloqué (pas de semaine ancrée
+// pour raisonner). Sert à empêcher le cas vécu chez Hugo Bonnet (2026-08-24) : son bilan de la
+// semaine précédente ayant été envoyé dès son propre 1er jour, l'app ouvrait aussitôt un
+// nouveau bilan (semaine suivante) dès qu'il rouvrait l'app le dimanche matin suivant — bilan
+// dans lequel il retapait ensuite de mémoire toute une semaine déjà vécue, envoyé le jour même
+// où sa "nouvelle" semaine commençait. En bloquant l'envoi avant que la semaine soit
+// suffisamment avancée, ce nouveau bilan reste ouvert/éditable plusieurs jours de plus au lieu
+// d'être immédiatement remplacé au prochain rollover — cassant la cascade.
+function _bilanEnvoiTropTot(bilanCreatedAt, jourBilanNom) {
+  if (!jourBilanNom || !(jourBilanNom in _JOURS_IDX_FR) || !bilanCreatedAt) return false;
+  const { debut } = _bilanWeekBounds(jourBilanNom, new Date(bilanCreatedAt));
+  const joursEcoules = Math.floor((new Date() - debut) / 86400000);
+  return joursEcoules < 5;
+}
+
 // Un bilan ENVOYÉ (envoye_coach=true) mais envoyé après sa propre deadline (jour_bilan à midi) —
 // distinct de "en retard" au sens habituel du mot dans la console (qui désigne un bilan pas
 // encore envoyé du tout, cf. _supaCalculerRetard). Même source de vérité que le bonus XP
