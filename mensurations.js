@@ -559,11 +559,21 @@ function _buildMensChart(id, rows, keys, colors, labels, unit, opts) {
   // (opts.noHover, ex: brique accueil dont le tap ouvre déjà la page Mensurations, le survol
   // tactile n'a donc aucun intérêt) : donne quand même le chiffre de chaque point d'un coup
   // d'œil, pas juste le dernier — opts.allLabels étiquette CHAQUE relevé, pas seulement le plus récent.
-  const endLabels = (!opts.endLabel && !opts.allLabels) ? '' : keys.map((k,ki)=>{
-    if (opts.allLabels) {
+  const endLabels = (!opts.endLabel && !opts.allLabels && !opts.monthlyLabels) ? '' : keys.map((k,ki)=>{
+    if (opts.allLabels || opts.monthlyLabels) {
+      // monthlyLabels : un seul chiffre par mois calendaire (le dernier relevé valide de
+      // chaque mois) — évite le chevauchement de chiffres sur un historique de plusieurs
+      // années (allLabels étiquette CHAQUE relevé, illisible passé quelques mois de données).
       return rows.map((r,i)=>{
         const v=parseFloat(r[k]);
         if(isNaN(v)||v<=0) return '';
+        if (opts.monthlyLabels) {
+          // Ne label que le DERNIER relevé valide de son mois calendaire (regarde en
+          // avant : si un point plus tard partage le même mois, on saute celui-ci).
+          const mois = (r.date||'').slice(0,7);
+          const prochainMemeMois = rows.slice(i+1).some(r2 => (r2.date||'').slice(0,7) === mois && !isNaN(parseFloat(r2[k])) && parseFloat(r2[k])>0);
+          if (prochainMemeMois) return '';
+        }
         const above = yS(v) - PT > ch*0.5;
         return `<text x="${xs[i]}" y="${(yS(v)+(above?-7:14)).toFixed(1)}" text-anchor="middle" font-size="${axisFS+1}" font-weight="700" fill="${colors[ki]}">${v}</text>`;
       }).join('');

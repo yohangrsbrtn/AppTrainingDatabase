@@ -183,7 +183,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="api.js?v=21"></script>
 <script src="bilan.js?v=32"></script>
 <script src="diete.js?v=26"></script>
-<script src="mensurations.js?v=13"></script>
+<script src="mensurations.js?v=14"></script>
 <script src="recettes.js?v=4"></script>
 <script src="progression.js?v=8"></script>
 <script src="collection.js?v=4"></script>
@@ -753,7 +753,10 @@ async function _chargerHomeV2Extra() {
   const [progRes, roadmapRes, mensRes, bilanCourant, protocoleRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true&brouillon=eq.false&select=id,nom,bloc_actif_id,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,type,nombre_semaines)&limit=1`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(clientId)}&order=date_debut.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
+    // order=date.DESC (pas asc) : sur un client avec beaucoup d'historique, un tri croissant
+    // + limit renverrait les plus VIEUX relevés au lieu des récents — la brique accueil ne
+    // doit montrer que les derniers mois (voir filtre 6 mois dans _homeV2MensurationsHtml).
+    fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&order=date.desc&select=date,poids,mesure&limit=60`, { headers: supaHeaders() }),
     _supaGetOrCreateBilanCourant(clientId).catch(() => null),
     chimieActif
       ? fetch(`${SUPABASE_URL}/rest/v1/client_protocoles?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.desc&limit=1&select=date_debut,duree_semaines,objectif`, { headers: supaHeaders() })
@@ -924,8 +927,15 @@ function _homeV2BilanHtml(d) {
 }
 
 function _homeV2MensurationsHtml(d) {
-  const rows = (d.mensurations || []).filter(r => r.poids || r.mesure);
-  const chart = rows.length >= 2 ? _buildMensChart('home_mens', rows, ['poids','mesure'], ['#f0a500','#3ecf8e'], ['Poids (kg)','Tour de taille (cm)'], '', { noHover:true, allLabels:true, bigText:true }) : '';
+  // Fenêtre glissante de 6 mois max — sur un client suivi depuis longtemps, afficher tout
+  // l'historique surchargeait le mini-graphe de chiffres qui se chevauchaient. monthlyLabels
+  // (au lieu de allLabels) réduit encore l'affichage à un seul chiffre par mois calendaire.
+  const depuis = new Date(); depuis.setMonth(depuis.getMonth() - 6);
+  const depuisIso = depuis.toISOString().slice(0,10);
+  const rows = (d.mensurations || [])
+    .filter(r => r.date >= depuisIso && (r.poids || r.mesure))
+    .sort((a,b) => a.date.localeCompare(b.date));
+  const chart = rows.length >= 2 ? _buildMensChart('home_mens', rows, ['poids','mesure'], ['#f0a500','#3ecf8e'], ['Poids (kg)','Tour de taille (cm)'], '', { noHover:true, monthlyLabels:true, bigText:true }) : '';
   return `
     <div onclick="goTo('mensurations')" ontouchstart="this.style.background='#242838'" ontouchend="this.style.background='#1a1d29'" style="background:#1a1d29;border-radius:12px;padding:14px;cursor:pointer;border-top:3px solid #3ecf8e;margin-top:10px;-webkit-tap-highlight-color:transparent;">
       <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Mensurations</div>
