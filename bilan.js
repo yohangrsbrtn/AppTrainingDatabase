@@ -702,7 +702,7 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
         ${_renderToggleSupa(j.idx, 'training', 'tog_train_'+j.idx,  j.training, 'Training')}
         ${_renderToggleSupa(j.idx, 'cardio',   'tog_cardio_'+j.idx, j.cardio,   'Cardio')}
       </div>
-      <textarea class="bilan-textarea" placeholder="Commentaire du jour…" style="margin-top:10px;"
+      <textarea class="bilan-textarea" placeholder="Diète : ...&#10;Entraînement : ...&#10;Ressenti et contexte de la journée..." style="margin-top:10px;"
         onchange="sauverJourBilanSupa(${j.idx}, 'commentaire', this.value)"
       >${esc(j.commentaire||'')}</textarea>
     </div>`;

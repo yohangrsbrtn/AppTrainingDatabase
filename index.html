@@ -181,7 +181,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=21"></script>
-<script src="bilan.js?v=31"></script>
+<script src="bilan.js?v=32"></script>
 <script src="diete.js?v=26"></script>
 <script src="mensurations.js?v=11"></script>
 <script src="recettes.js?v=4"></script>
@@ -2432,8 +2432,8 @@ function _afficherModalJourneeSupabase() {
       </div>
       <div style="margin-bottom:20px;">
         <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">COMMENTAIRE</div>
-        <textarea id="jCommentaire" placeholder="Ressenti, contexte de la journée…" onchange="sauverCommentaireJournee(this.value)"
-          style="width:100%;min-height:64px;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;resize:vertical;font-family:inherit;">${esc(d.commentaire||'')}</textarea>
+        <textarea id="jCommentaire" placeholder="Diète : ...&#10;Entraînement : ...&#10;Ressenti et contexte de la journée..." onchange="sauverCommentaireJournee(this.value)"
+          style="width:100%;min-height:80px;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;resize:vertical;font-family:inherit;">${esc(d.commentaire||'')}</textarea>
       </div>
       <button id="btnValiderJournee" onclick="validerJourneeClient()" style="width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75,#167a5a);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">✅ Valider ma journée</button>
       <button onclick="document.getElementById('modalJournee').remove()" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>
