@@ -880,16 +880,20 @@ async function _ouvrirRecapBilanSupa() {
   if (!data) { _validerEtEnvoyerSupa(); return; }
   const mensurationManquante = await _bilanMensurationDuJourManquante(getClient());
 
-  let joursOk = 0, joursTraining = 0, totalSteps = 0;
+  let joursOk = 0, joursTraining = 0, totalSteps = 0, joursAvecSteps = 0;
   (data.jours || []).forEach(j => {
     const btnD = document.getElementById('tog_diet_'  + j.idx);
     const btnT = document.getElementById('tog_train_' + j.idx);
     const inp  = document.getElementById('step_'      + j.idx);
     if (btnD && btnD.dataset.val === 'true') joursOk++;
     if (btnT && btnT.dataset.val === 'true') joursTraining++;
-    if (inp) { const v = parseSteps(inp.value); if (v && Number(v) > 0) totalSteps += Number(v); }
+    if (inp) { const v = parseSteps(inp.value); if (v && Number(v) > 0) { totalSteps += Number(v); joursAvecSteps++; } }
   });
-  const avgSteps = totalSteps > 0 ? Math.round(totalSteps / 7) : 0;
+  // Moyenne sur les jours réellement renseignés, pas /7 — sinon une semaine
+  // incomplète (ex: 3 jours saisis sur 7) fait paraître la moyenne bien plus
+  // basse qu'elle ne l'est réellement. Même logique déjà appliquée côté
+  // console (détail bilan, cf. commentaire "Moyenne (pas total)").
+  const avgSteps = joursAvecSteps > 0 ? Math.round(totalSteps / joursAvecSteps) : 0;
   const hasNote  = _bilanNotes && Object.values(_bilanNotes).some(v => v > 0);
   const fmtNum   = n => n >= 1000 ? Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : Math.round(n).toString();
   const statRow  = (label, val, color) =>
@@ -1000,8 +1004,12 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
 
   const joursTraining = jours.filter(j => j.training).length;
   const joursDiete    = jours.filter(j => j.diete).length;
+  const joursAvecSteps = jours.filter(j => j.steps > 0).length;
   const totalSteps    = jours.reduce((s, j) => s + (j.steps || 0), 0);
-  const stepsMoy       = jours.length ? Math.round(totalSteps / jours.length) : 0;
+  // Moyenne sur les jours réellement renseignés, pas /7 — même correctif que
+  // dans _ouvrirRecapBilanSupa (sinon une semaine mal remplie sous-estime la
+  // moyenne et donc l'XP pas mérité).
+  const stepsMoy       = joursAvecSteps ? Math.round(totalSteps / joursAvecSteps) : 0;
 
   const bonusDiete       = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
   const bonusSeances100  = (profil.seances_cible && joursTraining >= profil.seances_cible) ? BONUS_SEANCES_100PCT : 0;
