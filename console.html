@@ -701,10 +701,13 @@ async function chargerSuivi(clientId){
 }
 // Select phase réutilisant les mêmes types Roadmap que les mensurations (_mensPhaseRoadmapType,
 // ROADMAP_TYPES) — une valeur historique non reconnue (import GAS) reste sélectionnable sans être perdue.
-function _suiviPhaseSelectHtml(currentPhase) {
-  const matched = _mensPhaseRoadmapType(currentPhase);
-  const opts = `<option value="" ${!currentPhase?'selected':''}>—</option>`
-    + (currentPhase && !matched ? `<option value="${esc(currentPhase)}" selected>${esc(currentPhase)}</option>` : '')
+// autoPhase (label déjà résolu depuis la Roadmap à la date de l'entrée, voir ouvrirModalSuivi) :
+// utilisé seulement si currentPhase est vide — une phase déjà saisie à la main n'est jamais écrasée.
+function _suiviPhaseSelectHtml(currentPhase, autoPhase) {
+  const effectivePhase = currentPhase || autoPhase || '';
+  const matched = _mensPhaseRoadmapType(effectivePhase);
+  const opts = `<option value="" ${!effectivePhase?'selected':''}>—</option>`
+    + (effectivePhase && !matched ? `<option value="${esc(effectivePhase)}" selected>${esc(effectivePhase)}</option>` : '')
     + ROADMAP_TYPES.map(t => `<option value="${esc(t.label)}" ${matched && matched.key===t.key?'selected':''}>${esc(t.label)}</option>`).join('');
   return `<select id="su-phase" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 8px;">${opts}</select>`;
 }
@@ -7471,9 +7474,19 @@ function renderFicheSuiviTab(c){
     : `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune entrée de suivi pour ce client.</p></div>`}`;
 }
 
-function ouvrirModalSuivi(clientId, id) {
+async function ouvrirModalSuivi(clientId, id) {
   const entries = Array.isArray(ficheData.suivi) ? ficheData.suivi : [];
   const row = id ? (entries.find(x=>x.id===id) || {}) : {};
+  // Phase auto-dérivée de la Roadmap à la date de l'entrée — plus besoin de la sélectionner
+  // à la main (même logique que la modale mensuration, voir _roadmapPhaseLabelAtDate).
+  let roadmap = [];
+  try {
+    roadmap = (state.nav === 'fiche-client' && Array.isArray(ficheData?.roadmap) && ficheData?.client?.id === clientId)
+      ? ficheData.roadmap : await chargerRoadmap(clientId);
+  } catch(e) { roadmap = []; }
+  window._suRoadmap = roadmap;
+  const dateInitiale = row.date || new Date().toISOString().slice(0,10);
+  const autoPhase = _roadmapPhaseLabelAtDate(roadmap, dateInitiale);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
@@ -7481,11 +7494,11 @@ function ouvrirModalSuivi(clientId, id) {
       <h3 style="margin:0 0 16px;">${id ? 'Modifier' : 'Ajouter'} une entrée de suivi</h3>
       <div class="fiche-field">
         <label>Date</label>
-        <input id="su-date" type="date" value="${row.date || new Date().toISOString().slice(0,10)}" style="font-size:16px;">
+        <input id="su-date" type="date" value="${dateInitiale}" style="font-size:16px;" onchange="suDateChanged()">
       </div>
       <div class="fiche-field">
-        <label>Phase</label>
-        ${_suiviPhaseSelectHtml(row.phase)}
+        <label>Phase <span style="font-weight:400;color:var(--text-faint);">(auto — Roadmap)</span></label>
+        ${_suiviPhaseSelectHtml(row.phase, autoPhase)}
       </div>
       <div class="fiche-field">
         <label>Calories <button type="button" class="btn" style="font-size:10px;padding:2px 7px;margin-left:6px;" onclick="_recalculerSuiviCalories('${clientId}')">🔄 Recalculer depuis les diètes</button></label>
@@ -7512,6 +7525,14 @@ function ouvrirModalSuivi(clientId, id) {
   document.body.appendChild(overlay);
   // Pré-remplissage auto uniquement pour une nouvelle entrée sans calories déjà saisies
   if (!id && !row.calories) _recalculerSuiviCalories(clientId);
+}
+
+function suDateChanged() {
+  const dateEl = document.getElementById('su-date');
+  const selectEl = document.getElementById('su-phase');
+  if (!dateEl || !selectEl) return;
+  const label = _roadmapPhaseLabelAtDate(window._suRoadmap||[], dateEl.value);
+  if (label) selectEl.value = label;
 }
 
 async function _recalculerSuiviCalories(clientId){
