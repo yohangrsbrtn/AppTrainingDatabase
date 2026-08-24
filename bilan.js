@@ -1004,12 +1004,14 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
 
   const joursTraining = jours.filter(j => j.training).length;
   const joursDiete    = jours.filter(j => j.diete).length;
-  const joursAvecSteps = jours.filter(j => j.steps > 0).length;
   const totalSteps    = jours.reduce((s, j) => s + (j.steps || 0), 0);
-  // Moyenne sur les jours réellement renseignés, pas /7 — même correctif que
-  // dans _ouvrirRecapBilanSupa (sinon une semaine mal remplie sous-estime la
-  // moyenne et donc l'XP pas mérité).
-  const stepsMoy       = joursAvecSteps ? Math.round(totalSteps / joursAvecSteps) : 0;
+  // Volontairement /7 (pas /jours renseignés) : un jour non renseigné compte
+  // comme 0 pas dans l'XP — malus assumé pour inciter à toujours saisir ses
+  // pas. Différent de l'affichage "Moyenne steps/jour" (recap + console), qui
+  // lui reste sur la moyenne des jours réellement remplis pour donner un
+  // chiffre informatif fidèle — décision explicite du coach : deux logiques
+  // distinctes, l'affichage informe, l'XP pénalise l'absence de saisie.
+  const stepsMoy       = jours.length ? Math.round(totalSteps / jours.length) : 0;
 
   const bonusDiete       = joursDiete >= 7 ? BONUS_DIETE_7SUR7 : joursDiete >= 6 ? BONUS_DIETE_6SUR7 : 0;
   const bonusSeances100  = (profil.seances_cible && joursTraining >= profil.seances_cible) ? BONUS_SEANCES_100PCT : 0;
