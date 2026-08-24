@@ -2889,9 +2889,9 @@ function renderBilanDetailPage(el) {
             <td>${tick(j.training)}</td>
             <td>${tick(j.cardio)}</td>
           </tr>`).join('')||`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:16px;">Aucune donnée.</td></tr>`}
-          ${poidsVals.length>1?`<tr style="background:var(--surface-2);font-style:italic;">
+          ${(poidsVals.length>1||stepsVals.length>1||eauVals.length>1)?`<tr style="background:var(--surface-2);font-style:italic;">
             <td style="font-size:11px;color:var(--text-faint);">Moyenne</td>
-            <td style="font-size:12px;">${avgPoids} kg</td>
+            <td style="font-size:12px;">${avgPoids!=null?avgPoids+' kg':'—'}</td>
             <td style="font-size:12px;">${avgEau?avgEau+' L':'—'}</td>
             <td style="font-size:12px;">${joursOkDiete}/7</td>
             <td style="font-size:12px;">${avgSteps>0?avgSteps.toLocaleString('fr-FR')+' moy.':'—'}</td>
