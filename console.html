@@ -2881,7 +2881,7 @@ function renderBilanDetailPage(el) {
         <thead><tr><th>Jour</th><th>Poids</th><th>Eau</th><th>Diète</th><th>Steps</th><th>Training</th><th>Cardio</th></tr></thead>
         <tbody>
           ${jours.map(j=>`<tr>
-            <td style="font-weight:600;font-size:12px;">${j._dateLabel?`<span style="color:var(--text-faint);font-weight:400;margin-right:5px;">${esc(j._dateLabel)}</span>`:''}${esc(j.nom||'')}</td>
+            <td style="font-weight:600;font-size:12px;">${j._dateLabel?`<span style="color:var(--text-faint);font-weight:400;margin-right:5px;">${esc(j._dateLabel)}</span>`:''}${esc(j.nom||'')}${j.commentaire?`<div style="font-size:10.5px;color:var(--text-muted);white-space:normal;margin-top:2px;font-style:italic;">💬 ${esc(j.commentaire)}</div>`:''}</td>
             <td style="font-size:12px;">${j.poids!==''&&j.poids!=null?j.poids+' kg':'—'}</td>
             <td style="font-size:12px;">${j.eau!==''&&j.eau!=null?j.eau+' L':'—'}</td>
             <td>${tick(j.diete)}</td>

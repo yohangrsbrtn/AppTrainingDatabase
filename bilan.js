@@ -259,7 +259,7 @@ function _joursOrdreAffichage(jours, jourBilanNom) {
 function _normaliserBilanSupa(row) {
   const jours = _JOURS_NOMS.map((nom, idx) => {
     const j = (row.jours || [])[idx] || {};
-    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee };
+    return { idx, nom: j.nom || nom, poids: j.poids ?? '', eau: j.eau ?? '', steps: j.steps ?? '', commentaire: j.commentaire ?? '', diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee };
   });
   const repas = (row.repas_eval || []).map((r, idx) => ({
     idx, num: r.num || (idx + 1), adhesion: r.adhesion || 0, digestion: r.digestion || 0, appetit: r.appetit || 0,
@@ -343,7 +343,7 @@ async function _supaCreerNouveauBilan(clientId, jourBilanNom, refDate) {
   }
   const nbRepas = await _supaCalculerNbRepas(clientId);
 
-  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, diete: false, training: false, cardio: false, valide: false, seance_validee: false }));
+  const jours    = _JOURS_NOMS.map(nom => ({ nom, poids: null, eau: null, steps: null, commentaire: null, diete: false, training: false, cardio: false, valide: false, seance_validee: false }));
   const repasEval = Array.from({ length: nbRepas }, (_, i) => ({ num: i + 1, adhesion: 0, digestion: 0, appetit: 0 }));
   const body = {
     client_id:    clientId,
@@ -396,7 +396,7 @@ async function _supaPatchJoursBilan(bilanId, jours) {
   await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
     method: 'PATCH',
     headers: supaHeaders({ Prefer: 'return=minimal' }),
-    body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }),
+    body: JSON.stringify({ jours: jours.map(j => ({ nom: j.nom, poids: j.poids || null, eau: j.eau || null, steps: j.steps || null, commentaire: j.commentaire || null, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, valide: !!j.valide, seance_validee: !!j.seance_validee })) }),
   });
 }
 
@@ -702,6 +702,9 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
         ${_renderToggleSupa(j.idx, 'training', 'tog_train_'+j.idx,  j.training, 'Training')}
         ${_renderToggleSupa(j.idx, 'cardio',   'tog_cardio_'+j.idx, j.cardio,   'Cardio')}
       </div>
+      <textarea class="bilan-textarea" placeholder="Commentaire du jour…" style="margin-top:10px;"
+        onchange="sauverJourBilanSupa(${j.idx}, 'commentaire', this.value)"
+      >${esc(j.commentaire||'')}</textarea>
     </div>`;
   });
 
