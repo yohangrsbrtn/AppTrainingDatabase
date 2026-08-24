@@ -730,10 +730,10 @@ async function loadHomeSupabase(){
     }
     _journeeData = journee;
   } catch(e) { S.data.profil = {}; _journeeData = { aucun: true }; }
-  // Nouvel accueil "briques" (2026-08-04) — en test sur le compte du coach
-  // uniquement (_homeV2Actif), page Supabase séparée (home-supabase-v2),
-  // renderHomeSupabase() d'origine jamais touché : retour arrière = juste
-  // retirer le gate ci-dessous, rien à reconstruire.
+  // Nouvel accueil "briques" (2026-08-04, testé seul sur le compte coach jusqu'au
+  // 2026-08-24) — déployé à tous les clients. renderHomeSupabase() d'origine
+  // jamais touché : retour arrière = juste modifier _homeV2Actif ci-dessous,
+  // rien à reconstruire.
   if (_homeV2Actif()) {
     await _chargerHomeV2Extra().catch(() => { _homeV2Data = null; });
     setPage('home-supabase-v2');
@@ -743,8 +743,8 @@ async function loadHomeSupabase(){
   _apresChargementHome();
 }
 
-// ── Accueil v2 "briques" — test coach uniquement, voir loadHomeSupabase ──
-function _homeV2Actif() { return S.client === 'yohanp'; }
+// ── Accueil v2 "briques" — déployé à tous, voir loadHomeSupabase ──
+function _homeV2Actif() { return true; }
 
 let _homeV2Data = null;
 async function _chargerHomeV2Extra() {
