@@ -528,7 +528,7 @@ function _buildMensChart(id, rows, keys, colors, labels, unit, opts) {
   const xS=i=>+(PL+(i/(n-1||1))*cw).toFixed(2);
   const yS=v=>+(PT+ch-((v-yMin)/((yMax-yMin)||1))*ch).toFixed(2);
   const xs=rows.map((_,i)=>xS(i));
-  const axisFS = opts.bigText ? 11 : 9;
+  const axisFS = opts.bigText ? 12 : 9;
   window._mensCharts[id]={rows,keys,colors,labels,xs,W,H,PL,PT,ch,unit:unit||''};
   const defs=keys.map((k,ki)=>`<linearGradient id="${id}_g${ki}" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0%" stop-color="${colors[ki]}" stop-opacity="0.18"/>
@@ -557,8 +557,17 @@ function _buildMensChart(id, rows, keys, colors, labels, unit, opts) {
   }).join('')).join('');
   // Étiquette de valeur au dernier point de chaque courbe — pour une carte non-interactive
   // (opts.noHover, ex: brique accueil dont le tap ouvre déjà la page Mensurations, le survol
-  // tactile n'a donc aucun intérêt) : donne quand même le dernier chiffre d'un coup d'œil.
-  const endLabels = !opts.endLabel ? '' : keys.map((k,ki)=>{
+  // tactile n'a donc aucun intérêt) : donne quand même le chiffre de chaque point d'un coup
+  // d'œil, pas juste le dernier — opts.allLabels étiquette CHAQUE relevé, pas seulement le plus récent.
+  const endLabels = (!opts.endLabel && !opts.allLabels) ? '' : keys.map((k,ki)=>{
+    if (opts.allLabels) {
+      return rows.map((r,i)=>{
+        const v=parseFloat(r[k]);
+        if(isNaN(v)||v<=0) return '';
+        const above = yS(v) - PT > ch*0.5;
+        return `<text x="${xs[i]}" y="${(yS(v)+(above?-7:14)).toFixed(1)}" text-anchor="middle" font-size="${axisFS+1}" font-weight="700" fill="${colors[ki]}">${v}</text>`;
+      }).join('');
+    }
     for(let i=rows.length-1;i>=0;i--){
       const v=parseFloat(rows[i][k]);
       if(!isNaN(v)&&v>0){
