@@ -276,7 +276,7 @@ async function rafraichirProgressionEtDeblocages() {
   try {
     const p = await chargerProgressionSupabase();
     S.data.prog = p;
-    if (S.page === 'home-supabase' && typeof _majCarteHeader === 'function') _majCarteHeader();
+    if ((S.page === 'home-supabase' || S.page === 'home-supabase-v2') && typeof _majCarteHeader === 'function') _majCarteHeader();
     verifierDeblocages(p);
   } catch(e) {}
 }
