@@ -7604,6 +7604,13 @@ const ROADMAP_TYPES = [
   { key:'standby',       label:'Stand-by',       color:'#8892a4' },
 ];
 function _roadmapType(key){ return ROADMAP_TYPES.find(t=>t.key===key) || { key, label:key||'—', color:'#8892a4' }; }
+// Phase Roadmap couvrant une date donnée (mensurations : plus besoin de saisir la phase à la
+// main, on sait déjà dans quelle phase le client était grâce à sa Roadmap — voir ouvrirModalMensuration).
+function _roadmapPhaseLabelAtDate(roadmap, dateISO) {
+  if (!dateISO || !Array.isArray(roadmap)) return null;
+  const p = roadmap.find(r => r.date_debut && r.date_fin && dateISO >= r.date_debut && dateISO <= r.date_fin);
+  return p ? _roadmapType(p.type).label : null;
+}
 
 function renderFicheRoadmapTab(c){
   const phases = (Array.isArray(ficheData.roadmap) ? ficheData.roadmap : []).slice().sort((a,b)=>(a.date_debut||'').localeCompare(b.date_debut||''));
@@ -10671,11 +10678,22 @@ async function sauverRecette() {
 }
 
 // ── Mensurations CRUD ───────────────────────────────────────────────────
-function ouvrirModalMensuration(clientId, rowId) {
+async function ouvrirModalMensuration(clientId, rowId) {
   const row = rowId ? (_ficheMensurations||_pageMensurationsRows||[]).find(r=>r.id===rowId) || {} : {};
   const jours = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
   const phases = ROADMAP_TYPES.map(t=>t.label);
+  // Phase déjà enregistrée à la main → respectée telle quelle. Sinon (nouvelle saisie, ou
+  // ancienne ligne jamais renseignée) → dérivée automatiquement de la Roadmap du client à
+  // la date de la mensuration, plus besoin de la sélectionner manuellement à chaque fois.
+  let roadmap = [];
+  try {
+    roadmap = (state.nav === 'fiche-client' && Array.isArray(ficheData?.roadmap) && ficheData?.client?.id === clientId)
+      ? ficheData.roadmap : await chargerRoadmap(clientId);
+  } catch(e) { roadmap = []; }
+  window._mmRoadmap = roadmap;
+  const dateInitiale = row.date || new Date().toISOString().slice(0,10);
   const phaseMatchee = _mensPhaseRoadmapType(row.phase);
+  const labelSelectionne = row.phase ? (phaseMatchee ? phaseMatchee.label : row.phase) : _roadmapPhaseLabelAtDate(roadmap, dateInitiale);
   const field = (id, label, val, type='number', extra='') =>
     `<div class="fiche-field"><label>${label}</label><input id="mm-${id}" type="${type}" value="${esc(val!=null?val:'')}" style="font-size:16px;" ${extra}></div>`;
 
@@ -10685,12 +10703,12 @@ function ouvrirModalMensuration(clientId, rowId) {
     <div class="modal-box" style="max-width:520px;width:100%;">
       <h3 style="margin:0 0 16px;">${rowId ? 'Modifier' : 'Ajouter'} une mensuration</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        ${field('date','Date',row.date||new Date().toISOString().slice(0,10),'date')}
-        <div class="fiche-field"><label>Phase</label>
+        ${field('date','Date',dateInitiale,'date','onchange="mmDateChanged()"')}
+        <div class="fiche-field"><label>Phase <span style="font-weight:400;color:var(--text-faint);">(auto — Roadmap)</span></label>
           <select id="mm-phase" style="font-size:16px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:6px 10px;">
             <option value="">—</option>
-            ${row.phase && !phaseMatchee ? `<option value="${esc(row.phase)}" selected>${esc(row.phase)}</option>` : ''}
-            ${phases.map(p=>`<option value="${p}" ${(phaseMatchee ? phaseMatchee.label===p : row.phase===p) ? 'selected' : ''}>${p}</option>`).join('')}
+            ${row.phase && !phaseMatchee && labelSelectionne===row.phase ? `<option value="${esc(row.phase)}" selected>${esc(row.phase)}</option>` : ''}
+            ${phases.map(p=>`<option value="${p}" ${labelSelectionne===p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
         ${field('poids','Poids (kg)',row.poids,'number','step="0.1" min="0"')}
@@ -10713,6 +10731,14 @@ function ouvrirModalMensuration(clientId, rowId) {
     </div>`;
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+}
+
+function mmDateChanged() {
+  const dateEl = document.getElementById('mm-date');
+  const selectEl = document.getElementById('mm-phase');
+  if (!dateEl || !selectEl) return;
+  const label = _roadmapPhaseLabelAtDate(window._mmRoadmap||[], dateEl.value);
+  if (label) selectEl.value = label;
 }
 
 async function sauvegarderMensuration(clientId, rowId) {
