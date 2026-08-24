@@ -8024,6 +8024,54 @@ function progLogsSemaineChangerBloc(bi, delta){
   renderMain();
 }
 
+// Vue "tableur" — un exercice par ligne, une semaine par colonne (scroll horizontal),
+// pour lire toute l'évolution d'un coup d'œil sans naviguer semaine par semaine.
+// Réutilise progByEx (charge max retenue par semaine, cross-blocs) déjà calculé dans
+// renderProgLogsPage — même source de données que la vue "Progression" (sparklines),
+// juste présentée en grille dense au lieu d'une carte par exercice.
+function renderProgLogsGrille(blocs, progByEx, progByExReps){
+  const allEx = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[])));
+  const withData = allEx.filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
+  if (!withData.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
+  const maxSem = Math.max(...withData.flatMap(ex => Object.keys(progByEx[ex.id]).map(Number)));
+  const semaines = Array.from({length:maxSem}, (_,i)=>i+1);
+  const rows = withData.map(ex => {
+    const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+    const groupe = exData ? exData.groupe_musculaire : null;
+    const pts = progByEx[ex.id]||{};
+    const semRenseignees = semaines.filter(s=>pts[s]!=null);
+    const first = semRenseignees.length ? pts[semRenseignees[0]] : null;
+    const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]] : null;
+    const delta = (first!=null && last!=null) ? last-first : null;
+    const deltaStr = delta==null ? '—' : (delta>=0?'+':'')+delta.toFixed(1)+' kg';
+    const deltaColor = delta>0?'#4caf50':delta<0?'var(--critical)':'var(--text-faint)';
+    const cells = semaines.map(s => {
+      const c = pts[s];
+      if (c==null) return `<td style="text-align:center;color:var(--text-faint);font-size:12px;">—</td>`;
+      const r = (progByExReps[ex.id]||{})[s];
+      return `<td style="text-align:center;white-space:nowrap;">
+        <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
+        ${r!=null?`<div style="font-size:10px;color:var(--text-faint);">${esc(String(r))} reps</div>`:''}
+      </td>`;
+    }).join('');
+    return `<tr>
+      <td style="position:sticky;left:0;background:var(--surface);z-index:1;white-space:nowrap;padding-right:14px;">
+        <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+        ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+      </td>
+      ${cells}
+      <td style="text-align:center;white-space:nowrap;font-weight:700;font-size:12.5px;color:${deltaColor};">${deltaStr}</td>
+    </tr>`;
+  }).join('');
+  const headCells = semaines.map(s=>`<th style="text-align:center;font-size:11px;">S${s}</th>`).join('');
+  return `<div class="table-card">
+    <div class="table-scroll"><table class="alim-table" style="width:auto;">
+      <thead><tr><th style="position:sticky;left:0;background:var(--surface);z-index:1;">Exercice</th>${headCells}<th style="text-align:center;">Δ</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
 function renderProgLogsPage(el){
   const backClientId = state.selected;
   if (!progLogsData.loaded){
@@ -8064,6 +8112,7 @@ function renderProgLogsPage(el){
 
   // Build progression data cross-blocs avec semaines globales
   const progByEx = {};
+  const progByExReps = {}; // exId → globalSem → reps du set qui porte la charge max retenue (pour la grille)
   Object.entries(logs).forEach(([key, l]) => {
     const parts = key.split('|');
     const exId = parts[0], sem = parseInt(parts[1]);
@@ -8072,7 +8121,11 @@ function renderProgLogsPage(el){
       const bi = exToBloc[exId] ?? 0;
       const globalSem = sem + (blocOffset[bi] || 0);
       if (!progByEx[exId]) progByEx[exId] = {};
-      if (!progByEx[exId][globalSem] || charge > progByEx[exId][globalSem]) progByEx[exId][globalSem] = charge;
+      if (!progByEx[exId][globalSem] || charge > progByEx[exId][globalSem]) {
+        progByEx[exId][globalSem] = charge;
+        if (!progByExReps[exId]) progByExReps[exId] = {};
+        progByExReps[exId][globalSem] = l.reps != null ? l.reps : null;
+      }
     }
   });
 
@@ -8096,10 +8149,11 @@ function renderProgLogsPage(el){
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
       <button class="btn ${_progLogsView==='semaine'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='semaine';renderMain()">Vue semaine</button>
       <button class="btn ${_progLogsView==='progression'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='progression';renderMain()">Progression</button>
+      <button class="btn ${_progLogsView==='grille'?'primary':''}" style="font-size:12px;padding:5px 12px;" onclick="_progLogsView='grille';renderMain()">Grille</button>
       ${_progLogsView==='semaine' && blocs.length>1 ? `<span style="font-size:11.5px;color:var(--text-faint);margin-left:4px;">${blocs.length} blocs · chacun a sa propre navigation semaine ci-dessous</span>` : ''}
     </div>
 
-    ${_progLogsView === 'progression' ? (() => {
+    ${_progLogsView === 'grille' ? renderProgLogsGrille(blocs, progByEx, progByExReps) : _progLogsView === 'progression' ? (() => {
       const allEx = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[])));
       const withData = allEx.filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
       if (!withData.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;

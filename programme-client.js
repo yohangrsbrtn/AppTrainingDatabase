@@ -866,6 +866,21 @@ function renderPcSeancePage() {
     const gifUrl = ex.exercice_id != null ? (_pcGifMap || {})[ex.exercice_id] : null;
     const gifThumb = gifUrl ? `<div onclick="ouvrirImagePleinEcran('${esc(gifUrl)}')" style="width:44px;height:44px;background:#eef1f8;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;"><img src="${esc(gifUrl)}" style="width:38px;height:38px;object-fit:contain;" alt="" /></div>` : '';
 
+    const chargeParSem = _pcChargeParSemaine(ex.id);
+    const semAvecData = Object.keys(chargeParSem).map(Number).sort((a,b)=>a-b);
+    let progBadge = '';
+    if (semAvecData.length >= 1) {
+      const nomEsc = esc(ex.nom).replace(/'/g,'&#39;');
+      if (semAvecData.length >= 2) {
+        const delta = chargeParSem[semAvecData[semAvecData.length-1]].charge - chargeParSem[semAvecData[0]].charge;
+        const deltaStr = (delta>=0?'+':'')+delta.toFixed(1)+'kg';
+        const color = delta>0?'#1D9E75':delta<0?'#e05c5c':'#8892a4';
+        progBadge = `<button onclick="_pcOuvrirProgressionExo(${ex.id},'${nomEsc}')" style="background:${color}1a;border:1px solid ${color}55;border-radius:20px;padding:3px 9px;font-size:11px;font-weight:700;color:${color};cursor:pointer;white-space:nowrap;flex-shrink:0;">📈 ${deltaStr}</button>`;
+      } else {
+        progBadge = `<button onclick="_pcOuvrirProgressionExo(${ex.id},'${nomEsc}')" style="background:transparent;border:1px solid #2d3142;border-radius:20px;padding:3px 9px;font-size:11px;font-weight:600;color:#8892a4;cursor:pointer;white-space:nowrap;flex-shrink:0;">📈</button>`;
+      }
+    }
+
     return `<div class="card" style="padding:10px;${ss?`border-left:3px solid ${ss.couleur};`:''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         ${gifThumb}
@@ -878,7 +893,10 @@ function renderPcSeancePage() {
           ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
           ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
-        ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
+          ${progBadge}
+          ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
+        </div>
       </div>
       ${bodyHtml}
       ${editToolbar}
@@ -1110,6 +1128,82 @@ async function pcSauverLogEquivalent(equivalentId, serie, field, value) {
 
 async function pcSauverCommentaireEquivalent(equivalentId, value) {
   await pcSauverLogEquivalent(equivalentId, 1, 'commentaire', value);
+}
+
+// ── Progression par exercice (badge Δ + modale sparkline) ────────────────
+// Charge max par semaine LOCALE au bloc courant (mêmes clés que le reste de
+// _pcLogs, pas de conversion cross-blocs — même granularité que _pcRenderChart
+// déjà utilisé pour le graphe combiné du haut de séance).
+function _pcChargeParSemaine(exId) {
+  const totalSem = _pcSemainesForBloc(_pcBlocId);
+  const seance = _pcAllSeances().find(s => (s.client_programme_exercices||[]).some(e=>e.id===exId));
+  const ex = seance ? (seance.client_programme_exercices||[]).find(e=>e.id===exId) : null;
+  const nbSeries = ex ? (parseInt(ex.series)||3) : 5;
+  const out = {};
+  for (let sem = 1; sem <= totalSem; sem++) {
+    let best = null, bestReps = null;
+    for (let s = 1; s <= nbSeries; s++) {
+      const log = _pcLogs[exId + '|' + sem + '|' + s];
+      const c = log && parseFloat(log.charge);
+      if (c && (best == null || c > best)) { best = c; bestReps = log.reps; }
+    }
+    if (best != null) out[sem] = { charge: best, reps: bestReps };
+  }
+  return out;
+}
+
+function _pcOuvrirProgressionExo(exId, nom) {
+  const parSemaine = _pcChargeParSemaine(exId);
+  const semaines = Object.keys(parSemaine).map(Number).sort((a,b)=>a-b);
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
+  let body;
+  if (semaines.length < 1) {
+    body = `<div style="font-size:13px;color:#8892a4;text-align:center;padding:20px 0;">Pas encore de charge loggée pour cet exercice.</div>`;
+  } else {
+    const charges = semaines.map(s=>parSemaine[s].charge);
+    const first = charges[0], last = charges[charges.length-1];
+    const delta = last - first;
+    const deltaStr = (delta>=0?'+':'')+delta.toFixed(1)+' kg';
+    const deltaColor = delta>0?'#1D9E75':delta<0?'#e05c5c':'#8892a4';
+    let svg = '';
+    if (semaines.length >= 2) {
+      const W=300,H=90,PL=8,PR=8,PT=10,PB=18;
+      const iW=W-PL-PR, iH=H-PT-PB;
+      const maxC=Math.max(...charges), minC=Math.min(...charges);
+      const xs = semaines.map((_,i)=>PL+(i/(semaines.length-1))*iW);
+      const ys = charges.map(c=>PT+(maxC===minC?iH/2:iH-(c-minC)/(maxC-minC)*iH));
+      const poly = xs.map((x,i)=>`${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+      svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;margin:10px 0;">
+        <polyline points="${poly}" fill="none" stroke="#378ADD" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${xs.map((x,i)=>`<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="3" fill="#378ADD"/>`).join('')}
+        <text x="${xs[0]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:#8892a4;">S${semaines[0]}</text>
+        <text x="${xs[xs.length-1]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:#8892a4;">S${semaines[semaines.length-1]}</text>
+      </svg>`;
+    }
+    const rows = semaines.slice().reverse().map(s => {
+      const d = parSemaine[s];
+      return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #2d3142;font-size:12.5px;">
+        <span style="color:#8892a4;">Semaine ${s}</span>
+        <span style="font-weight:600;">${d.charge} kg${d.reps!=null?' · '+esc(String(d.reps))+' reps':''}</span>
+      </div>`;
+    }).join('');
+    body = `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
+        <div style="font-size:20px;font-weight:700;">${last} kg</div>
+        <div style="font-size:13px;font-weight:700;color:${deltaColor};">${deltaStr}</div>
+      </div>
+      ${svg}
+      <div style="max-height:180px;overflow-y:auto;margin-top:6px;">${rows}</div>`;
+  }
+  modal.innerHTML = `<div style="background:#1a1d29;border-radius:16px;padding:24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+    <div style="font-size:13px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📈 Progression</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:12px;">${esc(nom)}</div>
+    ${body}
+    <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top:16px;width:100%;padding:12px;background:#2d3142;border:none;border-radius:10px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;">Fermer</button>
+  </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
 }
 
 function pcAfficherNoteCoach(idx) {
