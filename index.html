@@ -2379,7 +2379,7 @@ async function _loadJourneeDataSupabase() {
   const { id, jours } = await _supaBilanNonEnvoye(clientId);
   const idx = _jourIdxAujourdhui();
   const j = jours[idx] || {};
-  return { bilanId: id, jourIdx: idx, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, steps: j.steps ?? '', valide: !!j.valide, aucun: false };
+  return { bilanId: id, jourIdx: idx, diete: !!j.diete, training: !!j.training, cardio: !!j.cardio, steps: j.steps ?? '', poids: j.poids ?? '', eau: j.eau ?? '', valide: !!j.valide, aucun: false };
 }
 async function _sauverJourneeSupabase(field, value) {
   if (!_journeeData || !_journeeData.bilanId) return;
@@ -2388,7 +2388,7 @@ async function _sauverJourneeSupabase(field, value) {
   const arr = res.ok ? await res.json() : [];
   const jours = (arr[0] && arr[0].jours) || [];
   const idx = _journeeData.jourIdx;
-  jours[idx] = { ...(jours[idx] || {}), diete: _journeeData.diete, training: _journeeData.training, cardio: _journeeData.cardio, steps: _journeeData.steps || null, valide: !!_journeeData.valide };
+  jours[idx] = { ...(jours[idx] || {}), diete: _journeeData.diete, training: _journeeData.training, cardio: _journeeData.cardio, steps: _journeeData.steps || null, poids: _journeeData.poids || null, eau: _journeeData.eau || null, valide: !!_journeeData.valide };
   await _supaPatchJoursBilan(_journeeData.bilanId, jours);
 }
 function _afficherModalJourneeSupabase() {
@@ -2415,6 +2415,20 @@ function _afficherModalJourneeSupabase() {
         <input id="jSteps" type="text" inputmode="numeric" value="${d.steps||''}" placeholder="ex: 10200"
           onchange="sauverStepsJournee(this.value)"
           style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:20px;">
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">POIDS (kg) — optionnel</div>
+          <input id="jPoids" type="text" inputmode="decimal" value="${fmtFR(d.poids)}" placeholder="—"
+            onchange="sauverPoidsJournee(this.value)"
+            style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">EAU (L) — optionnel</div>
+          <input id="jEau" type="text" inputmode="decimal" value="${fmtFR(d.eau)}" placeholder="—"
+            onchange="sauverEauJournee(this.value)"
+            style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
+        </div>
       </div>
       <button id="btnValiderJournee" onclick="validerJourneeClient()" style="width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75,#167a5a);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">✅ Valider ma journée</button>
       <button onclick="document.getElementById('modalJournee').remove()" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>
@@ -2444,6 +2458,14 @@ function sauverStepsJourneeSupabase(val) {
   _sauverJourneeSupabase('steps', steps)
     .then(() => { if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages(); })
     .catch(() => {});
+}
+function sauverPoidsJournee(val) {
+  if (!_journeeData) return;
+  _sauverJourneeSupabase('poids', parsePoids(val)).catch(() => {});
+}
+function sauverEauJournee(val) {
+  if (!_journeeData) return;
+  _sauverJourneeSupabase('eau', parseEau(val)).catch(() => {});
 }
 const XP_JOURNEE_VALIDEE  = 5;
 const BONUS_PAS_JOUR      = 10;
