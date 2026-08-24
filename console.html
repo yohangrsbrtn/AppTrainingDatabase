@@ -1632,20 +1632,26 @@ async function _chargerActiviteRecente(clientsById){
 }
 
 // Même sémantique que _bilanEstPonctuel côté client : "si ce bilan était envoyé
-// maintenant, serait-ce en retard ?" — vérifie TOUS les bilans non-envoyés (pas
-// seulement le plus récent) : un client qui a sauté une semaine peut avoir un
-// vieux bilan resté ouvert et non-envoyé pendant qu'un nouveau a démarré pour
-// la semaine en cours (cf. _supaGetOrCreateBilanCourant, bilan.js) — le plus
-// récent n'est alors pas encore en retard, mais l'ancien l'est toujours.
+// maintenant, serait-ce en retard ?" — vérifie UNIQUEMENT le bilan le plus
+// récent du client (pas tout l'historique non-envoyé). Un vieux bilan sauté
+// resté ouvert (semaine oubliée, jamais rempli) reste dans data.bilansAll/la
+// fiche client comme trou visible, mais ne doit plus faire apparaître le
+// client dans "Bilans en retard" une fois qu'il a repris le rythme et envoyé
+// un bilan plus récent — sinon un client à jour reste signalé "en retard"
+// indéfiniment à cause d'une semaine oubliée il y a des mois (bug vécu,
+// signalé par le coach : Ronny et Jean-Baptiste avaient envoyé ET fait
+// traiter leur bilan de la semaine, mais restaient dans "Bilans en retard" à
+// cause d'un vieux bilan non-envoyé de plusieurs semaines plus tôt).
 async function _supaCalculerRetard(clientId) {
   try {
     const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
     const profilArr = profilRes.ok ? await profilRes.json() : [];
     const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
-    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.desc&select=created_at`, { headers: supaHeaders() });
+    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=created_at.desc&limit=1&select=created_at,envoye_coach`, { headers: supaHeaders() });
     const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
-    if (!bilanArr.length) return false;
-    return bilanArr.some(b => !_bilanEstPonctuel(b.created_at, new Date().toISOString(), jourBilan));
+    const dernier = bilanArr[0];
+    if (!dernier || dernier.envoye_coach) return false;
+    return !_bilanEstPonctuel(dernier.created_at, new Date().toISOString(), jourBilan);
   } catch(e) { return false; }
 }
 
