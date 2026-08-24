@@ -517,7 +517,8 @@ function _toggleMChart2(key) {
   if (el) el.innerHTML = _renderMensChart2Section(_mReleves);
 }
 
-function _buildMensChart(id, rows, keys, colors, labels, unit) {
+function _buildMensChart(id, rows, keys, colors, labels, unit, opts) {
+  opts = opts || {};
   const W=560,H=180,PL=44,PR=14,PT=16,PB=34,cw=W-PL-PR,ch=H-PT-PB;
   const allVals=keys.flatMap(k=>rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v)&&v>0));
   if(allVals.length<2) return '';
@@ -527,6 +528,7 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   const xS=i=>+(PL+(i/(n-1||1))*cw).toFixed(2);
   const yS=v=>+(PT+ch-((v-yMin)/((yMax-yMin)||1))*ch).toFixed(2);
   const xs=rows.map((_,i)=>xS(i));
+  const axisFS = opts.bigText ? 11 : 9;
   window._mensCharts[id]={rows,keys,colors,labels,xs,W,H,PL,PT,ch,unit:unit||''};
   const defs=keys.map((k,ki)=>`<linearGradient id="${id}_g${ki}" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0%" stop-color="${colors[ki]}" stop-opacity="0.18"/>
@@ -534,12 +536,12 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   </linearGradient>`).join('');
   const yGrid=[0.25,0.5,0.75].map(f=>{const v=yMin+f*(yMax-yMin);
     return `<line x1="${PL}" y1="${yS(v)}" x2="${PL+cw}" y2="${yS(v)}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3"/>
-      <text x="${PL-5}" y="${+(yS(v)+3.5).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${Math.round(v)}</text>`;
+      <text x="${PL-5}" y="${+(yS(v)+3.5).toFixed(1)}" text-anchor="end" font-size="${axisFS}" fill="var(--muted)">${Math.round(v)}</text>`;
   }).join('');
   const maxL=Math.min(6,n), stepL=Math.floor((n-1)/(maxL-1||1));
   const xLabels=Array.from({length:maxL},(_,i)=>{
     const idx=i===maxL-1?n-1:i*stepL, d=(rows[idx].date||'').split('-');
-    return `<text x="${xs[idx]}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.length===3?d[2]+'/'+d[1]:''}</text>`;
+    return `<text x="${xs[idx]}" y="${H-4}" text-anchor="middle" font-size="${axisFS}" fill="var(--muted)">${d.length===3?d[2]+'/'+d[1]:''}</text>`;
   }).join('');
   const areas=keys.map((k,ki)=>{
     const pts=rows.map((r,i)=>{const v=parseFloat(r[k]);return isNaN(v)||v<=0?null:[xs[i],yS(v)];}).filter(Boolean);
@@ -553,15 +555,28 @@ function _buildMensChart(id, rows, keys, colors, labels, unit) {
   const dots=keys.map((k,ki)=>rows.map((r,i)=>{const v=parseFloat(r[k]);
     return isNaN(v)||v<=0?'':`<circle id="${id}_d${ki}_${i}" cx="${xs[i]}" cy="${yS(v)}" r="1.8" fill="${colors[ki]}" stroke="var(--bg2)" stroke-width="1.2"/>`;
   }).join('')).join('');
+  // Étiquette de valeur au dernier point de chaque courbe — pour une carte non-interactive
+  // (opts.noHover, ex: brique accueil dont le tap ouvre déjà la page Mensurations, le survol
+  // tactile n'a donc aucun intérêt) : donne quand même le dernier chiffre d'un coup d'œil.
+  const endLabels = !opts.endLabel ? '' : keys.map((k,ki)=>{
+    for(let i=rows.length-1;i>=0;i--){
+      const v=parseFloat(rows[i][k]);
+      if(!isNaN(v)&&v>0){
+        const above = yS(v) - PT > ch*0.5;
+        return `<text x="${xs[i]}" y="${(yS(v)+(above?-7:14)).toFixed(1)}" text-anchor="${i===rows.length-1?'end':'middle'}" font-size="${axisFS+1}" font-weight="700" fill="${colors[ki]}">${v}</text>`;
+      }
+    }
+    return '';
+  }).join('');
   const axes=`<line x1="${PL}" y1="${PT}" x2="${PL}" y2="${PT+ch}" stroke="var(--border)" stroke-width="1"/>
     <line x1="${PL}" y1="${PT+ch}" x2="${PL+cw}" y2="${PT+ch}" stroke="var(--border)" stroke-width="1"/>`;
   const vline=`<line id="${id}_vl" x1="${xs[0]}" y1="${PT}" x2="${xs[0]}" y2="${PT+ch}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5" display="none"/>`;
-  const ov=`<rect x="${PL}" y="${PT}" width="${cw}" height="${ch}" fill="transparent" onmousemove="_mensHover(event,'${id}')" onmouseleave="_mensHoverOut('${id}')"/>`;
-  const tip=`<div id="${id}_tip" style="display:none;position:absolute;top:10px;left:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text);pointer-events:none;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;"></div>`;
+  const ov=opts.noHover ? '' : `<rect x="${PL}" y="${PT}" width="${cw}" height="${ch}" fill="transparent" onmousemove="_mensHover(event,'${id}')" onmouseleave="_mensHoverOut('${id}')"/>`;
+  const tip=opts.noHover ? '' : `<div id="${id}_tip" style="display:none;position:absolute;top:10px;left:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text);pointer-events:none;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;"></div>`;
   const legend=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:8px;margin-bottom:4px;">
     ${keys.map((k,i)=>`<span><span style="color:${colors[i]};margin-right:3px;">●</span>${labels[i]}</span>`).join('')}
   </div>`;
-  return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${areas}${lines}${dots}${vline}${ov}</svg></div>${legend}`;
+  return `<div style="position:relative;">${tip}<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${axes}${yGrid}${xLabels}${areas}${lines}${dots}${endLabels}${vline}${ov}</svg></div>${legend}`;
 }
 
 function _mensHover(evt, cid) {
