@@ -563,6 +563,7 @@ function renderProgrammeClientPage() {
     </div>${renderNavBar('training')}</div>`;
   }
   if (_pcSubPage === 'seance') return renderPcSeancePage();
+  if (_pcSubPage === 'suivi') return renderPcSuiviPage();
   return renderPcSelectorPage();
 }
 
@@ -643,6 +644,7 @@ function renderPcSelectorPage() {
         <select class="t-select" style="font-size:16px;" onchange="pcChangerSeance(this.value)">${optsSeances || '<option>—</option>'}</select>
       </div>
       <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>${isReadonly ? '👁 Voir la séance' : 'Commencer →'}</button>
+      <button class="btn-secondary" onclick="pcOuvrirSuivi()" style="margin-top:8px;width:100%;">📊 Suivi des charges</button>
       ${(_pcAutoEdition() && !isReadonly && seances.length > 1) ? `<button class="btn-secondary" onclick="pcOuvrirReorganiserSeances()" style="margin-top:8px;width:100%;">↕️ Réorganiser mes séances</button>` : ''}
       ${(typeof tpAccesAutorise === 'function' && tpAccesAutorise()) ? `<button class="btn-secondary" onclick="loadTrainingPerso()" style="margin-top:8px;width:100%;">📓 Mes séances perso</button>` : ''}
     </div>
@@ -866,21 +868,6 @@ function renderPcSeancePage() {
     const gifUrl = ex.exercice_id != null ? (_pcGifMap || {})[ex.exercice_id] : null;
     const gifThumb = gifUrl ? `<div onclick="ouvrirImagePleinEcran('${esc(gifUrl)}')" style="width:44px;height:44px;background:#eef1f8;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;"><img src="${esc(gifUrl)}" style="width:38px;height:38px;object-fit:contain;" alt="" /></div>` : '';
 
-    const chargeParSem = _pcChargeParSemaine(ex.id);
-    const semAvecData = Object.keys(chargeParSem).map(Number).sort((a,b)=>a-b);
-    let progBadge = '';
-    if (semAvecData.length >= 1) {
-      const nomEsc = esc(ex.nom).replace(/'/g,'&#39;');
-      if (semAvecData.length >= 2) {
-        const delta = chargeParSem[semAvecData[semAvecData.length-1]].charge - chargeParSem[semAvecData[0]].charge;
-        const deltaStr = (delta>=0?'+':'')+delta.toFixed(1)+'kg';
-        const color = delta>0?'#1D9E75':delta<0?'#e05c5c':'#8892a4';
-        progBadge = `<button onclick="_pcOuvrirProgressionExo(${ex.id},'${nomEsc}')" style="background:${color}1a;border:1px solid ${color}55;border-radius:20px;padding:3px 9px;font-size:11px;font-weight:700;color:${color};cursor:pointer;white-space:nowrap;flex-shrink:0;">📈 ${deltaStr}</button>`;
-      } else {
-        progBadge = `<button onclick="_pcOuvrirProgressionExo(${ex.id},'${nomEsc}')" style="background:transparent;border:1px solid #2d3142;border-radius:20px;padding:3px 9px;font-size:11px;font-weight:600;color:#8892a4;cursor:pointer;white-space:nowrap;flex-shrink:0;">📈</button>`;
-      }
-    }
-
     return `<div class="card" style="padding:10px;${ss?`border-left:3px solid ${ss.couleur};`:''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px;">
         ${gifThumb}
@@ -893,10 +880,7 @@ function renderPcSeancePage() {
           ${cibleLigne1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${cibleLigne1}</div>` : ''}
           ${cibleLigne2 ? `<div style="font-size:11px;color:#5a8aaa;margin-top:1px;">${cibleLigne2}</div>` : ''}
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
-          ${progBadge}
-          ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
-        </div>
+        ${ex.repos ? `<button class="chrono-btn-trigger" data-repos="${esc(ex.repos).replace(/"/g,'&quot;')}" style="min-width:44px;min-height:44px;border-radius:10px;background:#2d3142;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">⏱</button>` : ''}
       </div>
       ${bodyHtml}
       ${editToolbar}
@@ -1130,80 +1114,112 @@ async function pcSauverCommentaireEquivalent(equivalentId, value) {
   await pcSauverLogEquivalent(equivalentId, 1, 'commentaire', value);
 }
 
-// ── Progression par exercice (badge Δ + modale sparkline) ────────────────
-// Charge max par semaine LOCALE au bloc courant (mêmes clés que le reste de
-// _pcLogs, pas de conversion cross-blocs — même granularité que _pcRenderChart
-// déjà utilisé pour le graphe combiné du haut de séance).
-function _pcChargeParSemaine(exId) {
-  const totalSem = _pcSemainesForBloc(_pcBlocId);
-  const seance = _pcAllSeances().find(s => (s.client_programme_exercices||[]).some(e=>e.id===exId));
-  const ex = seance ? (seance.client_programme_exercices||[]).find(e=>e.id===exId) : null;
-  const nbSeries = ex ? (parseInt(ex.series)||3) : 5;
-  const out = {};
-  for (let sem = 1; sem <= totalSem; sem++) {
-    let best = null, bestReps = null;
-    for (let s = 1; s <= nbSeries; s++) {
-      const log = _pcLogs[exId + '|' + sem + '|' + s];
-      const c = log && parseFloat(log.charge);
-      if (c && (best == null || c > best)) { best = c; bestReps = log.reps; }
-    }
-    if (best != null) out[sem] = { charge: best, reps: bestReps };
-  }
-  return out;
-}
+// ── Suivi des charges — page dédiée, grille type tableur ─────────────────
+// Même logique que la vue "Grille" de la console (console.html,
+// renderProgLogsGrille) : un exercice par ligne, une semaine par colonne
+// (numérotation globale cross-blocs), groupé par séance avec bandeau coloré
+// (même code couleur PC_BLOC_COLOR que le sélecteur de bloc), scroll
+// horizontal sur les semaines. _pcLogs contient déjà TOUTES les semaines de
+// tous les blocs du programme actif (chargé une fois, pas de refetch ici).
+function pcOuvrirSuivi() { _pcSubPage = 'suivi'; setPage('programme-client'); }
+function pcFermerSuivi() { _pcSubPage = 'selector'; setPage('programme-client'); }
 
-function _pcOuvrirProgressionExo(exId, nom) {
-  const parSemaine = _pcChargeParSemaine(exId);
-  const semaines = Object.keys(parSemaine).map(Number).sort((a,b)=>a-b);
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
-  let body;
-  if (semaines.length < 1) {
-    body = `<div style="font-size:13px;color:#8892a4;text-align:center;padding:20px 0;">Pas encore de charge loggée pour cet exercice.</div>`;
-  } else {
-    const charges = semaines.map(s=>parSemaine[s].charge);
-    const first = charges[0], last = charges[charges.length-1];
-    const delta = last - first;
-    const deltaStr = (delta>=0?'+':'')+delta.toFixed(1)+' kg';
-    const deltaColor = delta>0?'#1D9E75':delta<0?'#e05c5c':'#8892a4';
-    let svg = '';
-    if (semaines.length >= 2) {
-      const W=300,H=90,PL=8,PR=8,PT=10,PB=18;
-      const iW=W-PL-PR, iH=H-PT-PB;
-      const maxC=Math.max(...charges), minC=Math.min(...charges);
-      const xs = semaines.map((_,i)=>PL+(i/(semaines.length-1))*iW);
-      const ys = charges.map(c=>PT+(maxC===minC?iH/2:iH-(c-minC)/(maxC-minC)*iH));
-      const poly = xs.map((x,i)=>`${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
-      svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;margin:10px 0;">
-        <polyline points="${poly}" fill="none" stroke="#378ADD" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-        ${xs.map((x,i)=>`<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="3" fill="#378ADD"/>`).join('')}
-        <text x="${xs[0]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:#8892a4;">S${semaines[0]}</text>
-        <text x="${xs[xs.length-1]}" y="${H}" text-anchor="middle" style="font-size:10px;fill:#8892a4;">S${semaines[semaines.length-1]}</text>
-      </svg>`;
+function renderPcSuiviPage() {
+  const cp = _pcClientProgramme;
+  const blocs = cp.blocs || [];
+  // Charge max (+ reps du set correspondant) par exercice × semaine globale,
+  // même principe de cumul cross-blocs que côté console (offset = somme des
+  // semaines des blocs précédents).
+  const blocMaxSem = blocs.map(b => b.nombre_semaines || _pcSemainesForBloc(b.id));
+  const blocOffset = blocs.map((_, bi) => { let off = 0; for (let i = 0; i < bi; i++) off += blocMaxSem[i]; return off; });
+  const progByEx = {}, progByExReps = {};
+  Object.entries(_pcLogs).forEach(([key, l]) => {
+    const parts = key.split('|');
+    const exId = parseInt(parts[0]), sem = parseInt(parts[1]);
+    const charge = parseFloat(l.charge);
+    if (isNaN(charge) || charge <= 0) return;
+    const bi = blocs.findIndex(b => (b.client_programme_seances||[]).some(s => (s.client_programme_exercices||[]).some(ex => ex.id === exId)));
+    if (bi < 0) return;
+    const globalSem = sem + (blocOffset[bi] || 0);
+    if (!progByEx[exId]) progByEx[exId] = {};
+    if (!progByEx[exId][globalSem] || charge > progByEx[exId][globalSem]) {
+      progByEx[exId][globalSem] = charge;
+      if (!progByExReps[exId]) progByExReps[exId] = {};
+      progByExReps[exId][globalSem] = l.reps != null ? l.reps : null;
     }
-    const rows = semaines.slice().reverse().map(s => {
-      const d = parSemaine[s];
-      return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #2d3142;font-size:12.5px;">
-        <span style="color:#8892a4;">Semaine ${s}</span>
-        <span style="font-weight:600;">${d.charge} kg${d.reps!=null?' · '+esc(String(d.reps))+' reps':''}</span>
-      </div>`;
+  });
+
+  const groupes = [];
+  blocs.forEach((b, bi) => {
+    const color = PC_BLOC_COLOR[b.type] || '#666';
+    const label = _pcBlocLabel(b);
+    (b.client_programme_seances||[]).forEach(s => {
+      const exos = (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
+      if (exos.length) groupes.push({ color, label, titre: s.titre, exos });
+    });
+  });
+
+  let bodyHtml;
+  if (!groupes.length) {
+    bodyHtml = `<div class="empty"><div class="empty-text">Pas encore de charges enregistrées — reviens ici une fois quelques séances loggées.</div></div>`;
+  } else {
+    const maxSem = Math.max(...groupes.flatMap(g => g.exos.flatMap(ex => Object.keys(progByEx[ex.id]).map(Number))));
+    const semaines = Array.from({ length: maxSem }, (_, i) => i + 1);
+    const groupesHtml = groupes.map(g => {
+      const rows = g.exos.map(ex => {
+        const pts = progByEx[ex.id] || {};
+        const semRenseignees = semaines.filter(s => pts[s] != null);
+        const first = semRenseignees.length ? pts[semRenseignees[0]] : null;
+        const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]] : null;
+        const delta = (first != null && last != null) ? last - first : null;
+        const deltaStr = delta == null ? '—' : (delta >= 0 ? '+' : '') + delta.toFixed(1) + 'kg';
+        const deltaColor = delta > 0 ? '#1D9E75' : delta < 0 ? '#e05c5c' : '#8892a4';
+        const cells = semaines.map(s => {
+          const c = pts[s];
+          if (c == null) return `<td style="text-align:center;color:#5a6172;font-size:12px;padding:6px 10px;">—</td>`;
+          const r = (progByExReps[ex.id] || {})[s];
+          return `<td style="text-align:center;white-space:nowrap;padding:6px 10px;">
+            <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
+            ${r != null ? `<div style="font-size:10px;color:#8892a4;">${esc(String(r))} reps</div>` : ''}
+          </td>`;
+        }).join('');
+        return `<tr>
+          <td style="position:sticky;left:0;background:#161923;border-left:3px solid ${g.color}88;white-space:nowrap;padding:6px 12px 6px 9px;">
+            <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+          </td>
+          ${cells}
+          <td style="text-align:center;white-space:nowrap;font-weight:700;font-size:12.5px;color:${deltaColor};padding:6px 10px;">${deltaStr}</td>
+        </tr>`;
+      }).join('');
+      return `<tr>
+        <td colspan="${semaines.length + 2}" style="position:sticky;left:0;background:${g.color}22;border-left:3px solid ${g.color};padding:6px 12px;">
+          <span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${g.color};">${esc(g.label)}</span>
+          <span style="font-size:12px;font-weight:600;color:#e8eaf0;margin-left:8px;">${esc(g.titre)}</span>
+        </td>
+      </tr>${rows}
+      <tr><td colspan="${semaines.length + 2}" style="height:8px;padding:0;border:none;"></td></tr>`;
     }).join('');
-    body = `
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
-        <div style="font-size:20px;font-weight:700;">${last} kg</div>
-        <div style="font-size:13px;font-weight:700;color:${deltaColor};">${deltaStr}</div>
-      </div>
-      ${svg}
-      <div style="max-height:180px;overflow-y:auto;margin-top:6px;">${rows}</div>`;
+    const headCells = semaines.map(s => `<th style="text-align:center;font-size:11px;padding:6px 10px;color:#8892a4;">S${s}</th>`).join('');
+    bodyHtml = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;">
+      <table style="border-collapse:collapse;width:auto;">
+        <thead><tr>
+          <th style="position:sticky;left:0;background:#161923;text-align:left;font-size:11px;padding:6px 12px 6px 9px;color:#8892a4;">Exercice</th>
+          ${headCells}
+          <th style="text-align:center;font-size:11px;padding:6px 10px;color:#8892a4;">Δ</th>
+        </tr></thead>
+        <tbody>${groupesHtml}</tbody>
+      </table>
+    </div>`;
   }
-  modal.innerHTML = `<div style="background:#1a1d29;border-radius:16px;padding:24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);">
-    <div style="font-size:13px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📈 Progression</div>
-    <div style="font-size:15px;font-weight:600;margin-bottom:12px;">${esc(nom)}</div>
-    ${body}
-    <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top:16px;width:100%;padding:12px;background:#2d3142;border:none;border-radius:10px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;">Fermer</button>
+
+  return `<div id="app">
+    ${renderHeader('Suivi des charges', cp.nom || '', false)}
+    <div class="page">
+      <button class="btn-secondary" onclick="pcFermerSuivi()" style="margin-bottom:12px;width:100%;">← Retour</button>
+      ${bodyHtml}
+    </div>
+    ${renderNavBar('training')}
   </div>`;
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-  document.body.appendChild(modal);
 }
 
 function pcAfficherNoteCoach(idx) {
