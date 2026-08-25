@@ -4316,9 +4316,20 @@ async function confirmerFormExercice(id){
     tempo_force: document.getElementById('fExoTempoForce').value.trim(),
   };
   try {
+    const ancienNom = id ? (exercicesData.find(e=>e.id===id)||{}).nom : null;
     const saved = await sauvegarderExercice(payload);
     if (id) { const i = exercicesData.findIndex(e=>e.id===id); if (i>=0) exercicesData[i] = saved; }
     else exercicesData.push(saved);
+    // Renommage propagé aux programmes déjà assignés : client_programme_exercices copie le nom
+    // au moment de l'ajout (nécessaire pour les exercices migrés GAS sans exercice_id, voir
+    // CLAUDE.md) — sans cette resynchro, un renommage dans la base laissait les programmes déjà
+    // assignés affichés avec l'ancien nom indéfiniment. programme_seance_exercices (templates)
+    // n'a pas ce problème : pas de colonne nom, toujours lu en direct depuis exercices.nom.
+    if (id && ancienNom && ancienNom !== nom) {
+      await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?exercice_id=eq.${id}`, {
+        method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ nom })
+      }).catch(()=>{});
+    }
     document.getElementById('modal-exercice').remove();
     renderExercicesSub();
   } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
