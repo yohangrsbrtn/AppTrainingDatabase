@@ -512,6 +512,7 @@ function renderDieteList() {
 // l'équivalence actuellement affichée pour le repas i (0 = repas de base).
 let _dOptionTotals = [];
 let _dCurrentOpt   = [];
+let _dOptionNoms   = []; // _dOptionNoms[i] = noms des options (repas de base + équivalences) du repas i
 
 function _sommeAliments(aliments) {
   let cals = 0, prot = 0, glu = 0, lip = 0;
@@ -521,6 +522,16 @@ function _sommeAliments(aliments) {
     glu  += a.glu  || 0; lip  += a.lip  || 0;
   });
   return { cals, prot, glu, lip };
+}
+
+function dRepasSliderAller(idx, direction) {
+  const slider = document.getElementById(`dSlider_${idx}`);
+  if (!slider) return;
+  const w = slider.clientWidth || 1;
+  const nbOpts = (_dOptionTotals[idx] || []).length;
+  const cur = Math.round(slider.scrollLeft / w);
+  const next = Math.max(0, Math.min(nbOpts - 1, cur + direction));
+  slider.scrollTo({ left: next * w, behavior: 'smooth' });
 }
 
 function _recalcDieteTotal() {
@@ -538,6 +549,7 @@ function renderDieteDetail() {
   const data = _dDetail;
   _dOptionTotals = [];
   _dCurrentOpt = [];
+  _dOptionNoms = [];
 
   let repasHtml = '';
   if (!(data.repas || []).length) {
@@ -551,20 +563,31 @@ function renderDieteDetail() {
     const hasOpts = options.length > 1;
 
     _dOptionTotals[idx] = options.map(opt => _sommeAliments(opt.aliments));
+    _dOptionNoms[idx] = options.map(opt => opt.nom);
     _dCurrentOpt[idx] = 0;
 
     repasHtml += `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${r.commentaire?'2px':'10px'};gap:8px;">
         <div style="font-size:15px;font-weight:600;">${esc(r.nom)}</div>
-        ${hasOpts ? `<div id="dDots_${idx}" style="font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;">1 / ${options.length}</div>` : ''}
       </div>
       ${r.commentaire ? `<div id="dCommentaire_${idx}" style="font-size:12.5px;color:var(--accent);background:rgba(79,110,247,.12);border-radius:10px;padding:6px 10px;margin-bottom:10px;white-space:pre-wrap;">💬 ${esc(r.commentaire)}</div>` : ''}`;
 
     if (hasOpts) {
+      // Même pattern que le sélecteur exercice/équivalent côté programme (flèches colorées +
+      // libellé) — bien plus visible qu'un simple compteur "1/2" (demande coach, 2026-08-24).
+      // Bleu = repas prévu (option 0), violet = équivalence(s) — cohérent avec ≡ déjà utilisé.
+      repasHtml += `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+        <button id="dEquivPrev_${idx}" onclick="dRepasSliderAller(${idx},-1)" style="width:30px;height:30px;border-radius:50%;background:#378ADD22;border:1px solid #378ADD55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#378ADD" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div id="dDots_${idx}" style="flex:1;text-align:center;font-size:11.5px;font-weight:700;color:#378ADD;">${esc(r.nom)}</div>
+        <button id="dEquivNext_${idx}" onclick="dRepasSliderAller(${idx},1)" style="width:30px;height:30px;border-radius:50%;background:#a78bfa22;border:1px solid #a78bfa55;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>`;
       repasHtml += `<div id="dSlider_${idx}" style="display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:0;">`;
-      options.forEach((opt, oIdx) => {
+      options.forEach((opt) => {
         repasHtml += `<div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
-          ${oIdx > 0 ? `<div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(opt.nom)}</div>` : ''}
           ${rendreCorpsRepas(opt, null, null)}
         </div>`;
       });
@@ -589,11 +612,22 @@ function renderDieteDetail() {
       const dots   = document.getElementById(`dDots_${idx}`);
       if (!slider) continue;
       const nbOpts = (_dOptionTotals[idx] || []).length;
+      const prevBtn = document.getElementById(`dEquivPrev_${idx}`);
+      const nextBtn = document.getElementById(`dEquivNext_${idx}`);
+      const majLabelRepas = optIdx => {
+        if (dots) {
+          dots.textContent = (optIdx === 0 ? '' : '≡ ') + esc((_dOptionNoms[idx] || [])[optIdx] || '');
+          dots.style.color = optIdx === 0 ? '#378ADD' : '#a78bfa';
+        }
+        if (prevBtn) prevBtn.style.visibility = optIdx === 0 ? 'hidden' : 'visible';
+        if (nextBtn) nextBtn.style.visibility = optIdx === nbOpts - 1 ? 'hidden' : 'visible';
+      };
+      majLabelRepas(0);
       slider.addEventListener('scroll', () => {
         const optIdx = Math.min(nbOpts - 1, Math.round(slider.scrollLeft / (slider.clientWidth || 1)));
         if (_dCurrentOpt[idx] === optIdx) return;
         _dCurrentOpt[idx] = optIdx;
-        if (dots) dots.textContent = `${optIdx + 1} / ${nbOpts}`;
+        majLabelRepas(optIdx);
         _recalcDieteTotal();
       }, { passive: true });
     }
