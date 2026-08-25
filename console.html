@@ -4071,36 +4071,47 @@ async function renderProgrammesPage(el){
 // ── Sous-onglet Exercices ──────────────────────────────────────────────
 function renderExercicesSub(){
   const sub = document.getElementById('progrSub');
-  const list = (exercicesData || [])
-    .filter(e => exoGroupeFiltre === 'all' || e.groupe_musculaire === exoGroupeFiltre)
-    .filter(e => e.nom.toLowerCase().includes(exoRecherche.toLowerCase()));
   sub.innerHTML = `
     <div class="table-card">
       <div class="table-toolbar">
-        <div class="title">${list.length} exercice${list.length>1?'s':''}</div>
-        <input type="text" placeholder="Rechercher…" value="${esc(exoRecherche)}" oninput="exoRecherche=this.value;renderExercicesSub()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12px;width:160px;">
-        <div class="chip-filter">
-          <button class="${exoGroupeFiltre==='all'?'active':''}" onclick="exoGroupeFiltre='all';renderExercicesSub()">Tous</button>
-          ${GROUPES_MUSCULAIRES.map(g => `<button class="${exoGroupeFiltre===g?'active':''}" onclick="exoGroupeFiltre='${g}';renderExercicesSub()">${g}</button>`).join('')}
-        </div>
+        <div class="title" id="progrExoTitle"></div>
+        <input type="text" id="progrExoSearch" placeholder="Rechercher…" value="${esc(exoRecherche)}" oninput="exoRecherche=this.value;_majExercicesListe()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12px;width:160px;">
+        <div class="chip-filter" id="progrExoChips"></div>
         <button class="btn primary" onclick="ouvrirFormExercice(null)">+ Nouvel exercice</button>
       </div>
       <div class="table-scroll"><table class="clients">
         <thead><tr><th>Démo</th><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(e => `
-            <tr onclick="ouvrirFormExercice(${e.id})">
-              <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">` : '—'}</td>
-              <td style="font-weight:600;">${esc(e.nom)}</td>
-              <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
-              <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
-              <td>${_exoResumeBlocsHtml(e)}</td>
-              <td>${e.video_url ? `<a href="${esc(e.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);">▶ Voir</a>` : '—'}</td>
-              <td class="row-actions"><button class="icon-btn" onclick="event.stopPropagation();retirerExercice(${e.id})">${iTrash()}</button></td>
-            </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`}
-        </tbody>
+        <tbody id="progrExoTbody"></tbody>
       </table></div>
     </div>`;
+  _majExercicesListe();
+}
+// Mise à jour ciblée (titre + chips + tbody uniquement) — appelée à chaque frappe dans le champ
+// recherche. Ne JAMAIS réassigner sub.innerHTML ici : ça recrée l'input et lui fait perdre le
+// focus à chaque lettre tapée (bug vécu, signalé par le coach — obligé de recliquer dans le
+// champ après chaque caractère). renderExercicesSub() (au-dessus) reste la seule à tout
+// reconstruire, réservée à l'ouverture de l'onglet / après CRUD (ajout/suppression exercice).
+function _majExercicesListe(){
+  const list = (exercicesData || [])
+    .filter(e => exoGroupeFiltre === 'all' || e.groupe_musculaire === exoGroupeFiltre)
+    .filter(e => e.nom.toLowerCase().includes(exoRecherche.toLowerCase()));
+  const titleEl = document.getElementById('progrExoTitle');
+  if (titleEl) titleEl.textContent = `${list.length} exercice${list.length>1?'s':''}`;
+  const chipsEl = document.getElementById('progrExoChips');
+  if (chipsEl) chipsEl.innerHTML = `
+    <button class="${exoGroupeFiltre==='all'?'active':''}" onclick="exoGroupeFiltre='all';_majExercicesListe()">Tous</button>
+    ${GROUPES_MUSCULAIRES.map(g => `<button class="${exoGroupeFiltre===g?'active':''}" onclick="exoGroupeFiltre='${g}';_majExercicesListe()">${g}</button>`).join('')}`;
+  const tbody = document.getElementById('progrExoTbody');
+  if (tbody) tbody.innerHTML = list.map(e => `
+    <tr onclick="ouvrirFormExercice(${e.id})">
+      <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">` : '—'}</td>
+      <td style="font-weight:600;">${esc(e.nom)}</td>
+      <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
+      <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
+      <td>${_exoResumeBlocsHtml(e)}</td>
+      <td>${e.video_url ? `<a href="${esc(e.video_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent);">▶ Voir</a>` : '—'}</td>
+      <td class="row-actions"><button class="icon-btn" onclick="event.stopPropagation();retirerExercice(${e.id})">${iTrash()}</button></td>
+    </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun exercice. Crée le premier avec "+ Nouvel exercice".</td></tr>`;
 }
 
 // ── Sous-onglet "Recensement Métabolique" ─────────────────────────────────
