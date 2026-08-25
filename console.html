@@ -8088,73 +8088,77 @@ function progLogsSemaineChangerBloc(bi, delta){
 // juste présentée en grille dense au lieu d'une carte par exercice.
 // Groupée par séance (bandeau de titre coloré, même code couleur BLOC_COLOR que
 // l'éditeur de programme) avec un espacement discret entre chaque bloc.
-function renderProgLogsGrille(blocs, progByEx, progByExReps){
-  // Regroupe séance par séance (dans l'ordre du programme) en ne gardant que les
-  // exercices ayant au moins une donnée de charge — une séance sans aucune donnée
-  // n'apparaît pas du tout (pas de bandeau vide).
-  const groupes = []; // [{ blocIdx, color, blocLabel, seanceTitre, exos:[ex,...] }]
-  blocs.forEach((b, bi) => {
+// Une table PAR BLOC, semaines numérotées localement (S1 = 1re semaine de CE bloc) — demande
+// coach (2026-08-24) : avec la numérotation globale précédente, le bloc 2 démarrait à "S7" et
+// il fallait scroller loin pour retrouver sa propre semaine 1. Chaque bloc doit se lire de
+// façon indépendante, sans avoir à connaître la durée du bloc précédent.
+function renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset){
+  const blocsHtml = blocs.map((b, bi) => {
     const color = BLOC_COLOR[b.type] || 'var(--hairline)';
     const blocLabel = BLOC_LABELS_COACH[b.type] || b.type || 'Générique';
-    (b.client_programme_seances||[]).forEach(s => {
-      const exos = (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
-      if (exos.length) groupes.push({ blocIdx: bi, color, blocLabel, seanceTitre: s.titre, exos });
-    });
-  });
-  if (!groupes.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
-  const maxSem = Math.max(...groupes.flatMap(g => g.exos.flatMap(ex => Object.keys(progByEx[ex.id]).map(Number))));
-  const semaines = Array.from({length:maxSem}, (_,i)=>i+1);
-  const nbCols = semaines.length + 2; // exercice + semaines + delta
+    const offset = (blocOffset && blocOffset[bi]) || 0;
+    // Regroupe séance par séance, en ne gardant que les exercices ayant au moins une donnée
+    // de charge — une séance sans aucune donnée n'apparaît pas du tout (pas de bandeau vide).
+    const groupes = (b.client_programme_seances||[])
+      .map(s => ({ seanceTitre: s.titre, exos: (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1) }))
+      .filter(g => g.exos.length);
+    if (!groupes.length) return '';
+    const semainesLocales = new Set();
+    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]).forEach(gs => semainesLocales.add(Number(gs) - offset))));
+    const maxSemLocale = Math.max(...semainesLocales);
+    const semaines = Array.from({length: maxSemLocale}, (_,i) => i+1); // valeurs locales 1..N
+    const nbCols = semaines.length + 2; // exercice + semaines + delta
 
-  let lastBlocIdx = null;
-  const rows = groupes.map(g => {
-    const spacer = (lastBlocIdx !== null && g.blocIdx !== lastBlocIdx)
-      ? `<tr><td colspan="${nbCols}" style="padding:0;border:none;height:10px;background:transparent;"></td></tr>` : '';
-    lastBlocIdx = g.blocIdx;
-    const header = `<tr>
-      <td colspan="${nbCols}" style="position:sticky;left:0;background:${g.color}14;border-left:3px solid ${g.color};padding:6px 12px;">
-        <span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${g.color};">${esc(g.blocLabel)}</span>
-        <span style="font-size:12px;font-weight:600;color:var(--text);margin-left:8px;">${esc(g.seanceTitre)}</span>
-        <span style="font-size:11px;color:var(--text-faint);margin-left:6px;">${g.exos.length} exo${g.exos.length>1?'s':''}</span>
-      </td>
-    </tr>`;
-    const exRows = g.exos.map(ex => {
-      const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
-      const groupe = exData ? exData.groupe_musculaire : null;
-      const pts = progByEx[ex.id]||{};
-      const semRenseignees = semaines.filter(s=>pts[s]!=null);
-      const first = semRenseignees.length ? pts[semRenseignees[0]] : null;
-      const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]] : null;
-      const delta = (first!=null && last!=null) ? last-first : null;
-      const deltaStr = delta==null ? '—' : (delta>=0?'+':'')+delta.toFixed(1)+' kg';
-      const deltaColor = delta>0?'#4caf50':delta<0?'var(--critical)':'var(--text-faint)';
-      const cells = semaines.map(s => {
-        const c = pts[s];
-        if (c==null) return `<td style="text-align:center;color:var(--text-faint);font-size:12px;">—</td>`;
-        const r = (progByExReps[ex.id]||{})[s];
-        return `<td style="text-align:center;white-space:nowrap;">
-          <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
-          ${r!=null?`<div style="font-size:10px;color:var(--text-faint);">${esc(String(r))} reps</div>`:''}
-        </td>`;
-      }).join('');
-      return `<tr>
-        <td style="position:sticky;left:0;background:var(--surface);border-left:3px solid ${g.color}55;z-index:1;white-space:nowrap;padding:6px 14px 6px 11px;">
-          <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
-          ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+    const rows = groupes.map(g => {
+      const header = `<tr>
+        <td colspan="${nbCols}" style="position:sticky;left:0;background:${color}14;border-left:3px solid ${color};padding:6px 12px;">
+          <span style="font-size:12px;font-weight:600;color:var(--text);">${esc(g.seanceTitre)}</span>
+          <span style="font-size:11px;color:var(--text-faint);margin-left:6px;">${g.exos.length} exo${g.exos.length>1?'s':''}</span>
         </td>
-        ${cells}
-        <td style="text-align:center;white-space:nowrap;font-weight:700;font-size:12.5px;color:${deltaColor};">${deltaStr}</td>
       </tr>`;
+      const exRows = g.exos.map(ex => {
+        const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
+        const groupe = exData ? exData.groupe_musculaire : null;
+        const pts = progByEx[ex.id]||{};
+        const semRenseignees = semaines.filter(sLoc => pts[sLoc+offset]!=null);
+        const first = semRenseignees.length ? pts[semRenseignees[0]+offset] : null;
+        const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]+offset] : null;
+        const delta = (first!=null && last!=null) ? last-first : null;
+        const deltaStr = delta==null ? '—' : (delta>=0?'+':'')+delta.toFixed(1)+' kg';
+        const deltaColor = delta>0?'#4caf50':delta<0?'var(--critical)':'var(--text-faint)';
+        const cells = semaines.map(sLoc => {
+          const c = pts[sLoc+offset];
+          if (c==null) return `<td style="text-align:center;color:var(--text-faint);font-size:12px;">—</td>`;
+          const r = (progByExReps[ex.id]||{})[sLoc+offset];
+          return `<td style="text-align:center;white-space:nowrap;">
+            <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
+            ${r!=null?`<div style="font-size:10px;color:var(--text-faint);">${esc(String(r))} reps</div>`:''}
+          </td>`;
+        }).join('');
+        return `<tr>
+          <td style="position:sticky;left:0;background:var(--surface);border-left:3px solid ${color}55;z-index:1;white-space:nowrap;padding:6px 14px 6px 11px;">
+            <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
+            ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
+          </td>
+          ${cells}
+          <td style="text-align:center;white-space:nowrap;font-weight:700;font-size:12.5px;color:${deltaColor};">${deltaStr}</td>
+        </tr>`;
+      }).join('');
+      return header + exRows;
     }).join('');
-    return spacer + header + exRows;
+    const headCells = semaines.map(s=>`<th style="text-align:center;font-size:11px;">S${s}</th>`).join('');
+    return `<div class="table-card" style="margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:${color}14;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${color};">${esc(blocLabel)}</span>
+      </div>
+      <div class="table-scroll"><table class="alim-table" style="width:auto;">
+        <thead><tr><th style="position:sticky;left:0;background:var(--surface);z-index:1;">Exercice</th>${headCells}<th style="text-align:center;">Δ</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
   }).join('');
-  const headCells = semaines.map(s=>`<th style="text-align:center;font-size:11px;">S${s}</th>`).join('');
-  return `<div class="table-card">
-    <div class="table-scroll"><table class="alim-table" style="width:auto;">
-      <thead><tr><th style="position:sticky;left:0;background:var(--surface);z-index:1;">Exercice</th>${headCells}<th style="text-align:center;">Δ</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
+  return blocsHtml || `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
 }
 
 function renderProgLogsPage(el){
@@ -8238,7 +8242,7 @@ function renderProgLogsPage(el){
       ${_progLogsView==='semaine' && blocs.length>1 ? `<span style="font-size:11.5px;color:var(--text-faint);margin-left:4px;">${blocs.length} blocs · chacun a sa propre navigation semaine ci-dessous</span>` : ''}
     </div>
 
-    ${_progLogsView === 'grille' ? renderProgLogsGrille(blocs, progByEx, progByExReps) : _progLogsView === 'progression' ? (() => {
+    ${_progLogsView === 'grille' ? renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset) : _progLogsView === 'progression' ? (() => {
       const allEx = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[])));
       const withData = allEx.filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
       if (!withData.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;

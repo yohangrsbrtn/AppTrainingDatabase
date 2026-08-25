@@ -1156,42 +1156,44 @@ function renderPcSuiviPage() {
     }
   });
 
-  const groupes = [];
+  // Une table par bloc, semaines numérotées localement (S1 = 1re semaine de CE bloc) — même
+  // logique que côté console (renderProgLogsGrille) : évite d'avoir à scroller jusqu'à "S7" pour
+  // retrouver la 1re semaine du bloc 2 (demande coach, 2026-08-24).
+  let bodyHtml = '';
+  let aDesDonnees = false;
   blocs.forEach((b, bi) => {
     const color = PC_BLOC_COLOR[b.type] || '#666';
     const label = _pcBlocLabel(b);
-    (b.client_programme_seances||[]).forEach(s => {
-      const exos = (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
-      if (exos.length) groupes.push({ color, label, titre: s.titre, exos });
-    });
-  });
-
-  let bodyHtml;
-  if (!groupes.length) {
-    bodyHtml = `<div class="empty"><div class="empty-text">Pas encore de charges enregistrées — reviens ici une fois quelques séances loggées.</div></div>`;
-  } else {
-    const maxSem = Math.max(...groupes.flatMap(g => g.exos.flatMap(ex => Object.keys(progByEx[ex.id]).map(Number))));
-    const semaines = Array.from({ length: maxSem }, (_, i) => i + 1);
+    const offset = blocOffset[bi] || 0;
+    const groupes = (b.client_programme_seances||[])
+      .map(s => ({ titre: s.titre, exos: (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1) }))
+      .filter(g => g.exos.length);
+    if (!groupes.length) return;
+    aDesDonnees = true;
+    const semainesLocales = new Set();
+    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]).forEach(gs => semainesLocales.add(Number(gs) - offset))));
+    const maxSemLocale = Math.max(...semainesLocales);
+    const semaines = Array.from({ length: maxSemLocale }, (_, i) => i + 1);
     const groupesHtml = groupes.map(g => {
       const rows = g.exos.map(ex => {
         const pts = progByEx[ex.id] || {};
-        const semRenseignees = semaines.filter(s => pts[s] != null);
-        const first = semRenseignees.length ? pts[semRenseignees[0]] : null;
-        const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]] : null;
+        const semRenseignees = semaines.filter(sLoc => pts[sLoc+offset] != null);
+        const first = semRenseignees.length ? pts[semRenseignees[0]+offset] : null;
+        const last = semRenseignees.length ? pts[semRenseignees[semRenseignees.length-1]+offset] : null;
         const delta = (first != null && last != null) ? last - first : null;
         const deltaStr = delta == null ? '—' : (delta >= 0 ? '+' : '') + delta.toFixed(1) + 'kg';
         const deltaColor = delta > 0 ? '#1D9E75' : delta < 0 ? '#e05c5c' : '#8892a4';
-        const cells = semaines.map(s => {
-          const c = pts[s];
+        const cells = semaines.map(sLoc => {
+          const c = pts[sLoc+offset];
           if (c == null) return `<td style="text-align:center;color:#5a6172;font-size:12px;padding:6px 10px;">—</td>`;
-          const r = (progByExReps[ex.id] || {})[s];
+          const r = (progByExReps[ex.id] || {})[sLoc+offset];
           return `<td style="text-align:center;white-space:nowrap;padding:6px 10px;">
             <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
             ${r != null ? `<div style="font-size:10px;color:#8892a4;">${esc(String(r))} reps</div>` : ''}
           </td>`;
         }).join('');
         return `<tr>
-          <td style="position:sticky;left:0;background:#161923;border-left:3px solid ${g.color}88;white-space:nowrap;padding:6px 12px 6px 9px;">
+          <td style="position:sticky;left:0;background:#161923;border-left:3px solid ${color}88;white-space:nowrap;padding:6px 12px 6px 9px;">
             <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
           </td>
           ${cells}
@@ -1199,24 +1201,31 @@ function renderPcSuiviPage() {
         </tr>`;
       }).join('');
       return `<tr>
-        <td colspan="${semaines.length + 2}" style="position:sticky;left:0;background:${g.color}22;border-left:3px solid ${g.color};padding:6px 12px;">
-          <span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${g.color};">${esc(g.label)}</span>
-          <span style="font-size:12px;font-weight:600;color:#e8eaf0;margin-left:8px;">${esc(g.titre)}</span>
+        <td colspan="${semaines.length + 2}" style="position:sticky;left:0;background:${color}22;border-left:3px solid ${color};padding:6px 12px;">
+          <span style="font-size:12px;font-weight:600;color:#e8eaf0;">${esc(g.titre)}</span>
         </td>
-      </tr>${rows}
-      <tr><td colspan="${semaines.length + 2}" style="height:8px;padding:0;border:none;"></td></tr>`;
+      </tr>${rows}`;
     }).join('');
     const headCells = semaines.map(s => `<th style="text-align:center;font-size:11px;padding:6px 10px;color:#8892a4;">S${s}</th>`).join('');
-    bodyHtml = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;">
-      <table style="border-collapse:collapse;width:auto;">
-        <thead><tr>
-          <th style="position:sticky;left:0;background:#161923;text-align:left;font-size:11px;padding:6px 12px 6px 9px;color:#8892a4;">Exercice</th>
-          ${headCells}
-          <th style="text-align:center;font-size:11px;padding:6px 10px;color:#8892a4;">Δ</th>
-        </tr></thead>
-        <tbody>${groupesHtml}</tbody>
-      </table>
+    bodyHtml += `<div style="margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 2px;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${color};">${esc(label)}</span>
+      </div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;">
+        <table style="border-collapse:collapse;width:auto;">
+          <thead><tr>
+            <th style="position:sticky;left:0;background:#161923;text-align:left;font-size:11px;padding:6px 12px 6px 9px;color:#8892a4;">Exercice</th>
+            ${headCells}
+            <th style="text-align:center;font-size:11px;padding:6px 10px;color:#8892a4;">Δ</th>
+          </tr></thead>
+          <tbody>${groupesHtml}</tbody>
+        </table>
+      </div>
     </div>`;
+  });
+  if (!aDesDonnees) {
+    bodyHtml = `<div class="empty"><div class="empty-text">Pas encore de charges enregistrées — reviens ici une fois quelques séances loggées.</div></div>`;
   }
 
   return `<div id="app">
