@@ -9637,6 +9637,7 @@ function renderEditeurDietePage(el) {
         <div style="font-weight:700;font-size:15px;">${titre}</div>
       </div>
       ${_ficheEditClientId ? `<button class="btn" onclick="creerTemplateDepuisDieteClient()" title="Crée une copie indépendante de cette diète dans Diètes → Templates, sans toucher à la diète du client">📋 Créer un template</button>` : ''}
+      <button class="btn" onclick="_reinitialiserModifieDiete()" title="Décoche tous les aliments marqués 'modifié' (pastille client) — utile en début de nouvelle semaine">🔄 Réinitialiser les modifs</button>
       <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
     </div>
     <div style="max-width:720px;padding:20px 24px;">
@@ -9793,6 +9794,19 @@ function alimChangerQuantite(ri, ai, valeur, slot){
 
 function alimToggleModifie(ri, ai, checked, slot){
   _dieteEnEdition(slot).repas[ri].aliments[ai].modifie = checked;
+}
+
+// Décoche en masse tous les aliments "modifié" (pastille visible côté client) — demandé par le
+// coach pour repartir à zéro en début de semaine plutôt que de décocher case par case les
+// ajustements accumulés des semaines précédentes. Ne sauvegarde rien tant que le coach ne clique
+// pas "Enregistrer" (même logique que toute autre édition en mémoire de cet éditeur).
+function _reinitialiserModifieDiete(slot){
+  const tpl = _dieteEnEdition(slot);
+  if (!tpl) return;
+  let n = 0;
+  (tpl.repas||[]).forEach(r => (r.aliments||[]).forEach(a => { if (a.modifie) { a.modifie = false; n++; } }));
+  if (!n) return;
+  _reRenderDieteEditeur(slot);
 }
 
 // Réordonner les aliments d'un repas par glisser-déposer — même pattern que
@@ -10243,6 +10257,7 @@ function renderEditeurDieteComparePage(el){
         <div style="font-weight:700;font-size:15px;">${esc(A.nom)} ⇄ ${esc(B.nom)}</div>
       </div>
       <div id="dcErr" style="color:var(--critical);font-size:12px;display:none;"></div>
+      <button class="btn" onclick="_reinitialiserModifieDiete('A');_reinitialiserModifieDiete('B');" title="Décoche tous les aliments marqués 'modifié' des 2 diètes — utile en début de nouvelle semaine">🔄 Réinitialiser les modifs</button>
       <button class="btn primary" id="dcSaveBtn" onclick="sauvegarderDieteComparee()">Enregistrer les 2 diètes</button>
     </div>
     <div id="dc-cols-row" style="display:flex;">
