@@ -4104,7 +4104,7 @@ function _majExercicesListe(){
   const tbody = document.getElementById('progrExoTbody');
   if (tbody) tbody.innerHTML = list.map(e => `
     <tr onclick="ouvrirFormExercice(${e.id})">
-      <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;" alt="">` : '—'}</td>
+      <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" onclick="event.stopPropagation();ouvrirPhotoLightbox([{url:'${esc(e.gif_url)}'}],0)" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;cursor:pointer;" alt="">` : '—'}</td>
       <td style="font-weight:600;">${esc(e.nom)}</td>
       <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
       <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
