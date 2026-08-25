@@ -7194,15 +7194,27 @@ function renderFicheProgTab(c){
     </div>` : ''}`;
 }
 
+// Notifier en une fois toutes les diètes actives d'un client (ex: Jour On + Jour Off modifiées
+// ensemble) — évite d'envoyer une notif par diète quand le coach vient d'ajuster les deux à la
+// suite (demande coach 2026-08-24). Liste les noms "A et B" (2) ou "A, B et C" (3+).
+function _notifierToutesDietes(clientId, clientNom, noms){
+  const liste = noms.length <= 1 ? noms.join('')
+    : noms.slice(0,-1).join(', ') + ' et ' + noms[noms.length-1];
+  ouvrirModalNotifier(clientId, clientNom, 'Tes diètes ont été mises à jour !',
+    `Va jeter un œil à tes diètes « ${liste} », elles viennent d'être mises à jour.`);
+}
+
 function renderFicheDieteTab(c){
   const dietes = ficheData.tous_dietes || [];
   const actives  = dietes.filter(d=>d.actif);
   const archives = dietes.filter(d=>!d.actif);
+  const nomsActivesJs = actives.map(d=>esc(d.nom||'Diète sans nom').replace(/'/g,"\\'")).map(n=>`'${n}'`).join(',');
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-muted);">${actives.length} diète${actives.length>1?'s':''} assignée${actives.length>1?'s':''}</div>
       <div style="display:flex;gap:8px;">
         ${dietes.length >= 2 ? `<button class="btn" onclick="ouvrirComparerDietes('${c.id}')" title="Éditer 2 diètes côte à côte (ex: Jour On / Jour Off)">⇄ Comparer 2 diètes</button>` : ''}
+        ${actives.length >= 2 ? `<button class="btn" onclick="_notifierToutesDietes('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}',[${nomsActivesJs}])" title="Notifier pour toutes les diètes actives en une seule fois">🔔 Notifier tout</button>` : ''}
         <button class="btn" onclick="ouvrirCreerDietePourClient('${c.id}')">+ Créer</button>
         <button class="btn primary" onclick="ouvrirAssignerDiete('${c.id}')">+ Assigner</button>
       </div>
