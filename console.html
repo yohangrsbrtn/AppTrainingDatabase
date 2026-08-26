@@ -662,6 +662,8 @@ let recettesCoachData = null;
 let recetteEnEdition = null;
 let alimentsCoachData = null;   // null=pas chargé, []+=chargé
 let alimentsCoachErr = null;    // message d'erreur si chargement échoué
+let ciqualData = null;          // base CIQUAL (ANSES) — null=pas chargé, table peut ne pas encore exister
+let ciqualErr = null;
 let alimBaseSearch = '';
 let alimBaseCat = 'all';
 let alimBaseSource = 'coach';   // 'coach' | 'off'
@@ -3077,6 +3079,15 @@ const ALIM_CATEGORIES = ['Viandes & poissons','Produits laitiers','Céréales & 
 
 async function chargerAlimentsCoach(){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?order=nom.asc`, { headers: supaHeaders() });
+  if (!res.ok) throw new Error('supabase_' + res.status);
+  return res.json();
+}
+
+// Base CIQUAL (ANSES) — 3484 aliments bruts/génériques, macros + vitamines + minéraux, importée
+// une fois depuis data.gouv.fr (Licence Ouverte). Chargée en lazy comme alimentsCoachData, mais
+// tolère l'absence de table (import pas encore fait) sans bloquer le reste du picker.
+async function chargerCiqual(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/ciqual_aliments?order=nom.asc`, { headers: supaHeaders() });
   if (!res.ok) throw new Error('supabase_' + res.status);
   return res.json();
 }
@@ -9871,7 +9882,7 @@ function _renderModalAjoutAliment(){
     modal.onclick = e => { if(e.target===modal) modal.remove(); };
     document.body.appendChild(modal);
   }
-  const baseList = alimentsCoachData || [];
+  const baseReady = alimentsCoachData !== null && (ciqualData !== null || ciqualErr);
   modal.innerHTML = `
     <div class="modal-box" style="max-width:460px;">
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
@@ -9879,7 +9890,7 @@ function _renderModalAjoutAliment(){
         ${ajoutAlimRI !== null && _dieteEnEdition(ajoutAlimSlot)?.repas?.[ajoutAlimRI] ? `<span style="font-size:11px;color:var(--text-faint);">→ ${esc(_dieteEnEdition(ajoutAlimSlot).repas[ajoutAlimRI].nom)}</span>` : ''}
       </div>
       <div class="modal-tabs">
-        <button class="modal-tab ${ajoutAlimTab==='base'?'active':''}" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">📦 Base coach</button>
+        <button class="modal-tab ${ajoutAlimTab==='base'?'active':''}" onclick="ajoutAlimTab='base';_renderModalAjoutAliment()">📦 Base coach + CIQUAL</button>
         <button class="modal-tab ${ajoutAlimTab==='off'?'active':''}" onclick="ajoutAlimTab='off';_renderModalAjoutAliment()">🌍 Open Food Facts</button>
         <button class="modal-tab ${ajoutAlimTab==='manuel'?'active':''}" onclick="ajoutAlimTab='manuel';_renderModalAjoutAliment()">✏️ Manuel</button>
       </div>
@@ -9891,18 +9902,8 @@ function _renderModalAjoutAliment(){
             <br><button class="btn" style="margin-top:6px;font-size:11px;" onclick="alimentsCoachData=null;alimentsCoachErr=null;ajoutAlimTab='base';chargerAlimentsCoach().then(d=>{alimentsCoachData=d;_renderModalAjoutAliment();}).catch(e=>{alimentsCoachErr=e.message;_renderModalAjoutAliment();})">Réessayer</button>
           </div>` : ''}
         <input id="aBaseSearch" type="text" placeholder="Rechercher dans la base…" oninput="_filtrerBaseAlim(this.value)" style="width:100%;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-family:inherit;margin-bottom:8px;">
-        ${alimentsCoachData === null && !alimentsCoachErr ? `<div style="text-align:center;padding:20px;"><div class="spin" style="margin:auto;"></div></div>` : ''}
-        <div class="alim-pick-list" id="aBaseList">
-          ${baseList.map(a => `
-            <div class="alim-pick-row" onclick="_selectionnerAlimBase(${a.id})">
-              <div>
-                <div class="alim-pick-nom">${esc(a.nom)}</div>
-                ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
-              </div>
-              <div class="alim-pick-macros">${Math.round(a.kcal_par_100g||0)} kcal · P${Math.round((a.prot_par_100g||0)*10)/10} G${Math.round((a.glu_par_100g||0)*10)/10} L${Math.round((a.lip_par_100g||0)*10)/10}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></div>
-            </div>`).join('')}
-          ${baseList.length===0&&alimentsCoachData!==null?`<div style="text-align:center;padding:20px;color:var(--text-faint);">Base vide — ajoute des aliments depuis la page "Base alimentaire".</div>`:''}
-        </div>
+        ${!baseReady ? `<div style="text-align:center;padding:20px;"><div class="spin" style="margin:auto;"></div></div>` : ''}
+        <div class="alim-pick-list" id="aBaseList">${_renderAlimBaseRows('')}</div>
         <div id="picker-flash" style="font-size:11.5px;color:var(--success);min-height:18px;transition:opacity .4s;opacity:0;margin-top:6px;"></div>
       ` : ajoutAlimTab === 'off' ? `
         <div style="display:flex;gap:8px;margin-bottom:8px;">
@@ -9937,30 +9938,68 @@ function _renderModalAjoutAliment(){
       .then(d => { alimentsCoachData = d; _renderModalAjoutAliment(); })
       .catch(e => { alimentsCoachErr = e.message; _renderModalAjoutAliment(); });
   }
+  // ciqual_aliments peut ne pas encore exister (import pas encore fait) — échec silencieux,
+  // le picker reste utilisable avec juste la base coach dans ce cas (voir ciqualErr).
+  if (ajoutAlimTab === 'base' && ciqualData === null && !ciqualErr){
+    chargerCiqual()
+      .then(d => { ciqualData = d; _renderModalAjoutAliment(); })
+      .catch(e => { ciqualErr = e.message; _renderModalAjoutAliment(); });
+  }
   if (ajoutAlimTab === 'base') setTimeout(()=>document.getElementById('aBaseSearch')?.focus(), 50);
   if (ajoutAlimTab === 'off') setTimeout(()=>document.getElementById('aOffSearch')?.focus(), 50);
   if (ajoutAlimTab === 'manuel') setTimeout(()=>document.getElementById('aNom')?.focus(), 50);
 }
 
-function _filtrerBaseAlim(q){
-  const list = document.getElementById('aBaseList');
-  if (!list || !alimentsCoachData) return;
-  const ql = q.toLowerCase();
-  const filtered = ql ? alimentsCoachData.filter(a=>a.nom.toLowerCase().includes(ql)) : alimentsCoachData;
-  list.innerHTML = filtered.map(a => `
+// Fusionne base coach + CIQUAL dans une seule liste de résultats, chaque ligne taguée par sa
+// source (badge coloré) — demande coach (2026-08-26) : voir les deux bases d'un coup plutôt que
+// de devoir switcher d'onglet. CIQUAL toujours présenté en second (la base coach, personnalisée
+// par le coach, prime en cas de doublon de nom).
+function _renderAlimBaseRows(q){
+  const ql = (q||'').toLowerCase();
+  const coach = (alimentsCoachData||[]).filter(a=>!ql||a.nom.toLowerCase().includes(ql));
+  const ciqual = (ciqualData||[]).filter(a=>!ql||a.nom.toLowerCase().includes(ql));
+  const rowsCoach = coach.map(a => `
     <div class="alim-pick-row" onclick="_selectionnerAlimBase(${a.id})">
       <div>
         <div class="alim-pick-nom">${esc(a.nom)}</div>
-        ${a.categorie?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</div>`:''}
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+          <span style="font-size:9px;font-weight:700;color:#378ADD;background:#378ADD18;border:1px solid #378ADD44;border-radius:4px;padding:1px 5px;">🧑‍🍳 base coach</span>
+          ${a.categorie?`<span style="font-size:10.5px;color:var(--text-faint);">${esc(a.categorie)}</span>`:''}
+        </div>
       </div>
-      <div class="alim-pick-macros">${Math.round(a.kcal_par_100g||0)} kcal · P${Math.round((a.prot_par_100g||0)*10)/10} G${Math.round((a.glu_par_100g||0)*10)/10} L${Math.round((a.lip_par_100g||0)*10)/10}</div>
-    </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text-faint);">Aucun résultat.</div>`;
+      <div class="alim-pick-macros">${Math.round(a.kcal_par_100g||0)} kcal · P${Math.round((a.prot_par_100g||0)*10)/10} G${Math.round((a.glu_par_100g||0)*10)/10} L${Math.round((a.lip_par_100g||0)*10)/10}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">${a.unite&&a.unite!=='g'?'/'+a.unite:'/100g'}</span></div>
+    </div>`).join('');
+  const rowsCiqual = ciqual.map(a => `
+    <div class="alim-pick-row" onclick="_selectionnerAlimCiqual(${a.id})">
+      <div>
+        <div class="alim-pick-nom">${esc(a.nom)}</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+          <span style="font-size:9px;font-weight:700;color:#1D9E75;background:#1D9E7518;border:1px solid #1D9E7544;border-radius:4px;padding:1px 5px;">🇫🇷 base CIQUAL</span>
+          ${a.groupe?`<span style="font-size:10.5px;color:var(--text-faint);">${esc(a.groupe)}</span>`:''}
+        </div>
+      </div>
+      <div class="alim-pick-macros">${Math.round(a.kcal_100g||0)} kcal · P${Math.round((a.prot_100g||0)*10)/10} G${Math.round((a.glucides_100g||0)*10)/10} L${Math.round((a.lipides_100g||0)*10)/10}<span style="font-size:9px;color:var(--text-faint);margin-left:3px;">/100g</span></div>
+    </div>`).join('');
+  const rows = rowsCoach + rowsCiqual;
+  return rows || `<div style="text-align:center;padding:20px;color:var(--text-faint);">${ql?'Aucun résultat.':'Base vide — ajoute des aliments depuis la page "Base alimentaire".'}</div>`;
+}
+
+function _filtrerBaseAlim(q){
+  const list = document.getElementById('aBaseList');
+  if (!list) return;
+  list.innerHTML = _renderAlimBaseRows(q);
 }
 
 function _selectionnerAlimBase(id){
-  const a = alimentsCoachData.find(x=>x.id===id);
+  const a = (alimentsCoachData||[]).find(x=>x.id===id);
   if (!a) return;
   _ouvrirSaisieQuantite(a.nom, a.kcal_par_100g, a.prot_par_100g, a.glu_par_100g, a.lip_par_100g, a.unite||'g');
+}
+
+function _selectionnerAlimCiqual(id){
+  const a = (ciqualData||[]).find(x=>x.id===id);
+  if (!a) return;
+  _ouvrirSaisieQuantite(a.nom, a.kcal_100g, a.prot_100g, a.glucides_100g, a.lipides_100g, 'g');
 }
 
 async function _rechercherOFF(){

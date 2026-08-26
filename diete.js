@@ -388,12 +388,16 @@ async function sbResoudreDieteDetail(clientDieteId) {
 }
 
 async function sbChargerBaseAliments() {
-  const [coachRes, commRes] = await Promise.all([
+  const [coachRes, commRes, ciqualRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g&order=nom.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_100g,prot_par_100g,glu_par_100g,sucres_par_100g,fibres_par_100g,lip_par_100g,ags_par_100g,code_barre,valide&order=nom.asc`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_100g,prot_par_100g,glu_par_100g,sucres_par_100g,fibres_par_100g,lip_par_100g,ags_par_100g,code_barre,valide&order=nom.asc`, { headers: supaHeaders() }),
+    // ciqual_aliments (base ANSES officielle, macros + vitamines/minéraux) — table peut ne pas
+    // encore exister selon l'avancement de l'import, échec silencieux dans ce cas (voir catch).
+    fetch(`${SUPABASE_URL}/rest/v1/ciqual_aliments?select=id,nom,kcal_100g,prot_100g,glucides_100g,lipides_100g,sucres_100g,fibres_100g,ags_100g&order=nom.asc`, { headers: supaHeaders() }).catch(()=>null),
   ]);
   const coach = coachRes.ok ? await coachRes.json() : [];
   const comm  = commRes.ok  ? await commRes.json()  : [];
+  const ciqual = (ciqualRes && ciqualRes.ok) ? await ciqualRes.json() : [];
   // Colonnes stockées "pour 100g" — reconverties ici en équivalent "par
   // gramme" (÷100), le reste du fichier (kcal/prot/glu/lip = valeur par
   // gramme à multiplier par la quantité) n'a pas besoin de changer. Aliments
@@ -404,7 +408,8 @@ async function sbChargerBaseAliments() {
     // Base coach : pas de détail sucres/fibres/AGS (colonnes inexistantes) — cohérent avec
     // le comportement GAS d'origine (aDetail = a.sucres !== null dans la modale d'ajout).
     coach: coach.map(a => { const d = (a.unite||'g')==='g' ? 100 : 1; return { nom: a.nom, kcal: (a.kcal_par_100g||0)/d, prot: (a.prot_par_100g||0)/d, glu: (a.glu_par_100g||0)/d, lip: (a.lip_par_100g||0)/d, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true }; }),
-    communaute: comm.map(a => ({ nom: a.nom, kcal: (a.kcal_par_100g||0)/100, prot: (a.prot_par_100g||0)/100, glu: (a.glu_par_100g||0)/100, lip: (a.lip_par_100g||0)/100, sucres: a.sucres_par_100g!=null?a.sucres_par_100g/100:null, fibres: a.fibres_par_100g!=null?a.fibres_par_100g/100:null, ags: a.ags_par_100g!=null?a.ags_par_100g/100:null, codeBarre: a.code_barre, source: 'communaute', valide: a.valide }))
+    communaute: comm.map(a => ({ nom: a.nom, kcal: (a.kcal_par_100g||0)/100, prot: (a.prot_par_100g||0)/100, glu: (a.glu_par_100g||0)/100, lip: (a.lip_par_100g||0)/100, sucres: a.sucres_par_100g!=null?a.sucres_par_100g/100:null, fibres: a.fibres_par_100g!=null?a.fibres_par_100g/100:null, ags: a.ags_par_100g!=null?a.ags_par_100g/100:null, codeBarre: a.code_barre, source: 'communaute', valide: a.valide })),
+    ciqual: ciqual.map(a => ({ nom: a.nom, kcal: (a.kcal_100g||0)/100, prot: (a.prot_100g||0)/100, glu: (a.glucides_100g||0)/100, lip: (a.lipides_100g||0)/100, sucres: a.sucres_100g!=null?a.sucres_100g/100:null, fibres: a.fibres_100g!=null?a.fibres_100g/100:null, ags: a.ags_100g!=null?a.ags_100g/100:null, codeBarre: null, source: 'ciqual', valide: true }))
   };
 }
 
@@ -1555,8 +1560,8 @@ async function ouvrirAjoutAliment() {
 }
 
 function _tousLesAliments() {
-  const b = _dBaseAliments || { coach: [], communaute: [] };
-  return (b.coach || []).concat(b.communaute || []);
+  const b = _dBaseAliments || { coach: [], communaute: [], ciqual: [] };
+  return (b.coach || []).concat(b.communaute || []).concat(b.ciqual || []);
 }
 
 function _rechercherAlimentsLocal(query) {
@@ -1579,6 +1584,8 @@ function onRechercheAlimentInput(val) {
 function _renderLigneAliment(a) {
   const badge = a.source === 'coach'
     ? '<span style="font-size:9px;font-weight:700;color:#378ADD;background:#378ADD18;border:1px solid #378ADD44;border-radius:4px;padding:1px 5px;">🧑‍🍳 base</span>'
+    : a.source === 'ciqual'
+    ? '<span style="font-size:9px;font-weight:700;color:#1D9E75;background:#1D9E7518;border:1px solid #1D9E7544;border-radius:4px;padding:1px 5px;">🇫🇷 CIQUAL</span>'
     : `<span style="font-size:9px;font-weight:700;color:#a78bfa;background:#a78bfa18;border:1px solid #a78bfa44;border-radius:4px;padding:1px 5px;">👥 communauté${a.valide ? '' : ' · non validé'}</span>`;
   return `<div onclick="selectionnerAliment('${a.nom.replace(/'/g,"\\'")}','${a.source}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;">
     <div style="min-width:0;">
