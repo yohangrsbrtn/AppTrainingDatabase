@@ -3128,7 +3128,7 @@ function renderBaseSub(el){
         </div>
         <div class="table-card"><div class="table-scroll">
           <table class="alim-table">
-            <thead><tr><th>Nom</th><th>Catégorie</th><th>Kcal/100g</th><th>Prot</th><th>Gluc</th><th>Lip</th><th></th></tr></thead>
+            <thead><tr><th>Nom</th><th>Catégorie</th><th>Kcal/100g</th><th>Prot</th><th>Gluc</th><th>Lip</th><th title="Lien vers la base CIQUAL — donne accès aux vitamines/minéraux dans le résumé micronutriments">🔬 CIQUAL</th><th></th></tr></thead>
             <tbody id="alim-tbody-coach">${_rowsTableCoach()}</tbody>
           </table>
         </div></div>`;
@@ -3182,8 +3182,10 @@ function _rowsTableCoach(){
   if (alimBaseSearch) { const q = alimBaseSearch.toLowerCase(); list = list.filter(a=>a.nom.toLowerCase().includes(q)); }
   if (alimBaseCat !== 'all') list = list.filter(a=>a.categorie===alimBaseCat);
   const total = (alimentsCoachData||[]).length;
-  if (!total) return `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Base vide — clique sur <strong>+ Ajouter</strong> ou importe depuis Open Food Facts.</td></tr>`;
-  return list.length ? list.map(a=>`
+  if (!total) return `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:26px;">Base vide — clique sur <strong>+ Ajouter</strong> ou importe depuis Open Food Facts.</td></tr>`;
+  return list.length ? list.map(a=>{
+    const ciqualLie = a.ciqual_id ? (ciqualData||[]).find(c=>c.id===a.ciqual_id) : null;
+    return `
     <tr>
       <td><strong>${esc(a.nom)}</strong></td>
       <td>${a.categorie?`<span class="alim-cat-badge">${esc(a.categorie)}</span>`:'<span style="color:var(--text-faint)">—</span>'}</td>
@@ -3193,17 +3195,100 @@ function _rowsTableCoach(){
       <td class="mono">G ${Math.round((a.glu_par_100g||0)*10)/10}g</td>
       <td class="mono">L ${Math.round((a.lip_par_100g||0)*10)/10}g</td>
       `; })()}
+      <td style="white-space:nowrap;">
+        ${a.ciqual_id
+          ? `<span style="font-size:10.5px;color:#1D9E75;cursor:pointer;" onclick="ouvrirLienCiqual(${a.id})" title="${ciqualLie?esc(ciqualLie.nom):''}">✅ lié</span>`
+          : `<button class="btn" style="font-size:10.5px;padding:3px 7px;" onclick="ouvrirLienCiqual(${a.id})">🔗 Lier</button>`}
+      </td>
       <td style="white-space:nowrap;text-align:right;">
         <button class="btn" style="font-size:11px;padding:4px 9px;" onclick="ouvrirFormulaireAliment(${a.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--critical);margin-left:4px;" onclick="supprimerAlimentCoach(${a.id})">×</button>
       </td>
-    </tr>`).join('')
-  : `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat pour "<em>${esc(alimBaseSearch)}</em>".</td></tr>`;
+    </tr>`;}).join('')
+  : `<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:26px;">Aucun résultat pour "<em>${esc(alimBaseSearch)}</em>".</td></tr>`;
 }
 
 function _majTableCoach(){
   const tbody = document.getElementById('alim-tbody-coach');
   if (tbody) tbody.innerHTML = _rowsTableCoach();
+}
+
+let _lienCiqualAlimId = null;
+let _lienCiqualRecherche = '';
+
+// Lien manuel base coach → CIQUAL — jamais de rapprochement auto-appliqué : le coach voit une
+// liste filtrée par recherche et choisit explicitement, même logique que pour les gifs
+// d'exercices (préférer aucun lien à un mauvais lien).
+async function ouvrirLienCiqual(alimCoachId){
+  _lienCiqualAlimId = alimCoachId;
+  _lienCiqualRecherche = '';
+  const a = (alimentsCoachData||[]).find(x=>x.id===alimCoachId);
+  if (!a) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-lien-ciqual';
+  overlay.onclick = e => { if (e.target===overlay) overlay.remove(); };
+  const lieActuel = a.ciqual_id ? (ciqualData||[]).find(c=>c.id===a.ciqual_id) : null;
+  overlay.innerHTML = `<div class="modal-box" style="max-width:460px;">
+    <h3 style="margin:0 0 4px;">🔗 Lier à CIQUAL</h3>
+    <div style="font-size:12.5px;color:var(--text-faint);margin-bottom:10px;">${esc(a.nom)}</div>
+    ${lieActuel ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#1D9E7514;border:1px solid #1D9E7544;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+      <span style="font-size:12.5px;">✅ Lié à : <strong>${esc(lieActuel.nom)}</strong></span>
+      <button class="btn" style="font-size:11px;padding:3px 8px;" onclick="_delierCiqual(${alimCoachId})">Délier</button>
+    </div>` : ''}
+    <input id="lienCiqualSearch" type="text" placeholder="Rechercher dans CIQUAL…" value="${esc(a.nom)}" oninput="_lienCiqualRecherche=this.value;_renderLienCiqualListe()" style="width:100%;font-size:16px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-family:inherit;margin-bottom:8px;">
+    <div class="alim-pick-list" id="lienCiqualListe" style="max-height:320px;overflow-y:auto;">${ciqualData===null && !ciqualErr ? `<div style="text-align:center;padding:20px;"><div class="spin" style="margin:auto;"></div></div>` : ''}</div>
+    <div class="modal-actions" style="margin-top:8px;"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-lien-ciqual').remove()">Fermer</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  if (ciqualData === null && !ciqualErr) {
+    try { ciqualData = await chargerCiqual(); } catch(e) { ciqualErr = e.message; }
+  }
+  _lienCiqualRecherche = a.nom;
+  _renderLienCiqualListe();
+  setTimeout(()=>{ const el = document.getElementById('lienCiqualSearch'); if (el) { el.focus(); el.select(); } }, 50);
+}
+
+function _renderLienCiqualListe(){
+  const el = document.getElementById('lienCiqualListe');
+  if (!el) return;
+  if (ciqualErr) { el.innerHTML = `<div style="color:var(--critical);font-size:12px;padding:10px;">Erreur : ${esc(ciqualErr)}</div>`; return; }
+  const q = (_lienCiqualRecherche||'').toLowerCase();
+  const list = (ciqualData||[]).filter(c=>!q||c.nom.toLowerCase().includes(q)).slice(0,80);
+  el.innerHTML = list.map(c => `
+    <div class="alim-pick-row" onclick="_confirmerLienCiqual(${c.id})">
+      <div>
+        <div class="alim-pick-nom">${esc(c.nom)}</div>
+        ${c.groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(c.groupe)}</div>`:''}
+      </div>
+      <div class="alim-pick-macros">${Math.round(c.kcal_100g||0)} kcal · P${Math.round((c.prot_100g||0)*10)/10} G${Math.round((c.glucides_100g||0)*10)/10} L${Math.round((c.lipides_100g||0)*10)/10}</div>
+    </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text-faint);">Aucun résultat.</div>`;
+}
+
+async function _confirmerLienCiqual(ciqualId){
+  const alimId = _lienCiqualAlimId;
+  if (!alimId) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${alimId}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ ciqual_id: ciqualId })
+    });
+    const a = (alimentsCoachData||[]).find(x=>x.id===alimId);
+    if (a) a.ciqual_id = ciqualId;
+    document.getElementById('modal-lien-ciqual')?.remove();
+    _majTableCoach();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function _delierCiqual(alimId){
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?id=eq.${alimId}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ ciqual_id: null })
+    });
+    const a = (alimentsCoachData||[]).find(x=>x.id===alimId);
+    if (a) a.ciqual_id = null;
+    document.getElementById('modal-lien-ciqual')?.remove();
+    _majTableCoach();
+  } catch(e) { alert('Erreur : ' + e.message); }
 }
 
 async function lancerImportSheets(){
@@ -9488,13 +9573,22 @@ function _normNomAliment(s){
   return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
 }
 
-// Agrège les micronutriments d'une diète (variante de base uniquement, comme macrosDiete) en
-// faisant correspondre chaque aliment de la diète à la base CIQUAL par nom normalisé EXACT —
-// jamais d'approximation floue : un aliment non retrouvé tel quel est listé à part et exclu du
-// total plutôt que de risquer un mauvais rapprochement (même principe que pour les gifs d'exercices).
-function _calculerMicronutrimentsDiete(repasArr, ciqualList){
+// Agrège les micronutriments d'une diète (variante de base uniquement, comme macrosDiete).
+// Deux chemins de correspondance, jamais d'approximation floue :
+//  1. Nom de l'aliment de la diète == nom CIQUAL exact (normalisé) — cas des aliments ajoutés
+//     directement depuis l'onglet "base CIQUAL" du picker.
+//  2. Nom de l'aliment de la diète == nom d'un aliment de la base coach qui a été lié
+//     manuellement à une fiche CIQUAL (aliments_coach.ciqual_id, voir ouvrirLienCiqual) — comble
+//     le cas courant où le nom du coach ("Blanc de poulet") ne matche pas la nomenclature
+//     CIQUAL ("Poulet, blanc, cru") mais a été rapproché une fois pour toutes par le coach.
+// Un aliment non retrouvé par l'un ou l'autre chemin est listé à part et exclu du total plutôt
+// que de risquer un mauvais rapprochement (même principe que pour les gifs d'exercices).
+function _calculerMicronutrimentsDiete(repasArr, ciqualList, coachList){
   const index = new Map();
   (ciqualList||[]).forEach(a => { const k = _normNomAliment(a.nom); if (!index.has(k)) index.set(k, a); });
+  const ciqualById = new Map((ciqualList||[]).map(a=>[a.id,a]));
+  const coachIndex = new Map();
+  (coachList||[]).forEach(a => { if (a.ciqual_id) coachIndex.set(_normNomAliment(a.nom), a.ciqual_id); });
   const totaux = {};
   const nonTrouves = new Set();
   let totalKcal = 0;
@@ -9503,7 +9597,9 @@ function _calculerMicronutrimentsDiete(repasArr, ciqualList){
     if (!q) return;
     const d = (a.unite||'g')==='g' ? 100 : 1;
     totalKcal += q * (parseFloat(a.kcal_par_100g!=null?a.kcal_par_100g:a.kcal)||0) / d;
-    const match = index.get(_normNomAliment(a.nom));
+    const nomNorm = _normNomAliment(a.nom);
+    let match = index.get(nomNorm);
+    if (!match) { const cid = coachIndex.get(nomNorm); if (cid) match = ciqualById.get(cid); }
     if (!match) { nonTrouves.add(a.nom); return; }
     const facteur = q / 100; // CIQUAL toujours en valeurs pour 100g
     Object.keys(RNP_ADULTE).forEach(key => {
@@ -9527,7 +9623,7 @@ function _rnpCouleur(pct){
 }
 
 function _renderMicronutrimentsTable(repasArr, sexe){
-  const { totaux, nonTrouves, totalKcal } = _calculerMicronutrimentsDiete(repasArr, ciqualData || []);
+  const { totaux, nonTrouves, totalKcal } = _calculerMicronutrimentsDiete(repasArr, ciqualData || [], alimentsCoachData || []);
   const totalMJ = totalKcal * 0.004184;
   const sx = sexe === 'F' ? 'F' : 'H'; // défaut Homme si sexe non renseigné (affiché explicitement)
   const lignes = Object.entries(RNP_ADULTE).map(([key, def]) => {
@@ -9579,19 +9675,24 @@ async function ouvrirMicronutrimentsDiete(repasArr, clientId){
       sexe = arr[0]?.sexe || null;
     } catch(e) {}
   }
+  const pret = ciqualData !== null && alimentsCoachData !== null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'modal-micronutriments';
   overlay.onclick = e => { if (e.target===overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal-box" style="max-width:520px;">
     <h3 style="margin:0 0 6px;">🔬 Micronutriments</h3>
-    <div id="micronutrimentsBody">${ciqualData===null && !ciqualErr ? `<div style="text-align:center;padding:30px;"><div class="spin" style="margin:auto;"></div></div>` : _renderMicronutrimentsTable(repasArr, sexe)}</div>
+    <div id="micronutrimentsBody">${pret ? _renderMicronutrimentsTable(repasArr, sexe) : `<div style="text-align:center;padding:30px;"><div class="spin" style="margin:auto;"></div></div>`}</div>
     <div class="modal-actions" style="margin-top:10px;"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-micronutriments').remove()">Fermer</button></div>
   </div>`;
   document.body.appendChild(overlay);
+  const maj = () => { const b = document.getElementById('micronutrimentsBody'); if (b && ciqualData!==null && alimentsCoachData!==null) b.innerHTML = _renderMicronutrimentsTable(repasArr, sexe); };
   if (ciqualData === null && !ciqualErr) {
-    chargerCiqual().then(d => { ciqualData = d; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = _renderMicronutrimentsTable(repasArr, sexe); })
+    chargerCiqual().then(d => { ciqualData = d; maj(); })
       .catch(e => { ciqualErr = e.message; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur de chargement CIQUAL : ${esc(e.message)}</div>`; });
+  }
+  if (alimentsCoachData === null && !alimentsCoachErr) {
+    chargerAlimentsCoach().then(d => { alimentsCoachData = d; maj(); }).catch(e => { alimentsCoachErr = e.message; });
   }
 }
 
