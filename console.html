@@ -7047,7 +7047,16 @@ function renderFicheProfilTab(c){
         </div>
         <div class="fiche-field"><label>Date de naissance</label><input id="fNaissance" type="date" value="${esc(p.date_naissance||'')}"></div>
         <div class="fiche-field"><label>Email</label><input id="fEmail" type="email" value="${esc(p.email||'')}"></div>
-        <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="fiche-field"><label>Taille (cm)</label><input id="fTaille" type="number" min="100" max="250" value="${esc(p.taille_cm||'')}"></div>
+          <div class="fiche-field"><label>Sexe <span style="font-weight:400;color:var(--text-faint);">(pour les RNP micronutriments)</span></label>
+            <select id="fSexe">
+              <option value="">—</option>
+              <option value="H" ${p.sexe==='H'?'selected':''}>Homme</option>
+              <option value="F" ${p.sexe==='F'?'selected':''}>Femme</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <div class="fiche-card" style="margin-bottom:0;">
@@ -8819,6 +8828,7 @@ async function sauvegarderFicheSandbox(clientId){
     date_fin_coaching: document.getElementById('fFinCoaching').value || null,
     jour_bilan: document.getElementById('fJourBilan').value || null,
     taille_cm: parseInt(document.getElementById('fTaille').value)||null,
+    sexe: document.getElementById('fSexe')?.value || null,
     objectif: document.getElementById('fObjectif').value.trim() || null,
     steps_cible: parseInt(document.getElementById('fStepsCible').value)||null,
     seances_cible: parseInt(document.getElementById('fSeancesCible').value)||null,
@@ -9424,6 +9434,167 @@ function macrosDiete(repasArr){
   return { kcal:Math.round(kcal), prot:Math.round(prot), glu:Math.round(glu), lip:Math.round(lip) };
 }
 
+// ── Résumé micronutriments (2026-08-27) ──────────────────────────────────
+// Références Nutritionnelles pour la Population (RNP/AS), adultes 18 ans et plus, population
+// générale — Anses, "Les références nutritionnelles en vitamines et minéraux", avis + rapport
+// d'expertise collective, mars 2021 (Tableau 2 = vitamines, Tableau 3 = minéraux ; saisine
+// n°2018-SA-0238). Valeurs reprises telles quelles depuis le PDF officiel, PAS de conversion
+// "sportif" (aucun barème officiel équivalent n'existe pour la plupart des micronutriments —
+// décision assumée de ne pas en inventer un, voir échange avec le coach).
+// Choix retenus quand la table ANSES propose plusieurs paliers :
+//  - Fer femme : palier "pertes menstruelles élevées" (16 mg/j) — le plus prudent par défaut,
+//    faute de pouvoir distinguer automatiquement le statut menstruel/ménopausé d'une cliente.
+//  - Zinc : palier "apport modéré en phytates" (régime mixte courant), pas le palier "élevé".
+//  - Calcium : valeur adulte 25 ans et plus (950 mg/j, la plus fréquente en pratique).
+//  - Vitamines B1 et B3 : la RNP officielle est exprimée par MJ d'énergie consommée (pas une
+//    valeur absolue) — calculée dynamiquement depuis le total kcal de LA diète elle-même
+//    (voir _calculerMicronutrimentsDiete), pas depuis une valeur "moyenne" arbitraire.
+//  - Sodium : pas de RNP (nutriment à risque d'excès, pas de carence) — la valeur indiquée est
+//    le seuil "à ne pas dépasser" (LSS), affichée à part, jamais comme une cible à atteindre.
+//  - Manganèse et fibres : le rapport 2021 ne fixe pas de RNP adulte pour le manganèse — exclu
+//    plutôt que d'inventer un chiffre. Fibres (30g/j) vient des repères PNNS/Anses généraux
+//    (alimentation, pas ce rapport vitamines/minéraux spécifiquement) — indiqué comme tel.
+const RNP_ADULTE = {
+  vit_a_ug:    { label:'Vitamine A',  unite:'µg', H:750,  F:650  },
+  vit_b2_mg:   { label:'Vitamine B2', unite:'mg', H:1.6,  F:1.6  },
+  vit_b5_mg:   { label:'Vitamine B5', unite:'mg', H:6,    F:5    },
+  vit_b6_mg:   { label:'Vitamine B6', unite:'mg', H:1.7,  F:1.6  },
+  vit_b9_ug:   { label:'Vitamine B9 (folates)', unite:'µg', H:330, F:330 },
+  vit_b12_ug:  { label:'Vitamine B12', unite:'µg', H:4,   F:4    },
+  vit_c_mg:    { label:'Vitamine C',  unite:'mg', H:110,  F:110  },
+  vit_d_ug:    { label:'Vitamine D',  unite:'µg', H:15,   F:15   },
+  vit_e_mg:    { label:'Vitamine E',  unite:'mg', H:10,   F:9    },
+  vit_k1_ug:   { label:'Vitamine K1', unite:'µg', H:79,   F:79   },
+  calcium_mg:  { label:'Calcium',     unite:'mg', H:950,  F:950  },
+  fer_mg:      { label:'Fer',         unite:'mg', H:11,   F:16   },
+  magnesium_mg:{ label:'Magnésium',   unite:'mg', H:380,  F:300  },
+  zinc_mg:     { label:'Zinc',        unite:'mg', H:11.7, F:9.3  },
+  potassium_mg:{ label:'Potassium',   unite:'mg', H:3500, F:3500 },
+  phosphore_mg:{ label:'Phosphore',   unite:'mg', H:550,  F:550  },
+  cuivre_mg:   { label:'Cuivre',      unite:'mg', H:1.9,  F:1.5  },
+  iode_ug:     { label:'Iode',        unite:'µg', H:150,  F:150  },
+  selenium_ug: { label:'Sélénium',    unite:'µg', H:70,   F:70   },
+  fibres_100g: { label:'Fibres',      unite:'g',  H:30,   F:30   },
+};
+// Vitamines exprimées en mg/MJ d'énergie consommée dans le rapport Anses (pas une valeur
+// absolue) — calculées ici depuis le total kcal réel de la diète (1 kcal = 0.004184 MJ).
+const RNP_PAR_MJ = {
+  vit_b1_mg: { label:'Vitamine B1', unite:'mg', mgParMJ:0.1 },
+  vit_b3_mg: { label:'Vitamine B3', unite:'mg', mgParMJ:1.6 },
+};
+const SODIUM_LSS_MG = 2300; // seuil à ne pas dépasser, pas une cible
+
+function _normNomAliment(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+// Agrège les micronutriments d'une diète (variante de base uniquement, comme macrosDiete) en
+// faisant correspondre chaque aliment de la diète à la base CIQUAL par nom normalisé EXACT —
+// jamais d'approximation floue : un aliment non retrouvé tel quel est listé à part et exclu du
+// total plutôt que de risquer un mauvais rapprochement (même principe que pour les gifs d'exercices).
+function _calculerMicronutrimentsDiete(repasArr, ciqualList){
+  const index = new Map();
+  (ciqualList||[]).forEach(a => { const k = _normNomAliment(a.nom); if (!index.has(k)) index.set(k, a); });
+  const totaux = {};
+  const nonTrouves = new Set();
+  let totalKcal = 0;
+  (repasArr||[]).forEach(r => (r.repas_aliments||r.aliments||[]).forEach(a => {
+    const q = parseFloat(a.quantite_g)||0;
+    if (!q) return;
+    const d = (a.unite||'g')==='g' ? 100 : 1;
+    totalKcal += q * (parseFloat(a.kcal_par_100g!=null?a.kcal_par_100g:a.kcal)||0) / d;
+    const match = index.get(_normNomAliment(a.nom));
+    if (!match) { nonTrouves.add(a.nom); return; }
+    const facteur = q / 100; // CIQUAL toujours en valeurs pour 100g
+    Object.keys(RNP_ADULTE).forEach(key => {
+      const v = match[key];
+      if (v != null) totaux[key] = (totaux[key]||0) + v*facteur;
+    });
+    Object.keys(RNP_PAR_MJ).forEach(key => {
+      const v = match[key];
+      if (v != null) totaux[key] = (totaux[key]||0) + v*facteur;
+    });
+    if (match.sodium_mg != null) totaux.sodium_mg = (totaux.sodium_mg||0) + match.sodium_mg*facteur;
+  }));
+  return { totaux, nonTrouves: [...nonTrouves], totalKcal };
+}
+
+function _rnpCouleur(pct){
+  if (pct == null) return 'var(--text-faint)';
+  if (pct < 60) return 'var(--critical)';
+  if (pct < 90) return '#f0a500';
+  return '#1D9E75';
+}
+
+function _renderMicronutrimentsTable(repasArr, sexe){
+  const { totaux, nonTrouves, totalKcal } = _calculerMicronutrimentsDiete(repasArr, ciqualData || []);
+  const totalMJ = totalKcal * 0.004184;
+  const sx = sexe === 'F' ? 'F' : 'H'; // défaut Homme si sexe non renseigné (affiché explicitement)
+  const lignes = Object.entries(RNP_ADULTE).map(([key, def]) => {
+    const apport = totaux[key] || 0;
+    const rnp = def[sx];
+    const pct = rnp ? Math.round((apport/rnp)*100) : null;
+    return { label:def.label, apport, rnp, unite:def.unite, pct };
+  }).concat(Object.entries(RNP_PAR_MJ).map(([key, def]) => {
+    const apport = totaux[key] || 0;
+    const rnp = totalMJ ? def.mgParMJ * totalMJ : null;
+    const pct = rnp ? Math.round((apport/rnp)*100) : null;
+    return { label:def.label, apport, rnp, unite:def.unite, pct };
+  }));
+  const rows = lignes.map(l => `
+    <tr>
+      <td>${esc(l.label)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);">${l.apport.toFixed(1)} ${l.unite}</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--text-faint);">${l.rnp!=null?l.rnp.toFixed(1)+' '+l.unite:'—'}</td>
+      <td style="text-align:right;font-weight:700;color:${_rnpCouleur(l.pct)};">${l.pct!=null?l.pct+'%':'—'}</td>
+    </tr>`).join('');
+  const sodiumApport = totaux.sodium_mg || 0;
+  const sodiumRow = `<tr style="opacity:.8;">
+      <td>Sodium <span style="font-size:10px;color:var(--text-faint);">(seuil max, pas une cible)</span></td>
+      <td style="text-align:right;font-family:var(--font-mono);">${sodiumApport.toFixed(0)} mg</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--text-faint);">≤ ${SODIUM_LSS_MG} mg</td>
+      <td style="text-align:right;font-weight:700;color:${sodiumApport>SODIUM_LSS_MG?'var(--critical)':'#1D9E75'};">${sodiumApport>0?Math.round(sodiumApport/SODIUM_LSS_MG*100)+'%':'—'}</td>
+    </tr>`;
+  const nonTrouvesHtml = nonTrouves.length
+    ? `<div style="margin-top:10px;font-size:11.5px;color:var(--text-faint);background:var(--surface-2);border-radius:8px;padding:8px 10px;">⚠️ ${nonTrouves.length} aliment${nonTrouves.length>1?'s':''} non retrouvé${nonTrouves.length>1?'s':''} dans CIQUAL (exclu${nonTrouves.length>1?'s':''} du calcul) : ${nonTrouves.map(esc).join(', ')}</div>`
+    : '';
+  return `
+    <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px;">
+      Références Anses 2021 (adulte, population générale) — ${sexe?('sexe : '+(sx==='H'?'Homme':'Femme')):'sexe non renseigné, référence Homme affichée par défaut'}.
+      Pas de barème "sportif" officiel pour la plupart de ces nutriments — chiffres indicatifs, pas un avis diététique.
+    </div>
+    <table class="alim-table" style="width:100%;">
+      <thead><tr><th>Nutriment</th><th style="text-align:right;">Apport diète</th><th style="text-align:right;">RNP</th><th style="text-align:right;">%</th></tr></thead>
+      <tbody>${rows}${sodiumRow}</tbody>
+    </table>
+    ${nonTrouvesHtml}`;
+}
+
+async function ouvrirMicronutrimentsDiete(repasArr, clientId){
+  let sexe = null;
+  if (clientId) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=sexe`, { headers: supaHeaders() });
+      const arr = res.ok ? await res.json() : [];
+      sexe = arr[0]?.sexe || null;
+    } catch(e) {}
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-micronutriments';
+  overlay.onclick = e => { if (e.target===overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal-box" style="max-width:520px;">
+    <h3 style="margin:0 0 6px;">🔬 Micronutriments</h3>
+    <div id="micronutrimentsBody">${ciqualData===null && !ciqualErr ? `<div style="text-align:center;padding:30px;"><div class="spin" style="margin:auto;"></div></div>` : _renderMicronutrimentsTable(repasArr, sexe)}</div>
+    <div class="modal-actions" style="margin-top:10px;"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-micronutriments').remove()">Fermer</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  if (ciqualData === null && !ciqualErr) {
+    chargerCiqual().then(d => { ciqualData = d; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = _renderMicronutrimentsTable(repasArr, sexe); })
+      .catch(e => { ciqualErr = e.message; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur de chargement CIQUAL : ${esc(e.message)}</div>`; });
+  }
+}
+
 async function renderDietesPage(el){
   el.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Diètes &amp; Recettes</h1></div></div>
@@ -9675,6 +9846,7 @@ function renderEditeurDietePage(el) {
         <div style="font-weight:700;font-size:15px;">${titre}</div>
       </div>
       ${_ficheEditClientId ? `<button class="btn" onclick="creerTemplateDepuisDieteClient()" title="Crée une copie indépendante de cette diète dans Diètes → Templates, sans toucher à la diète du client">📋 Créer un template</button>` : ''}
+      <button class="btn" onclick="ouvrirMicronutrimentsDiete(dieteTplEnEdition.repas.filter(r=>(r.variante_index||0)===0).map(r=>({repas_aliments:r.aliments})),${_ficheEditClientId?`'${_ficheEditClientId}'`:'null'})" title="Vitamines/minéraux estimés de cette diète vs références Anses">🔬 Micronutriments</button>
       <button class="btn" onclick="_reinitialiserModifieDiete()" title="Décoche tous les aliments marqués 'modifié' (pastille client) — utile en début de nouvelle semaine">🔄 Réinitialiser les modifs</button>
       <button class="btn primary" onclick="sauvegarderDieteTemplate()">Enregistrer</button>
     </div>
