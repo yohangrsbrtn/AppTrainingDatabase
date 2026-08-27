@@ -37,6 +37,52 @@ function supaHeaders(extra) {
   return Object.assign({ apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, extra || {});
 }
 
+// ── Historique de l'objectif "séances/semaine" (client_seances_cible_historique) ──────
+// client_profils.seances_cible est un simple entier "en vigueur aujourd'hui" (pratique pour
+// tout ce qui lit la valeur courante : bonus XP au moment de l'envoi d'un bilan, affichage
+// fiche client...). Mais la jauge de progression "séances faites / séances attendues" cumule
+// sur TOUTES les semaines depuis le début du coaching — si on ne se basait que sur la valeur
+// courante, changer l'objectif de 5 à 4 séances aujourd'hui recalculerait rétroactivement
+// toutes les semaines passées comme si le client avait toujours été à 4 (bug signalé par le
+// coach, 2026-08-27 : "je veux que ça reste comptabilisé à 5 séances jusqu'à la date où j'ai
+// changé, puis 4 séances après"). Cette table garde une ligne par changement, datée par
+// date_effet, pour reconstituer semaine par semaine la valeur qui était réellement en vigueur.
+async function chargerSeancesCibleHistorique(clientId){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_seances_cible_historique?client_id=eq.${encodeURIComponent(clientId)}&order=date_effet.asc`, { headers: supaHeaders() });
+  return res.ok ? res.json() : [];
+}
+// Enregistre un changement d'objectif — upsert sur (client_id, date_effet) : si l'objectif est
+// modifié plusieurs fois le même jour, la dernière valeur du jour l'emporte plutôt que
+// d'empiler des lignes ambiguës pour une même date.
+async function enregistrerSeancesCibleHistorique(clientId, valeur, dateEffet){
+  if (valeur == null) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_seances_cible_historique?on_conflict=client_id,date_effet`, {
+      method: 'POST',
+      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: clientId, valeur, date_effet: dateEffet || new Date().toISOString().slice(0,10) })
+    });
+  } catch(e) {}
+}
+// Reconstitue le total de séances attendues sur `nbSemaines` semaines de 7 jours depuis
+// `dateDebutStr`, en utilisant à chaque semaine la valeur d'objectif réellement en vigueur à
+// cette date (dernière ligne de l'historique dont date_effet <= début de la semaine), avec
+// repli sur `defaultCible` pour toute semaine antérieure à la première ligne connue.
+function _seancesAttenduesHistorise(historique, dateDebutStr, nbSemaines, defaultCible){
+  if (!dateDebutStr || !nbSemaines) return (nbSemaines||0) * (defaultCible||0);
+  const debut = new Date(dateDebutStr);
+  if (isNaN(debut)) return nbSemaines * (defaultCible||0);
+  const hist = (historique||[]).filter(h=>h.date_effet).slice().sort((a,b)=>a.date_effet.localeCompare(b.date_effet));
+  let total = 0;
+  for (let i=0;i<nbSemaines;i++){
+    const weekStartStr = new Date(debut.getTime() + i*7*86400000).toISOString().slice(0,10);
+    let valeur = defaultCible || 0;
+    for (const h of hist) { if (h.date_effet <= weekStartStr) valeur = h.valeur; else break; }
+    total += valeur;
+  }
+  return total;
+}
+
 // ── Synchro identité client -> ComptaApp (projet Supabase séparé) ──────
 // Répercute création/statut vers compta_clients (fiche facturation), jamais l'inverse.
 // Ne bloque jamais le flux coach : une erreur réseau ici est avalée (best-effort).

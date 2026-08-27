@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=16"></script>
+<script src="api.js?v=17"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -8933,6 +8933,11 @@ async function sauvegarderFicheSandbox(clientId){
       throw new Error('supabase_'+res.status+(errBody?' — '+errBody.slice(0,300):''));
     }
     ficheData.profil = (await res.json())[0];
+    // Objectif séances/semaine changé : trace la nouvelle valeur en vigueur à partir
+    // d'aujourd'hui dans l'historique daté (voir chargerSeancesCibleHistorique, api.js),
+    // pour que la jauge de progression ne recalcule pas rétroactivement les semaines
+    // passées avec ce nouvel objectif.
+    if (body.seances_cible != null) await enregistrerSeancesCibleHistorique(clientId, body.seances_cible);
     // Synchronise les champs facturation dans data.clients (pas de rechargement complet) —
     // sinon l'espace Facturation resterait périmé tant que la console n'est pas rafraîchie.
     const cSync = data.clients && data.clients.find(x => x.id === clientId);
@@ -9172,11 +9177,12 @@ async function ajouterXpClient(clientId) {
 }
 
 async function chargerClientProgressionXP(clientId){
-  const [progRes, bilansRes, profilRes, seancesRes] = await Promise.all([
+  const [progRes, bilansRes, profilRes, seancesRes, historique] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=date_debut,date_debut_suivi,seances_cible`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?select=client_programme_exercice_id,semaine&client_programme_exercice_id=in.(select+id+from+client_programme_exercices+where+client_programme_id+in+(select+id+from+client_programmes+where+client_id%3Deq.${encodeURIComponent(clientId)}))`, { headers: supaHeaders() }).catch(()=>({ ok:false }))
+    fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?select=client_programme_exercice_id,semaine&client_programme_exercice_id=in.(select+id+from+client_programme_exercices+where+client_programme_id+in+(select+id+from+client_programmes+where+client_id%3Deq.${encodeURIComponent(clientId)}))`, { headers: supaHeaders() }).catch(()=>({ ok:false })),
+    chargerSeancesCibleHistorique(clientId).catch(()=>[])
   ]);
   const [progRows, bilans, profils] = await Promise.all([
     progRes.ok ? progRes.json() : Promise.resolve([]),
@@ -9205,7 +9211,7 @@ async function chargerClientProgressionXP(clientId){
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
   const nbSemaines = (typeof _semainesDepuisDebut === 'function' ? _semainesDepuisDebut(profil.date_debut_suivi || profil.date_debut) : 0) || bilans.length || 1;
   const seancesCible = profil.seances_cible || 4;
-  const seancesAttendues = nbSemaines * seancesCible;
+  const seancesAttendues = _seancesAttenduesHistorise(historique, profil.date_debut_suivi || profil.date_debut, nbSemaines, seancesCible);
   const bilansAttendus = nbSemaines;
   const pctSeances = seancesAttendues > 0 ? Math.min(100, Math.round(seancesValidees / seancesAttendues * 100)) : 0;
   const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;

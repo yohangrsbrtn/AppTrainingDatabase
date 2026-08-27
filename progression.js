@@ -26,10 +26,11 @@ function getTierColors(tier) {
 
 async function chargerProgressionSupabase() {
   const clientId = getClient();
-  const [profilRes, bilansRes, progRes] = await Promise.all([
+  const [profilRes, bilansRes, progRes, historique] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
     fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() })
+    fetch(`${SUPABASE_URL}/rest/v1/client_progression?client_id=eq.${encodeURIComponent(clientId)}`, { headers: supaHeaders() }),
+    chargerSeancesCibleHistorique(clientId).catch(()=>[])
   ]);
   const [profils, bilans, progRows] = await Promise.all([profilRes.json(), bilansRes.json(), progRes.ok ? progRes.json() : Promise.resolve([])]);
   const profil  = profils[0]  || {};
@@ -89,7 +90,7 @@ async function chargerProgressionSupabase() {
   // assigné d'objectif séances/semaine (client_profils.seances_cible).
   const nbSemaines = _semainesDepuisDebut(profil.date_debut_suivi || profil.date_debut) || bilans.length || 1;
   const seancesCible = profil.seances_cible || 4;
-  const seancesAttendues = nbSemaines * seancesCible;
+  const seancesAttendues = _seancesAttenduesHistorise(historique, profil.date_debut_suivi || profil.date_debut, nbSemaines, seancesCible);
   const bilansAttendus = nbSemaines;
   const pctSeances = seancesAttendues > 0 ? Math.min(100, Math.round(seancesValidees / seancesAttendues * 100)) : 0;
   const pctBilans = bilansAttendus > 0 ? Math.min(100, Math.round(bilansValidies / bilansAttendus * 100)) : 0;
