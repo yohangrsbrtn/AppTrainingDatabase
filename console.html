@@ -657,6 +657,7 @@ let dieteTemplatesData = null;
 let dieteTplEnEdition = null;
 let _dieteCompare = { A: null, B: null }; // mode "Comparer 2 diètes" — voir ouvrirEditeurDieteCompare
 let _dieteCompareClientId = null;
+let _dieteRepasCollapsed = new Set(); // repas repliés dans l'éditeur diète (clé "slot-ri"), pour fluidifier le drag&drop (même logique que _cpCollapsed côté programmes)
 let dietesPageTab = 'templates'; // 'templates' | 'recettes'
 let recettesCoachData = null;
 let recetteEnEdition = null;
@@ -9778,6 +9779,15 @@ function _dieteEnEdition(slot){ return slot ? _dieteCompare[slot] : dieteTplEnEd
 function _slotSuffix(slot){ return slot ? '-'+slot : ''; }
 function _reRenderDieteEditeur(slot){ _updateRepasBlocsDom(slot); }
 
+// Replie/déplie un repas (même pattern que cpToggleSeance côté éditeur programme) — demandé par
+// le coach pour fluidifier le drag&drop des repas : un repas replié tient sur une ligne, donc
+// plus facile à glisser précisément à la bonne position qu'un bloc entier avec tous ses aliments.
+function dieteToggleRepasCollapse(ri, slot){
+  const k = (slot||'')+'-'+ri;
+  _dieteRepasCollapsed.has(k) ? _dieteRepasCollapsed.delete(k) : _dieteRepasCollapsed.add(k);
+  _reRenderDieteEditeur(slot);
+}
+
 async function ouvrirEditeurDiete(id){
   _dietNavBack = 'dietes';
   if (id) {
@@ -9903,20 +9913,26 @@ function _renderDieteBlocsHtml(slot){
     const blocksHtml = variants.map(r => {
       const ri = r._ri;
       const isVariante = (r.variante_index||0) > 0;
+      const collapsed = _dieteRepasCollapsed.has((slot||'')+'-'+ri);
+      const alimCount = (r.aliments||[]).length;
       return `
       <div class="repas-block" style="${isVariante ? 'margin-left:16px;border-left:3px solid #a78bfa;padding-left:4px;background:linear-gradient(90deg,#a78bfa1f,var(--surface-2) 24px);' : ''}">
-        <div class="repas-head">
-          ${isVariante ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa26;border:1px solid #a78bfa66;border-radius:5px;padding:2px 7px;margin-right:6px;flex-shrink:0;white-space:nowrap;letter-spacing:.03em;">≡ ÉQUIVALENT</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi}${slotArg})" ondragend="repasOnDragEnd()" title="Glisser pour réordonner ce repas">⠿</span>`}
-          <input type="text" value="${esc(r.nom)}" onchange="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].nom=this.value" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
-          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="dupliquerRepas(${ri}${slotArg})" title="Dupliquer en équivalence (garde les mêmes aliments)">${iCopy()}</button>
-          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
+        <div class="repas-head" style="cursor:pointer;" onclick="dieteToggleRepasCollapse(${ri}${slotArg})">
+          ${isVariante ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;background:#a78bfa26;border:1px solid #a78bfa66;border-radius:5px;padding:2px 7px;margin-right:6px;flex-shrink:0;white-space:nowrap;letter-spacing:.03em;">≡ ÉQUIVALENT</span>` : `<span class="drag-handle" draggable="true" ondragstart="repasOnDragStart(event,${gi}${slotArg})" ondragend="repasOnDragEnd()" onclick="event.stopPropagation()" title="Glisser pour réordonner ce repas">⠿</span>`}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;transition:transform .15s;transform:rotate(${collapsed?'-90':'0'}deg);"><polyline points="6 9 12 15 18 9"/></svg>
+          <input type="text" value="${esc(r.nom)}" onchange="_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].nom=this.value" onclick="event.stopPropagation()" style="flex:1;background:var(--surface-3);border:1px solid transparent;border-radius:var(--radius-sm);padding:4px 8px;color:var(--text);font-size:${isVariante?'12':'13'}px;font-weight:700;font-family:inherit;">
+          ${collapsed ? `<span style="font-size:11px;color:var(--text-faint);flex-shrink:0;">${alimCount} aliment${alimCount>1?'s':''}</span>` : ''}
+          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="event.stopPropagation();dupliquerRepas(${ri}${slotArg})" title="Dupliquer en équivalence (garde les mêmes aliments)">${iCopy()}</button>
+          <button class="icon-btn" style="width:22px;height:22px;flex-shrink:0;" onclick="event.stopPropagation();supprimerRepas(${ri}${slotArg})">${iTrash()}</button>
         </div>
-        <div style="padding:2px 14px 6px;">
-          <textarea rows="1" data-repas-comment placeholder="💬 Commentaire pour le client (ex: ajouter de la levure)" oninput="rmAutoGrow(this);_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].commentaire=this.value" style="width:100%;background:transparent;border:1px dashed var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-muted);font-size:12px;font-family:inherit;box-sizing:border-box;resize:none;overflow:hidden;min-height:30px;">${esc(r.commentaire||'')}</textarea>
-        </div>
-        <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
-        <div style="padding:8px 14px;">
-          <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri}${slotArg})">+ Ajouter des aliments</button>
+        <div style="display:${collapsed?'none':'block'};">
+          <div style="padding:2px 14px 6px;">
+            <textarea rows="1" data-repas-comment placeholder="💬 Commentaire pour le client (ex: ajouter de la levure)" oninput="rmAutoGrow(this);_dieteEnEdition(${slotArgFirst||'null'}).repas[${ri}].commentaire=this.value" style="width:100%;background:transparent;border:1px dashed var(--hairline);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-muted);font-size:12px;font-family:inherit;box-sizing:border-box;resize:none;overflow:hidden;min-height:30px;">${esc(r.commentaire||'')}</textarea>
+          </div>
+          <div id="alim-list-${ri}${_slotSuffix(slot)}">${_renderAlimListHtml(ri, slot)}</div>
+          <div style="padding:8px 14px;">
+            <button class="btn" style="font-size:11.5px;padding:5px 10px;width:100%;" onclick="ouvrirAjoutAliment(${ri}${slotArg})">+ Ajouter des aliments</button>
+          </div>
         </div>
       </div>`;
     }).join('');
