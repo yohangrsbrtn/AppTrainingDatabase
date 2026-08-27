@@ -9789,6 +9789,7 @@ function dieteToggleRepasCollapse(ri, slot){
 }
 
 async function ouvrirEditeurDiete(id){
+  _dieteRepasCollapsed.clear();
   _dietNavBack = 'dietes';
   if (id) {
     const tpl = dieteTemplatesData.find(t=>t.id===id);
@@ -10573,6 +10574,7 @@ async function _chargerDieteTplPourCompare(clientDieteId){
 }
 
 async function ouvrirEditeurDieteCompare(clientId, clientDieteIdA, clientDieteIdB){
+  _dieteRepasCollapsed.clear();
   const [a, b] = await Promise.all([_chargerDieteTplPourCompare(clientDieteIdA), _chargerDieteTplPourCompare(clientDieteIdB)]);
   _dieteCompare = { A:a, B:b };
   _dieteCompareClientId = clientId;
@@ -12888,6 +12890,7 @@ let _ficheEditClientId = null;   // clientId en cours d'édition diète
 let _ficheEditClientDieteId = null; // client_dietes.id en cours d'édition — pour resynchroniser son nom après renommage du template
 
 function ouvrirCreerDietePourClient(clientId) {
+  _dieteRepasCollapsed.clear();
   _ficheCreateClientId = clientId;
   _dietNavBack = 'fiche-client';
   dieteTplEnEdition = { id:null, nom:'', description:'', repas:[{ nom:'Repas 1', ordre:0, variante_index:0, aliments:[] }] };
@@ -12936,6 +12939,7 @@ async function sauvegarderDietePourClient() {
 }
 
 async function editerDieteClient(nomDiete, clientId, clientDieteId) {
+  _dieteRepasCollapsed.clear();
   _ficheEditClientId = clientId;
   _ficheEditClientDieteId = clientDieteId || null;
   _dietNavBack = 'fiche-client';
