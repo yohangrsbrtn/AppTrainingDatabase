@@ -1165,14 +1165,16 @@ function renderPcSuiviPage() {
     const color = PC_BLOC_COLOR[b.type] || '#666';
     const label = _pcBlocLabel(b);
     const offset = blocOffset[bi] || 0;
+    // Toutes les séances et tous leurs exercices apparaissent, même sans aucune donnée de
+    // charge (une séance jamais renseignée doit rester visible plutôt que de disparaître,
+    // même logique que côté console — demande coach 2026-08-27).
     const groupes = (b.client_programme_seances||[])
-      .map(s => ({ titre: s.titre, exos: (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1) }))
-      .filter(g => g.exos.length);
+      .map(s => ({ titre: s.titre, exos: s.client_programme_exercices||[] }));
     if (!groupes.length) return;
     aDesDonnees = true;
     const semainesLocales = new Set();
-    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]).forEach(gs => semainesLocales.add(Number(gs) - offset))));
-    const maxSemLocale = Math.max(...semainesLocales);
+    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]||{}).forEach(gs => semainesLocales.add(Number(gs) - offset))));
+    const maxSemLocale = semainesLocales.size ? Math.max(...semainesLocales) : (b.nombre_semaines || 1);
     const semaines = Array.from({ length: maxSemLocale }, (_, i) => i + 1);
     const groupesHtml = groupes.map(g => {
       const rows = g.exos.map(ex => {

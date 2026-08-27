@@ -8214,15 +8214,18 @@ function renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset){
     const color = BLOC_COLOR[b.type] || 'var(--hairline)';
     const blocLabel = BLOC_LABELS_COACH[b.type] || b.type || 'Générique';
     const offset = (blocOffset && blocOffset[bi]) || 0;
-    // Regroupe séance par séance, en ne gardant que les exercices ayant au moins une donnée
-    // de charge — une séance sans aucune donnée n'apparaît pas du tout (pas de bandeau vide).
+    // Regroupe séance par séance — TOUTES les séances et TOUS leurs exercices apparaissent,
+    // même sans aucune donnée de charge (une séance jamais renseignée doit rester visible dans
+    // la grille plutôt que de disparaître silencieusement, demande coach 2026-08-27).
     const groupes = (b.client_programme_seances||[])
-      .map(s => ({ seanceTitre: s.titre, exos: (s.client_programme_exercices||[]).filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1) }))
-      .filter(g => g.exos.length);
+      .map(s => ({ seanceTitre: s.titre, exos: s.client_programme_exercices||[] }));
     if (!groupes.length) return '';
     const semainesLocales = new Set();
-    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]).forEach(gs => semainesLocales.add(Number(gs) - offset))));
-    const maxSemLocale = Math.max(...semainesLocales);
+    groupes.forEach(g => g.exos.forEach(ex => Object.keys(progByEx[ex.id]||{}).forEach(gs => semainesLocales.add(Number(gs) - offset))));
+    // Aucune donnée du tout sur ce bloc : on affiche quand même la grille (tout en "—") sur
+    // toute la durée théorique du bloc, plutôt qu'un Math.max(...[]) = -Infinity qui ferait
+    // planter Array.from.
+    const maxSemLocale = semainesLocales.size ? Math.max(...semainesLocales) : (b.nombre_semaines || 1);
     const semaines = Array.from({length: maxSemLocale}, (_,i) => i+1); // valeurs locales 1..N
     const nbCols = semaines.length + 2; // exercice + semaines + delta
 
