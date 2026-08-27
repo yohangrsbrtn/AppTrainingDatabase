@@ -9675,25 +9675,25 @@ async function ouvrirMicronutrimentsDiete(repasArr, clientId){
       sexe = arr[0]?.sexe || null;
     } catch(e) {}
   }
-  const pret = ciqualData !== null && alimentsCoachData !== null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'modal-micronutriments';
   overlay.onclick = e => { if (e.target===overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal-box" style="max-width:520px;">
     <h3 style="margin:0 0 6px;">🔬 Micronutriments</h3>
-    <div id="micronutrimentsBody">${pret ? _renderMicronutrimentsTable(repasArr, sexe) : `<div style="text-align:center;padding:30px;"><div class="spin" style="margin:auto;"></div></div>`}</div>
+    <div id="micronutrimentsBody"><div style="text-align:center;padding:30px;"><div class="spin" style="margin:auto;"></div></div></div>
     <div class="modal-actions" style="margin-top:10px;"><button class="btn" style="width:100%;" onclick="document.getElementById('modal-micronutriments').remove()">Fermer</button></div>
   </div>`;
   document.body.appendChild(overlay);
-  const maj = () => { const b = document.getElementById('micronutrimentsBody'); if (b && ciqualData!==null && alimentsCoachData!==null) b.innerHTML = _renderMicronutrimentsTable(repasArr, sexe); };
-  if (ciqualData === null && !ciqualErr) {
-    chargerCiqual().then(d => { ciqualData = d; maj(); })
-      .catch(e => { ciqualErr = e.message; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur de chargement CIQUAL : ${esc(e.message)}</div>`; });
-  }
-  if (alimentsCoachData === null && !alimentsCoachErr) {
-    chargerAlimentsCoach().then(d => { alimentsCoachData = d; maj(); }).catch(e => { alimentsCoachErr = e.message; });
-  }
+  let coachReady = false, ciqualReady = false;
+  const maj = () => { const b = document.getElementById('micronutrimentsBody'); if (b && coachReady && ciqualReady) b.innerHTML = _renderMicronutrimentsTable(repasArr, sexe); };
+  // toujours rechargés depuis Supabase à l'ouverture (jamais depuis le cache mémoire) : les liens CIQUAL
+  // de la base coach peuvent avoir été posés/modifiés depuis le dernier chargement de la page — un cache
+  // périmé ferait passer des aliments liés pour "non trouvés" dans le calcul.
+  chargerCiqual().then(d => { ciqualData = d; ciqualErr = null; ciqualReady = true; maj(); })
+    .catch(e => { ciqualErr = e.message; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur de chargement CIQUAL : ${esc(e.message)}</div>`; });
+  chargerAlimentsCoach().then(d => { alimentsCoachData = d; alimentsCoachErr = null; coachReady = true; maj(); })
+    .catch(e => { alimentsCoachErr = e.message; const b = document.getElementById('micronutrimentsBody'); if (b) b.innerHTML = `<div style="color:var(--critical);font-size:12px;">Erreur de chargement base coach : ${esc(e.message)}</div>`; });
 }
 
 async function renderDietesPage(el){
