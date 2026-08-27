@@ -8366,12 +8366,17 @@ function renderProgLogsPage(el){
       return withData.map(ex => {
         const exData = (exercicesData||[]).find(e=>e.id===ex.exercice_id);
         const groupe = exData ? exData.groupe_musculaire : null;
-        const pts = Object.entries(progByEx[ex.id]||{}).sort((a,b)=>+a[0]-+b[0]);
+        const pts = Object.entries(progByEx[ex.id]||{}).map(([s,c])=>[+s,c]).sort((a,b)=>a[0]-b[0]);
         const charges = pts.map(p=>p[1]);
         const maxC = Math.max(...charges), minC = Math.min(...charges);
         const W=300, H=60, PL=6, PR=6, PT=8, PB=14;
         const iW=W-PL-PR, iH=H-PT-PB;
-        const xs = pts.map((_,i)=>PL+(pts.length<2?iW/2:i/(pts.length-1)*iW));
+        // Espacement horizontal proportionnel au numéro de semaine réel (pas à l'index dans le
+        // tableau) : une semaine sans log entre deux semaines loggées doit créer un vrai espace
+        // visuel — sinon le trait relie directement S3 à S5 comme si S4 n'avait jamais existé,
+        // ce qui trompe sur l'assiduité réelle (demande coach, 2026-08-27).
+        const semMin = pts[0][0], semMax = pts[pts.length-1][0], semSpan = semMax - semMin || 1;
+        const xs = pts.map(([s])=>PL+(pts.length<2?iW/2:(s-semMin)/semSpan*iW));
         const ys = charges.map(c=>PT+(maxC===minC?iH/2:iH-(c-minC)/(maxC-minC)*iH));
         const polyline = xs.map((x,i)=>`${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
         const first = charges[0], last = charges[charges.length-1];

@@ -1213,7 +1213,7 @@ function renderPcSuiviPage() {
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${color};">${esc(label)}</span>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;">
-        <table style="border-collapse:collapse;width:auto;">
+        <table style="border-collapse:separate;border-spacing:0;width:auto;">
           <thead><tr>
             <th style="position:sticky;left:0;background:#161923;text-align:left;font-size:11px;padding:6px 12px 6px 9px;color:#8892a4;">Exercice</th>
             ${headCells}
