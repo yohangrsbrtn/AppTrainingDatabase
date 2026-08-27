@@ -15,6 +15,31 @@ let _mDateDebut = '';
 let _mDateFin   = '';
 let _mPhotos = null;           // photos de la saisie affichée dans le formulaire, null = pas encore chargées
 let _mPhotosUploading = false;
+let _mRoadmap = null;          // client_roadmap du client courant, lazy-chargée pour dériver la phase auto (voir sauverMensurationSupa)
+
+// Labels des phases Roadmap — doit rester synchronisé avec ROADMAP_TYPES (console.html), c'est
+// le texte stocké tel quel dans mensurations.phase par la console (voir sauvegarderMensuration).
+const _M_ROADMAP_LABELS = {
+  calibration: 'Calibration', cut: 'Cut', reverse: 'Reverse', prise_masse: 'Prise de masse',
+  maintenance: 'Maintenance', recomposition: 'Recomposition', refeed: 'Refeed', standby: 'Stand-by',
+};
+
+async function _mChargerRoadmap() {
+  if (_mRoadmap !== null) return _mRoadmap;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_roadmap?client_id=eq.${encodeURIComponent(S.client)}&order=date_debut.asc`, { headers: supaHeaders() });
+    _mRoadmap = res.ok ? await res.json() : [];
+  } catch(e) { _mRoadmap = []; }
+  return _mRoadmap;
+}
+
+// Phase Roadmap couvrant une date donnée, sous forme de label (même logique que
+// _roadmapPhaseLabelAtDate côté console).
+function _mPhaseAtDate(roadmap, dateISO) {
+  if (!dateISO) return null;
+  const p = (roadmap||[]).find(r => r.date_debut && r.date_fin && dateISO >= r.date_debut && dateISO <= r.date_fin);
+  return p ? (_M_ROADMAP_LABELS[p.type] || p.type) : null;
+}
 
 // ── Load ──────────────────────────────────────────────────────────────
 
@@ -322,6 +347,14 @@ async function sauverMensurationSupa(field, value) {
     bras:     nn(f.bras),
     commentaire: f.commentaire ? f.commentaire.trim() : null,
   };
+  // Phase auto-dérivée de la Roadmap, uniquement à la toute 1re sauvegarde de cette date (pas
+  // de champ "phase" dans ce formulaire client) — pour ne jamais écraser une phase que le coach
+  // aurait ensuite corrigée à la main depuis la console.
+  if (etaitNouveau) {
+    const roadmap = await _mChargerRoadmap();
+    const phaseAuto = _mPhaseAtDate(roadmap, f.date);
+    if (phaseAuto) { body.phase = phaseAuto; f.phase = phaseAuto; }
+  }
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
       method: 'POST',
