@@ -6,6 +6,7 @@ Bac à sable de développement pour la migration de l'app de coaching vers Supab
 - **Supabase** : `https://sfacjbwiczwkcjpwneyg.supabase.co` — RLS ouverte à `anon`, pas d'auth Supabase pour l'instant
 - **Référence fonctionnelle** : `../AppTrainingPWA/` (GAS prod) — comportement cible. **Ne jamais lire `../AppTraining/`.**
 - **Production** : `../AppTrainingPWA/` — référence lecture seule, ne pas modifier
+- **Référentiel biomécanique/programmation** : [docs/referentiel_coaching_biomecanique.md](docs/referentiel_coaching_biomecanique.md) — principes scientifiques du coach (tension mécanique, profils de résistance, volume/RIR/cyclage par blocs, règles de construction d'exercices, méthodologie d'analyse d'études). **À consulter avant toute création/modification de programme d'entraînement** (Recensement Métabolique, éditeur programme, templates) pour que les choix d'exercices/volumes/reps respectent ce cadre.
 
 ## Déploiement
 
