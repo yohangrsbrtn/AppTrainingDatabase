@@ -900,7 +900,11 @@ async function _doEnvoyerBilanSupa(btn) {
 // que le coach découvre après coup un bilan sans aucune donnée de mensuration associée.
 async function _bilanMensurationDuJourManquante(clientId) {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // _isoDateLocal (pas toISOString) : toISOString() convertit en UTC avant de trancher la
+    // date, ce qui la fait reculer d'un jour en soirée (Europe/Paris, UTC+1/+2) — un client
+    // ayant bien rempli sa mensuration du jour recevait quand même l'avertissement "aucune
+    // mensuration remplie" (même piège que _rmIsoLocal/_isoDateLocal ailleurs, voir CLAUDE.md).
+    const today = _isoDateLocal(new Date());
     const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=eq.${today}&select=id&limit=1`, { headers: supaHeaders() });
     const arr = res.ok ? await res.json() : [];
     return arr.length === 0;
@@ -987,7 +991,9 @@ async function _validerEtEnvoyerSupa() {
   setPage('bilan-loading');
   try {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    // _isoDateLocal (pas toISOString) : même piège que _bilanMensurationDuJourManquante
+    // ci-dessus — un envoi tard le soir (Europe/Paris) se voyait daté du lendemain en UTC.
+    const today = _isoDateLocal(now);
     await _supaUpdateBilan({ envoye_coach: true, date_validation: today, envoye_at: now.toISOString() });
     if (_bilanData) { _bilanData.dejaEnvoye = true; _bilanData.dateValidation = today; }
     const { xpSemaine: xpGagne, xpDetail } = await _crediterXpBilanEnvoye(_bilanId, (_bilanData && _bilanData.jours) || [], getClient(), (_bilanData && _bilanData.createdAt) || today, now.toISOString());
