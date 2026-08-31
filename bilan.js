@@ -898,12 +898,13 @@ async function _doEnvoyerBilanSupa(btn) {
 // Aucune mensuration saisie à la date d'envoi (poids/mesures manquants ce jour-là) — signalé
 // au client AVANT l'envoi (même esprit que le retard/notes manquantes ci-dessous), pour ne pas
 // que le coach découvre après coup un bilan sans aucune donnée de mensuration associée.
-// Fenêtre valide, pas une date unique : le jour_bilan lui-même OU la veille (les deux sont
-// des dates normales pour prendre ses mensurations avant d'envoyer), ÉTENDUE jusqu'à
-// aujourd'hui si le bilan est envoyé en retard (ex: bilan dû dimanche, envoyé lundi avec une
-// mensuration prise le samedi, le dimanche OU le lundi — les trois doivent compter). Sans ça,
-// un client en retard qui avait bien mesuré le jour normal se voyait quand même averti à tort
-// (demande coach, 2026-08-27).
+// Fenêtre valide, pas une date unique : depuis le tout premier jour où l'envoi est autorisé
+// (5 jours après le début de la semaine — vendredi si jour_bilan=Dimanche, voir
+// _bilanEnvoiTropTot) jusqu'à aujourd'hui. Couvre à la fois un envoi anticipé (dès vendredi ou
+// samedi, avec une mensuration prise ce jour-là) ET un envoi en retard (bilan dû dimanche,
+// envoyé lundi avec une mensuration prise le samedi, le dimanche OU le lundi). Sans ça, un
+// client qui envoie plus tôt ou plus tard que le jour exact voyait l'avertissement s'afficher
+// à tort même en ayant bien mesuré (demande coach, 2026-08-27).
 async function _bilanMensurationDuJourManquante(clientId, jourBilanNom, bilanCreatedAt) {
   try {
     // _isoDateLocal (pas toISOString) : toISOString() convertit en UTC avant de trancher la
@@ -912,10 +913,12 @@ async function _bilanMensurationDuJourManquante(clientId, jourBilanNom, bilanCre
     // mensuration remplie" (même piège que _rmIsoLocal/_isoDateLocal ailleurs, voir CLAUDE.md).
     const today = _isoDateLocal(new Date());
     const refDate = bilanCreatedAt ? new Date(bilanCreatedAt) : new Date();
-    const { fin } = _bilanWeekBounds(jourBilanNom, refDate); // fin = veille du jour_bilan, 23:59:59, de LA semaine de ce bilan
-    const veille = _isoDateLocal(fin);
-    const debutFenetre = veille <= today ? veille : today; // garde-fou si jamais veille > today
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=gte.${debutFenetre}&date=lte.${today}&select=id&limit=1`, { headers: supaHeaders() });
+    const { debut } = _bilanWeekBounds(jourBilanNom, refDate); // début de LA semaine de ce bilan
+    const earliest = new Date(debut);
+    earliest.setDate(earliest.getDate() + 5); // même seuil que _bilanEnvoiTropTot
+    const debutFenetre = _isoDateLocal(earliest);
+    const finFenetre = debutFenetre <= today ? today : debutFenetre; // garde-fou si jamais debutFenetre > today
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=gte.${debutFenetre}&date=lte.${finFenetre}&select=id&limit=1`, { headers: supaHeaders() });
     const arr = res.ok ? await res.json() : [];
     return arr.length === 0;
   } catch(e) { return false; }
