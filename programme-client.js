@@ -1139,7 +1139,7 @@ function renderPcSuiviPage() {
   // semaines des blocs précédents).
   const blocMaxSem = blocs.map(b => b.nombre_semaines || _pcSemainesForBloc(b.id));
   const blocOffset = blocs.map((_, bi) => { let off = 0; for (let i = 0; i < bi; i++) off += blocMaxSem[i]; return off; });
-  const progByEx = {}, progByExReps = {};
+  const progByEx = {}, progByExReps = {}, progByExRir = {};
   Object.entries(_pcLogs).forEach(([key, l]) => {
     const parts = key.split('|');
     const exId = parseInt(parts[0]), sem = parseInt(parts[1]);
@@ -1153,6 +1153,8 @@ function renderPcSuiviPage() {
       progByEx[exId][globalSem] = charge;
       if (!progByExReps[exId]) progByExReps[exId] = {};
       progByExReps[exId][globalSem] = l.reps != null ? l.reps : null;
+      if (!progByExRir[exId]) progByExRir[exId] = {};
+      progByExRir[exId][globalSem] = l.rir != null ? l.rir : null;
     }
   });
 
@@ -1189,9 +1191,10 @@ function renderPcSuiviPage() {
           const c = pts[sLoc+offset];
           if (c == null) return `<td style="text-align:center;color:#5a6172;font-size:12px;padding:6px 10px;">—</td>`;
           const r = (progByExReps[ex.id] || {})[sLoc+offset];
+          const rir = (progByExRir[ex.id] || {})[sLoc+offset];
           return `<td style="text-align:center;white-space:nowrap;padding:6px 10px;">
             <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
-            ${r != null ? `<div style="font-size:10px;color:#8892a4;">${esc(String(r))} reps</div>` : ''}
+            ${r != null ? `<div style="font-size:10px;color:#8892a4;">${esc(String(r))} reps${rir!=null?' · RIR '+esc(String(rir)):''}</div>` : ''}
           </td>`;
         }).join('');
         return `<tr>

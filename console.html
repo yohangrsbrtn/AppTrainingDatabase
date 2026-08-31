@@ -8376,7 +8376,7 @@ function progLogsSemaineChangerBloc(bi, delta){
 // coach (2026-08-24) : avec la numérotation globale précédente, le bloc 2 démarrait à "S7" et
 // il fallait scroller loin pour retrouver sa propre semaine 1. Chaque bloc doit se lire de
 // façon indépendante, sans avoir à connaître la durée du bloc précédent.
-function renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset){
+function renderProgLogsGrille(blocs, progByEx, progByExReps, progByExRir, blocOffset){
   const blocsHtml = blocs.map((b, bi) => {
     const color = BLOC_COLOR[b.type] || 'var(--hairline)';
     const blocLabel = BLOC_LABELS_COACH[b.type] || b.type || 'Générique';
@@ -8417,9 +8417,10 @@ function renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset){
           const c = pts[sLoc+offset];
           if (c==null) return `<td style="text-align:center;color:var(--text-faint);font-size:12px;">—</td>`;
           const r = (progByExReps[ex.id]||{})[sLoc+offset];
+          const rir = (progByExRir[ex.id]||{})[sLoc+offset];
           return `<td style="text-align:center;white-space:nowrap;">
             <div style="font-size:12.5px;font-weight:700;">${c}kg</div>
-            ${r!=null?`<div style="font-size:10px;color:var(--text-faint);">${esc(String(r))} reps</div>`:''}
+            ${r!=null?`<div style="font-size:10px;color:var(--text-faint);">${esc(String(r))} reps${rir!=null?' · RIR '+esc(String(rir)):''}</div>`:''}
           </td>`;
         }).join('');
         return `<tr>
@@ -8489,6 +8490,7 @@ function renderProgLogsPage(el){
   // Build progression data cross-blocs avec semaines globales
   const progByEx = {};
   const progByExReps = {}; // exId → globalSem → reps du set qui porte la charge max retenue (pour la grille)
+  const progByExRir = {}; // exId → globalSem → RIR du même set (demande coach 2026-08-27 : visible aussi dans la grille, pas seulement en Vue semaine)
   Object.entries(logs).forEach(([key, l]) => {
     const parts = key.split('|');
     const exId = parts[0], sem = parseInt(parts[1]);
@@ -8501,6 +8503,8 @@ function renderProgLogsPage(el){
         progByEx[exId][globalSem] = charge;
         if (!progByExReps[exId]) progByExReps[exId] = {};
         progByExReps[exId][globalSem] = l.reps != null ? l.reps : null;
+        if (!progByExRir[exId]) progByExRir[exId] = {};
+        progByExRir[exId][globalSem] = l.rir != null ? l.rir : null;
       }
     }
   });
@@ -8529,7 +8533,7 @@ function renderProgLogsPage(el){
       ${_progLogsView==='semaine' && blocs.length>1 ? `<span style="font-size:11.5px;color:var(--text-faint);margin-left:4px;">${blocs.length} blocs · chacun a sa propre navigation semaine ci-dessous</span>` : ''}
     </div>
 
-    ${_progLogsView === 'grille' ? renderProgLogsGrille(blocs, progByEx, progByExReps, blocOffset) : _progLogsView === 'progression' ? (() => {
+    ${_progLogsView === 'grille' ? renderProgLogsGrille(blocs, progByEx, progByExReps, progByExRir, blocOffset) : _progLogsView === 'progression' ? (() => {
       const allEx = blocs.flatMap(b=>(b.client_programme_seances||[]).flatMap(s=>(s.client_programme_exercices||[])));
       const withData = allEx.filter(ex => progByEx[ex.id] && Object.keys(progByEx[ex.id]).length >= 1);
       if (!withData.length) return `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
