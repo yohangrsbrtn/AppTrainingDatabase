@@ -6158,6 +6158,7 @@ function renderFichePhotosTab(c){
         ${compareSlotHtml(_fichePhotosSlotR,'R')}
       </div>
       <div style="font-size:11px;color:var(--text-faint);margin-top:8px;">Clique sur 🆚 pour ajouter une photo à la comparaison (gauche puis droite), ou glisse-la directement dans le slot voulu.</div>
+      ${_fichePhotosSlotL && _fichePhotosSlotR ? `<button class="btn primary" style="margin-top:10px;" onclick="ouvrirEditeurAvantApres('${esc(c.prenom||c.nom||'')}')">🖼️ Créer l'avant/après (export JPEG)</button>` : ''}
     </div>`;
   const delCount = _fichePhotosDelSel.size;
   const toutesCoches = _ficheBilanPhotosGallery.length > 0 && _ficheBilanPhotosGallery.every(p => _fichePhotosDelSel.has(p._key));
@@ -6266,6 +6267,172 @@ async function _fichePhotosSupprimerSelection(clientId){
   const c = (data.clients||[]).find(cl => cl.id === clientId);
   _assurerGaleriePhotos(c);
   _reRenderFichePhotosTab();
+}
+
+// ── Éditeur "Avant/Après" — export JPEG carré pour les réseaux (demande coach, 2026-08-27) ──
+// Un seul <canvas>, résolution interne = résolution d'export (1080×1080, format Instagram
+// carré standard) : ce qui est affiché à l'écran (redimensionné en CSS) est pixel pour pixel
+// ce qui est exporté, pas de double logique de dessin à synchroniser.
+const _AA_SIZE = 1080;
+let _aaState = null; // { L:{img,natW,natH,zoom,offX,offY}, R:{...} }
+let _aaDragSide = null; // 'L'|'R'|null pendant un drag
+let _aaDragStart = null; // {x,y,offX,offY} au pointerdown
+
+function _aaLoadImage(url){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // nécessaire pour pouvoir exporter le canvas (toBlob) sans "tainted canvas"
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function ouvrirEditeurAvantApres(nomClient){
+  const findPhoto = key => _ficheBilanPhotosGallery.find(p => p._key === key);
+  const pL = findPhoto(_fichePhotosSlotL), pR = findPhoto(_fichePhotosSlotR);
+  if (!pL || !pR) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-avant-apres';
+  overlay.innerHTML = `<div class="modal-box" style="max-width:480px;">
+    <h3 style="margin:0 0 4px;">🖼️ Avant / Après</h3>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Glisse chaque photo pour la recadrer, utilise les curseurs pour zoomer.</div>
+    <canvas id="aaCanvas" width="${_AA_SIZE}" height="${_AA_SIZE}" style="width:100%;height:auto;aspect-ratio:1/1;border-radius:var(--radius-sm);background:var(--surface-2);touch-action:none;cursor:grab;display:block;"></canvas>
+    <div style="display:flex;gap:16px;margin-top:12px;">
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Zoom AVANT (gauche)</div>
+        <input id="aaZoomL" type="range" min="1" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('L',this.value)">
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Zoom APRÈS (droite)</div>
+        <input id="aaZoomR" type="range" min="1" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('R',this.value)">
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn" onclick="document.getElementById('modal-avant-apres').remove()">Fermer</button>
+      <button class="btn primary" id="aaExportBtn" onclick="_aaExporter('${esc(nomClient||'client')}')">⬇ Télécharger le JPEG</button>
+    </div>
+  </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+
+  _aaState = { L: null, R: null };
+  const [imgL, imgR] = await Promise.all([_aaLoadImage(pL.url), _aaLoadImage(pR.url)]);
+  _aaState.L = { img: imgL, natW: imgL.naturalWidth, natH: imgL.naturalHeight, zoom: 1, offX: 0, offY: 0 };
+  _aaState.R = { img: imgR, natW: imgR.naturalWidth, natH: imgR.naturalHeight, zoom: 1, offX: 0, offY: 0 };
+  _aaDraw();
+
+  const canvas = document.getElementById('aaCanvas');
+  if (canvas) {
+    canvas.addEventListener('pointerdown', _aaPointerDown);
+    canvas.addEventListener('pointermove', _aaPointerMove);
+    window.addEventListener('pointerup', _aaPointerUp);
+  }
+}
+
+// Échelle "cover" (comme object-fit:cover) pour que la photo remplisse toujours sa moitié sans
+// bande vide, quel que soit son format d'origine — le zoom utilisateur (≥1) part de cette base.
+function _aaCoverScale(s, halfW, halfH){
+  return Math.max(halfW / s.natW, halfH / s.natH);
+}
+function _aaClamp(s, halfW, halfH){
+  const eff = _aaCoverScale(s, halfW, halfH) * s.zoom;
+  const maxX = Math.max(0, (s.natW * eff - halfW) / 2);
+  const maxY = Math.max(0, (s.natH * eff - halfH) / 2);
+  s.offX = Math.max(-maxX, Math.min(maxX, s.offX));
+  s.offY = Math.max(-maxY, Math.min(maxY, s.offY));
+}
+
+function _aaDraw(){
+  const canvas = document.getElementById('aaCanvas');
+  if (!canvas || !_aaState || !_aaState.L || !_aaState.R) return;
+  const ctx = canvas.getContext('2d');
+  const size = canvas.width; // = _AA_SIZE côté écran, ou une autre résolution côté export
+  const halfW = size / 2, halfH = size;
+  ctx.clearRect(0, 0, size, size);
+  [['L', 0], ['R', halfW]].forEach(([side, x0]) => {
+    const s = _aaState[side];
+    _aaClamp(s, halfW, halfH);
+    const eff = _aaCoverScale(s, halfW, halfH) * s.zoom;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, 0, halfW, halfH);
+    ctx.clip();
+    const drawW = s.natW * eff, drawH = s.natH * eff;
+    const dx = x0 + halfW / 2 - drawW / 2 + s.offX;
+    const dy = halfH / 2 - drawH / 2 + s.offY;
+    ctx.drawImage(s.img, dx, dy, drawW, drawH);
+    ctx.restore();
+  });
+  // Séparateur central + étiquettes — rendu marketing "avant/après" prêt à poster.
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  ctx.fillRect(halfW - size*0.0025, 0, size*0.005, size);
+  const labelY = size - size*0.045;
+  const fontSize = Math.round(size*0.038);
+  ctx.font = `700 ${fontSize}px system-ui,-apple-system,sans-serif`;
+  ctx.textAlign = 'center';
+  [['AVANT', halfW/2], ['APRÈS', halfW + halfW/2]].forEach(([label, cx]) => {
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    const padY = size*0.018;
+    ctx.fillRect(cx - halfW*0.32, labelY - fontSize, halfW*0.64, fontSize + padY*2);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, cx, labelY);
+  });
+}
+
+function _aaSetZoom(side, val){
+  if (!_aaState || !_aaState[side]) return;
+  _aaState[side].zoom = parseFloat(val) || 1;
+  _aaDraw();
+}
+
+function _aaCanvasCoords(e){
+  const canvas = document.getElementById('aaCanvas');
+  const r = canvas.getBoundingClientRect();
+  const scale = canvas.width / r.width; // conversion pixels CSS → pixels internes du canvas
+  return { x: (e.clientX - r.left) * scale, y: (e.clientY - r.top) * scale };
+}
+function _aaPointerDown(e){
+  const { x, y } = _aaCanvasCoords(e);
+  _aaDragSide = x < e.target.width / 2 ? 'L' : 'R';
+  const s = _aaState[_aaDragSide];
+  _aaDragStart = { x, y, offX: s.offX, offY: s.offY };
+  e.target.style.cursor = 'grabbing';
+  e.target.setPointerCapture(e.pointerId);
+}
+function _aaPointerMove(e){
+  if (!_aaDragSide) return;
+  const { x, y } = _aaCanvasCoords(e);
+  const s = _aaState[_aaDragSide];
+  s.offX = _aaDragStart.offX + (x - _aaDragStart.x);
+  s.offY = _aaDragStart.offY + (y - _aaDragStart.y);
+  _aaDraw();
+}
+function _aaPointerUp(){
+  _aaDragSide = null;
+  const canvas = document.getElementById('aaCanvas');
+  if (canvas) canvas.style.cursor = 'grab';
+}
+
+function _aaExporter(nomClient){
+  const canvas = document.getElementById('aaCanvas');
+  if (!canvas) return;
+  const btn = document.getElementById('aaExportBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Export…'; }
+  canvas.toBlob(blob => {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Télécharger le JPEG'; }
+    if (!blob) { alert('Erreur export — les photos viennent peut-être d\'un domaine qui bloque l\'export (CORS).'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const slug = (nomClient||'client').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+    a.download = `avant-apres-${slug || 'client'}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/jpeg', 0.92);
 }
 
 // Modale "+ Ajouter une photo" (onglet Photos) — une date choisie par le coach, plusieurs
