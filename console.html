@@ -6366,20 +6366,9 @@ function _aaDraw(){
     ctx.drawImage(s.img, dx, dy, drawW, drawH);
     ctx.restore();
   });
-  // Séparateur central + étiquettes — rendu marketing "avant/après" prêt à poster.
+  // Séparateur central — rendu marketing "avant/après" prêt à poster.
   ctx.fillStyle = 'rgba(255,255,255,.9)';
   ctx.fillRect(halfW - size*0.0025, 0, size*0.005, size);
-  const labelY = size - size*0.045;
-  const fontSize = Math.round(size*0.038);
-  ctx.font = `700 ${fontSize}px system-ui,-apple-system,sans-serif`;
-  ctx.textAlign = 'center';
-  [['AVANT', halfW/2], ['APRÈS', halfW + halfW/2]].forEach(([label, cx]) => {
-    ctx.fillStyle = 'rgba(0,0,0,.45)';
-    const padY = size*0.018;
-    ctx.fillRect(cx - halfW*0.32, labelY - fontSize, halfW*0.64, fontSize + padY*2);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(label, cx, labelY);
-  });
 }
 
 function _aaSetZoom(side, val){
