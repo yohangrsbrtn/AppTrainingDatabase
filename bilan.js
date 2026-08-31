@@ -898,14 +898,24 @@ async function _doEnvoyerBilanSupa(btn) {
 // Aucune mensuration saisie à la date d'envoi (poids/mesures manquants ce jour-là) — signalé
 // au client AVANT l'envoi (même esprit que le retard/notes manquantes ci-dessous), pour ne pas
 // que le coach découvre après coup un bilan sans aucune donnée de mensuration associée.
-async function _bilanMensurationDuJourManquante(clientId) {
+// Fenêtre valide, pas une date unique : le jour_bilan lui-même OU la veille (les deux sont
+// des dates normales pour prendre ses mensurations avant d'envoyer), ÉTENDUE jusqu'à
+// aujourd'hui si le bilan est envoyé en retard (ex: bilan dû dimanche, envoyé lundi avec une
+// mensuration prise le samedi, le dimanche OU le lundi — les trois doivent compter). Sans ça,
+// un client en retard qui avait bien mesuré le jour normal se voyait quand même averti à tort
+// (demande coach, 2026-08-27).
+async function _bilanMensurationDuJourManquante(clientId, jourBilanNom, bilanCreatedAt) {
   try {
     // _isoDateLocal (pas toISOString) : toISOString() convertit en UTC avant de trancher la
     // date, ce qui la fait reculer d'un jour en soirée (Europe/Paris, UTC+1/+2) — un client
     // ayant bien rempli sa mensuration du jour recevait quand même l'avertissement "aucune
     // mensuration remplie" (même piège que _rmIsoLocal/_isoDateLocal ailleurs, voir CLAUDE.md).
     const today = _isoDateLocal(new Date());
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=eq.${today}&select=id&limit=1`, { headers: supaHeaders() });
+    const refDate = bilanCreatedAt ? new Date(bilanCreatedAt) : new Date();
+    const { fin } = _bilanWeekBounds(jourBilanNom, refDate); // fin = veille du jour_bilan, 23:59:59, de LA semaine de ce bilan
+    const veille = _isoDateLocal(fin);
+    const debutFenetre = veille <= today ? veille : today; // garde-fou si jamais veille > today
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&date=gte.${debutFenetre}&date=lte.${today}&select=id&limit=1`, { headers: supaHeaders() });
     const arr = res.ok ? await res.json() : [];
     return arr.length === 0;
   } catch(e) { return false; }
@@ -914,7 +924,7 @@ async function _bilanMensurationDuJourManquante(clientId) {
 async function _ouvrirRecapBilanSupa() {
   const data = _bilanData;
   if (!data) { _validerEtEnvoyerSupa(); return; }
-  const mensurationManquante = await _bilanMensurationDuJourManquante(getClient());
+  const mensurationManquante = await _bilanMensurationDuJourManquante(getClient(), _bilanJourBilanNom, data.createdAt);
 
   let joursOk = 0, joursTraining = 0, totalSteps = 0, joursAvecSteps = 0;
   (data.jours || []).forEach(j => {
