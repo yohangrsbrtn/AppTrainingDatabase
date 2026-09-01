@@ -200,12 +200,24 @@ async function chargerLogsProgramme() {
   const ids = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
   _pcLogs = {};
   if (!ids.length) return;
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${ids.join(',')})`,
-    { headers: supaHeaders() }
-  );
-  if (!res.ok) return;
-  const rows = await res.json();
+  // Pagination obligatoire : PostgREST plafonne à 1000 lignes par défaut — un programme avec
+  // beaucoup d'historique (plusieurs blocs × semaines × séries) dépasse vite ce seuil, et les
+  // logs les plus récents (id le plus haut) se retrouvaient tronqués et invisibles côté client
+  // alors que bien présents en base (bug vécu : bloc "Mécanique" de Paul Sustra, semaine 1 vide).
+  const rows = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${ids.join(',')})&order=id.asc`,
+      { headers: Object.assign({}, supaHeaders(), { Range: `${offset}-${offset + PAGE - 1}` }) }
+    );
+    if (!res.ok) break;
+    const page = await res.json();
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
   rows.forEach(l => { _pcLogs[l.client_programme_exercice_id + '|' + l.semaine + '|' + l.numero_serie] = l; });
 }
 

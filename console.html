@@ -1029,6 +1029,29 @@ async function chargerTousDietes(clientId){
   return rows;
 }
 
+// Pagination obligatoire : PostgREST plafonne à 1000 lignes par défaut — un programme avec
+// beaucoup d'historique (plusieurs blocs × semaines × séries) dépasse vite ce seuil, et les
+// logs les plus récents (id le plus haut) se retrouvaient tronqués, invisibles pour cette
+// requête (même si présents en base) — bug vécu : bloc "Mécanique" de Paul Sustra, logs du
+// transfert de charge absents de _pcLogs côté app malgré 1089 lignes existantes en base.
+async function _fetchLogsProgrammePagines(exIds){
+  const rows = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=id.asc`,
+      { headers: Object.assign({}, supaHeaders(), { Range: `${offset}-${offset + PAGE - 1}` }) }
+    );
+    if (!res.ok) break;
+    const page = await res.json();
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return rows;
+}
+
 async function chargerProgrammeById(progId){
   const res1 = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${progId}`, { headers: supaHeaders() });
   if (!res1.ok) throw new Error('supabase_' + res1.status);
@@ -1048,11 +1071,11 @@ async function chargerProgrammeById(progId){
   let equivalents = {};
   let equivLogs = {};
   if (exIds.length) {
-    const [resLogs, resEquiv] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() }),
+    const [logsRows, resEquiv] = await Promise.all([
+      _fetchLogsProgrammePagines(exIds),
       fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices_equivalents?programme_exercice_id=in.(${exIds.join(',')})`, { headers: supaHeaders() })
     ]);
-    if (resLogs.ok) (await resLogs.json()).forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+    logsRows.forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
     if (resEquiv.ok) {
       const equivRows = await resEquiv.json();
       equivRows.forEach(r => { equivalents[r.programme_exercice_id] = r; });
@@ -5730,8 +5753,8 @@ async function chargerProgrammeActif(clientId){
   blocs.forEach(b => (b.client_programme_seances||[]).forEach(s => (s.client_programme_exercices||[]).forEach(ex => exIds.push(ex.id))));
   let logs = {};
   if (exIds.length) {
-    const resLogs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${exIds.join(',')})&order=semaine.asc,numero_serie.asc`, { headers: supaHeaders() });
-    if (resLogs.ok) (await resLogs.json()).forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
+    const logsRows = await _fetchLogsProgrammePagines(exIds);
+    logsRows.forEach(l => { logs[l.client_programme_exercice_id+'|'+l.semaine+'|'+l.numero_serie] = l; });
   }
   return Object.assign({}, cp, { blocs, logs });
 }
