@@ -2924,15 +2924,24 @@ function renderBilanDetailPage(el) {
             <td>${tick(j.training)}</td>
             <td>${tick(j.cardio)}</td>
           </tr>`).join('')||`<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:16px;">Aucune donnée.</td></tr>`}
-          ${(poidsVals.length>1||stepsVals.length>1||eauVals.length>1)?`<tr style="background:var(--surface-2);font-style:italic;">
+          ${(poidsVals.length>1||stepsVals.length>1||eauVals.length>1)?(() => {
+            // Objectifs coach (seances_cible, steps_cible) affichés en regard des moyennes
+            // réelles pour un coup d'œil direct "dans les clous ou pas", sans avoir à rouvrir
+            // les objectifs assignés séparément (demande coach 2026-09-05).
+            const seancesCible = bilanDetailState.objectifs && bilanDetailState.objectifs.seances_cible;
+            const stepsCible = bilanDetailState.objectifs && bilanDetailState.objectifs.steps_cible;
+            const trainingColor = seancesCible ? (joursOkTraining>=seancesCible?'var(--success)':'var(--critical)') : 'inherit';
+            const stepsColor = (stepsCible && avgSteps>0) ? (avgSteps>=stepsCible?'var(--success)':'var(--critical)') : 'inherit';
+            return `<tr style="background:var(--surface-2);font-style:italic;">
             <td style="font-size:11px;color:var(--text-faint);">Moyenne</td>
             <td style="font-size:12px;">${avgPoids!=null?avgPoids+' kg':'—'}</td>
             <td style="font-size:12px;">${avgEau?avgEau+' L':'—'}</td>
             <td style="font-size:12px;">${joursOkDiete}/7</td>
-            <td style="font-size:12px;">${avgSteps>0?avgSteps.toLocaleString('fr-FR')+' moy.':'—'}</td>
-            <td style="font-size:12px;">${joursOkTraining}/7</td>
+            <td style="font-size:12px;font-weight:${stepsCible?'700':'400'};color:${stepsColor};">${avgSteps>0?avgSteps.toLocaleString('fr-FR')+(stepsCible?' / '+stepsCible.toLocaleString('fr-FR'):' moy.'):'—'}</td>
+            <td style="font-size:12px;font-weight:${seancesCible?'700':'400'};color:${trainingColor};">${joursOkTraining}/${seancesCible||7}</td>
             <td style="font-size:12px;">${joursOkCardio}/7</td>
-          </tr>`:''}
+          </tr>`;
+          })():''}
         </tbody>
       </table></div>
     </div>
