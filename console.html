@@ -1709,11 +1709,23 @@ async function _supaCalculerRetard(clientId) {
     const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
     const profilArr = profilRes.ok ? await profilRes.json() : [];
     const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
-    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=created_at.desc&limit=1&select=created_at,envoye_coach`, { headers: supaHeaders() });
+    // Repère : le dernier bilan ENVOYÉ (pas juste le dernier CRÉÉ) — tout bilan non-envoyé créé
+    // APRÈS lui est potentiellement en retard, tout ce qui est avant est de l'historique ancien
+    // qu'on ignore délibérément (cf. commentaire ci-dessus : Ronny/Jean-Baptiste restaient "en
+    // retard" indéfiniment à cause d'un vieux bilan non-envoyé oublié). Sans ce repère précis, se
+    // baser sur le simple "dernier bilan créé" masquait l'inverse : un rollover automatique de
+    // semaine (nouveau bilan "semaine suivante" créé dès l'ouverture de l'app) faisait disparaître
+    // le retard d'un bilan plus ancien resté non-envoyé — bug vécu : Eric De Lorenzo, bilan de la
+    // semaine du 30 Août au 5 Sept jamais envoyé, invisible en "en retard" car un bilan plus
+    // récent (semaine du 6 au 12 Sept, tout juste créé) était devenu le "dernier bilan".
+    const dernierEnvoyeRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.true&archive=eq.false&order=created_at.desc&limit=1&select=created_at`, { headers: supaHeaders() });
+    const dernierEnvoyeArr = dernierEnvoyeRes.ok ? await dernierEnvoyeRes.json() : [];
+    const depuis = dernierEnvoyeArr[0] ? dernierEnvoyeArr[0].created_at : '1970-01-01T00:00:00Z';
+    const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&envoye_coach=eq.false&created_at=gt.${encodeURIComponent(depuis)}&order=created_at.asc&limit=1&select=created_at`, { headers: supaHeaders() });
     const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
-    const dernier = bilanArr[0];
-    if (!dernier || dernier.envoye_coach) return false;
-    return !_bilanEstPonctuel(dernier.created_at, new Date().toISOString(), jourBilan);
+    const plusAncienNonEnvoye = bilanArr[0];
+    if (!plusAncienNonEnvoye) return false;
+    return !_bilanEstPonctuel(plusAncienNonEnvoye.created_at, new Date().toISOString(), jourBilan);
   } catch(e) { return false; }
 }
 
