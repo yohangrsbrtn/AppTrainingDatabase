@@ -834,6 +834,27 @@ async function uploaderPhotoManuelle(clientId, file, dateStr){
   if (!insRes.ok) throw new Error('supabase_' + insRes.status);
   return (await insRes.json())[0];
 }
+// Ajout manuel rattaché directement à une mensuration existante (choisie dans le modal — exact
+// ou la plus proche dans le temps) : va dans mensuration_photos, pas bilan_photos, pour que la
+// photo apparaisse comme "📏 Mensuration" et hérite des vraies valeurs de cette entrée plutôt
+// que d'un simple rapprochement par date.
+async function uploaderPhotoMensurationManuelle(clientId, mensurationId, file){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `mensurations/${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (!res.ok) throw new Error('storage_' + res.status + ' — ' + await res.text().catch(()=>''));
+  const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+  const insRes = await fetch(`${SUPABASE_URL}/rest/v1/mensuration_photos`, {
+    method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ mensuration_id: mensurationId, client_id: clientId, url })
+  });
+  if (!insRes.ok) throw new Error('supabase_' + insRes.status);
+  return (await insRes.json())[0];
+}
 
 async function supprimerBilanPhotoApi(photoId, url){
   const marker = '/object/public/bilans-photos/';
@@ -897,6 +918,21 @@ function _bilanBornesAvecGraceMens(bornes){
   fin.setDate(fin.getDate() + 1);
   fin.setHours(23, 59, 59, 999);
   return { debut: bornes.debut, fin };
+}
+// Mensuration à afficher sous une vignette de l'onglet Photos dédié : lien EXACT si la photo est
+// rattachée à une mensuration précise (mensuration_id, cas "📏 Mensuration" et tout ajout manuel
+// désormais associé via le modal d'upload) ; sinon repli sur la plus proche dans le temps, mais
+// seulement si elle tombe à ≤3 jours de la date de la photo — au-delà, mieux vaut n'afficher rien
+// qu'une donnée trompeuse (demande coach 2026-09-07 : voir les mensurations "en petit" sous
+// chaque photo de l'album, sans surcharger la grille avec un rapprochement hasardeux).
+function _mensurationLieeAPhoto(p, mensurations){
+  if (!mensurations || !mensurations.length) return null;
+  if (p.mensuration_id) return mensurations.find(m => m.id === p.mensuration_id) || null;
+  if (!p._date) return null;
+  const m = _mensurationLaPlusProche(p._date, mensurations);
+  if (!m || !m.date) return null;
+  const diffJours = Math.abs(new Date(m.date).getTime() - new Date(p._date).getTime()) / 86400000;
+  return diffJours <= 3 ? m : null;
 }
 const _MENS_LABELS_COURT = { fessiers:'Fess.', cuisses:'Cuis.', mollets:'Moll.', poitrine:'Poit.', epaules:'Ép.', bras:'Bras' };
 function _renderMensurationSousPhoto(m){
@@ -6207,6 +6243,7 @@ function renderFichePhotosTab(c){
       ${_ficheBilanPhotosGallery.map((p, idx) => {
         const isCmp = p._key === _fichePhotosSlotL || p._key === _fichePhotosSlotR;
         const isDel = _fichePhotosDelSel.has(p._key);
+        const mens = _mensurationLieeAPhoto(p, _ficheBilansMensurations);
         return `<div style="width:130px;" draggable="true" ondragstart="_fichePhotosDragStart(event,'${p._key}')">
           <div style="position:relative;width:130px;aspect-ratio:9/16;border-radius:var(--radius-sm);overflow:hidden;${isCmp?'box-shadow:0 0 0 3px var(--accent);':''}">
             <img src="${esc(p.url)}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="ouvrirPhotoLightbox(_ficheBilanPhotosGallery,${idx},true)">
@@ -6217,6 +6254,7 @@ function renderFichePhotosTab(c){
             <button onclick="event.stopPropagation();_fichePhotosToggleCompare('${p._key}')" title="Ajouter à la comparaison" style="position:absolute;bottom:4px;left:4px;width:24px;height:24px;border-radius:6px;background:${isCmp?'var(--accent)':'rgba(0,0,0,.55)'};border:none;color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;">🆚</button>
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:4px;">${dateOf(p)}</div>
+          ${_renderMensurationSousPhoto(mens)}
         </div>`;
       }).join('')}
     </div>
@@ -6458,6 +6496,36 @@ function _aaExporter(nomClient){
 
 // Modale "+ Ajouter une photo" (onglet Photos) — une date choisie par le coach, plusieurs
 // fichiers possibles d'un coup (tous rattachés à la même date).
+// Candidats de rapprochement date photo ↔ mensuration existante, triés par proximité (les plus
+// proches d'abord), pour le sélecteur du modal d'ajout manuel — sert notamment à importer un lot
+// de vieilles photos WhatsApp de clients en coaching depuis longtemps et à les rattacher aux
+// mensurations déjà en base (demande coach 2026-09-07).
+function _apmCandidatsMensuration(dateStr, mensurations){
+  if (!dateStr || !mensurations || !mensurations.length) return [];
+  const target = new Date(dateStr + 'T12:00:00').getTime();
+  return mensurations
+    .filter(m => m.date)
+    .map(m => ({ m, diffJours: Math.round((new Date(m.date + 'T12:00:00').getTime() - target) / 86400000) }))
+    .sort((a, b) => Math.abs(a.diffJours) - Math.abs(b.diffJours))
+    .slice(0, 8);
+}
+function _apmMensurationOptionsHtml(dateStr){
+  const candidats = _apmCandidatsMensuration(dateStr, _ficheBilansMensurations || []);
+  const exact = candidats.find(c => c.diffJours === 0);
+  const optHtml = candidats.map(({m, diffJours}) => {
+    const label = new Date(m.date+'T00:00:00').toLocaleDateString('fr-FR')
+      + (diffJours === 0 ? ' (même jour)' : diffJours > 0 ? ` (dans ${diffJours}j)` : ` (${-diffJours}j avant)`)
+      + (m.poids != null ? ` · ${m.poids}kg` : '');
+    return `<option value="${m.id}" ${exact && exact.m.id===m.id ? 'selected':''}>${esc(label)}</option>`;
+  }).join('');
+  return `<option value="">Aucune (juste la date)</option>${optHtml}`;
+}
+function _apmRafraichirMensurations(){
+  const sel = document.getElementById('apmMensuration');
+  if (!sel) return;
+  const dateStr = document.getElementById('apmDate').value;
+  sel.innerHTML = _apmMensurationOptionsHtml(dateStr);
+}
 function ouvrirModalAjoutPhotoManuelle(clientId){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -6467,7 +6535,10 @@ function ouvrirModalAjoutPhotoManuelle(clientId){
   overlay.innerHTML = `
     <div class="modal-box" style="max-width:380px;">
       <h3 style="margin:0 0 16px;">+ Ajouter une photo</h3>
-      <div class="fiche-field"><label>Date de la photo</label><input id="apmDate" type="date" value="${today}" style="font-size:16px;"></div>
+      <div class="fiche-field"><label>Date de la photo</label><input id="apmDate" type="date" value="${today}" style="font-size:16px;" onchange="_apmRafraichirMensurations()"></div>
+      <div class="fiche-field"><label>Associer à une mensuration <span style="font-weight:400;color:var(--text-faint);">— optionnel</span></label>
+        <select id="apmMensuration" style="font-size:16px;">${_apmMensurationOptionsHtml(today)}</select>
+      </div>
       <div class="fiche-field"><label>Photo(s)</label><input id="apmFiles" type="file" accept="image/*" multiple style="font-size:14px;"></div>
       <div id="apmErr" style="display:none;color:var(--critical);font-size:12px;margin-bottom:6px;"></div>
       <div class="modal-actions" style="margin-top:16px;">
@@ -6480,6 +6551,7 @@ function ouvrirModalAjoutPhotoManuelle(clientId){
 
 async function confirmerAjoutPhotoManuelle(clientId){
   const dateStr = document.getElementById('apmDate').value;
+  const mensurationId = document.getElementById('apmMensuration').value || null;
   const files = Array.from(document.getElementById('apmFiles').files || []);
   const err = document.getElementById('apmErr');
   const btn = document.getElementById('apmBtn');
@@ -6488,7 +6560,10 @@ async function confirmerAjoutPhotoManuelle(clientId){
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    for (const file of files) await uploaderPhotoManuelle(clientId, file, dateStr);
+    for (const file of files) {
+      if (mensurationId) await uploaderPhotoMensurationManuelle(clientId, mensurationId, file);
+      else await uploaderPhotoManuelle(clientId, file, dateStr);
+    }
     document.getElementById('modal-ajout-photo-manuelle')?.remove();
     _ficheBilanPhotosGallery = null;
     const c = (data.clients||[]).find(cl => cl.id === clientId);
