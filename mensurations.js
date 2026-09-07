@@ -328,54 +328,82 @@ function onMensTout() {
   setPage('mensurations');
 }
 
+// Sérialise les sauvegardes par date (une saisie = plusieurs champs, chacun avec son propre
+// onchange) — même pattern anti-race-condition que pcSauverLog (programme-client.js). AVANT :
+// chaque champ modifié renvoyait un POST upsert de la ligne ENTIÈRE reconstruite depuis
+// _mFormData ; un client qui remplit poids puis taille puis fessiers coup sur coup déclenchait
+// plusieurs requêtes en parallèle, et si les réponses réseau arrivaient dans le désordre, la
+// dernière à s'exécuter côté serveur écrasait la ligne avec un instantané plus ancien de
+// _mFormData — perte silencieuse d'un ou plusieurs champs (bug vécu : Mathis Le Ray et Arnaud
+// Fouetilloux, mensurations saisies mais absentes/incomplètes en base, 2026-09-07). Désormais :
+// 1er champ saisi = POST de création (une seule fois, mis en file) ; tous les suivants = PATCH
+// du seul champ modifié, qui ne peut jamais écraser les autres colonnes.
+const _mSaveQueues = {};
+
 async function sauverMensurationSupa(field, value) {
   if (!_mFormData || !_mFormData.date) return;
-  _mFormData[field] = value;
   const f = _mFormData;
-  const etaitNouveau = !f.id; // pas encore d'id = 1re valeur jamais saisie à cette date
+  const key = f.date;
   const nn = v => v !== null && v !== undefined ? v : null;
-  const body = {
-    client_id: S.client,
-    date:     f.date,
-    poids:    nn(f.poids),
-    mesure:   nn(f.taille),
-    fessiers: nn(f.fessiers),
-    cuisses:  nn(f.cuisses),
-    mollets:  nn(f.mollets),
-    poitrine: nn(f.poitrine),
-    epaules:  nn(f.epaules),
-    bras:     nn(f.bras),
-    commentaire: f.commentaire ? f.commentaire.trim() : null,
-  };
-  // Phase auto-dérivée de la Roadmap, uniquement à la toute 1re sauvegarde de cette date (pas
-  // de champ "phase" dans ce formulaire client) — pour ne jamais écraser une phase que le coach
-  // aurait ensuite corrigée à la main depuis la console.
-  if (etaitNouveau) {
-    const roadmap = await _mChargerRoadmap();
-    const phaseAuto = _mPhaseAtDate(roadmap, f.date);
-    if (phaseAuto) { body.phase = phaseAuto; f.phase = phaseAuto; }
-  }
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
-      method: 'POST',
-      headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) return;
-    const saved = (await res.json())[0];
-    f.id = saved.id;
-    const updated = { ...body, id: saved.id, taille: f.taille, phase: f.phase || '', commentaire: f.commentaire || '' };
-    const idx = _mReleves.findIndex(r => r.date === f.date);
-    if (idx >= 0) _mReleves[idx] = updated;
-    else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
-    // Le poids saisi ici est aussi reporté dans le bilan de la semaine en
-    // cours, à la journée correspondant à cette date (voir bilan.js).
-    if (field === 'poids' && value !== null) reporterMesureDansBilan(S.client, f.date, 'poids', value);
-    // 1re sauvegarde de cette saisie (id vient d'apparaître) : re-render pour révéler
-    // la section photos, jusque-là masquée (pas de mensuration_id à rattacher avant).
-    // Les sauvegardes suivantes ne re-render PAS (garde le focus sur le champ édité).
-    if (etaitNouveau) { _mPhotos = []; setPage('mensurations'); }
-  } catch(e) {}
+  const parsed = field === 'commentaire' ? (value ? value.trim() : null) : nn(value);
+  // Mise à jour optimiste avant le fetch pour que les appels rapides successifs lisent
+  // toujours l'état le plus récent.
+  f[field] = parsed;
+  const etaitNouveau = !f.id; // pas encore d'id = 1re valeur jamais saisie à cette date
+
+  _mSaveQueues[key] = (_mSaveQueues[key] || Promise.resolve()).then(async () => {
+    try {
+      if (f.id) {
+        // Ligne déjà créée : PATCH sur un seul champ, aucun risque d'écraser les autres.
+        const col = field === 'taille' ? 'mesure' : field;
+        await fetch(`${SUPABASE_URL}/rest/v1/mensurations?id=eq.${f.id}`,
+          { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [col]: parsed }) });
+        const idx = _mReleves.findIndex(r => r.date === f.date);
+        if (idx >= 0) _mReleves[idx] = { ..._mReleves[idx], [col]: parsed, taille: f.taille };
+      } else {
+        // Nouveau : POST avec tous les champs non-null accumulés jusqu'ici.
+        const body = {
+          client_id: S.client,
+          date:     f.date,
+          poids:    nn(f.poids),
+          mesure:   nn(f.taille),
+          fessiers: nn(f.fessiers),
+          cuisses:  nn(f.cuisses),
+          mollets:  nn(f.mollets),
+          poitrine: nn(f.poitrine),
+          epaules:  nn(f.epaules),
+          bras:     nn(f.bras),
+          commentaire: f.commentaire ? f.commentaire.trim() : null,
+        };
+        // Phase auto-dérivée de la Roadmap, uniquement à la toute 1re sauvegarde de cette date
+        // (pas de champ "phase" dans ce formulaire client) — pour ne jamais écraser une phase
+        // que le coach aurait ensuite corrigée à la main depuis la console.
+        const roadmap = await _mChargerRoadmap();
+        const phaseAuto = _mPhaseAtDate(roadmap, f.date);
+        if (phaseAuto) { body.phase = phaseAuto; f.phase = phaseAuto; }
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/mensurations?on_conflict=client_id,date`, {
+          method: 'POST',
+          headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) return;
+        const saved = (await res.json())[0];
+        f.id = saved.id;
+        const updated = { ...body, id: saved.id, taille: f.taille, phase: f.phase || '', commentaire: f.commentaire || '' };
+        const idx = _mReleves.findIndex(r => r.date === f.date);
+        if (idx >= 0) _mReleves[idx] = updated;
+        else { _mReleves.push(updated); _mReleves.sort((a, b) => a.date.localeCompare(b.date)); }
+        // 1re sauvegarde de cette saisie (id vient d'apparaître) : re-render pour révéler
+        // la section photos, jusque-là masquée (pas de mensuration_id à rattacher avant).
+        // Les sauvegardes suivantes ne re-render PAS (garde le focus sur le champ édité).
+        if (etaitNouveau) { _mPhotos = []; setPage('mensurations'); }
+      }
+      // Le poids saisi ici est aussi reporté dans le bilan de la semaine en
+      // cours, à la journée correspondant à cette date (voir bilan.js).
+      if (field === 'poids' && value !== null) reporterMesureDansBilan(S.client, f.date, 'poids', value);
+    } catch(e) {}
+  });
+  return _mSaveQueues[key];
 }
 
 // ── Photos de mensuration (Supabase Storage, bucket "bilans-photos", préfixe
