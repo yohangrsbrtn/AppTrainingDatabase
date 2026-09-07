@@ -9,6 +9,66 @@ let _pcSeanceId        = null; // id de la séance sélectionnée
 let _pcBlocId          = null; // bloc actuellement sélectionné
 let _pcLogs            = {}; // `${exerciceId}|${semaine}|${serie}` → log
 const _pcSaveQueues    = {}; // même clé → Promise (sérialise les saves par série)
+
+// ── File d'attente hors-ligne pour les logs de séance ───────────────────────
+// Bétonne la saisie contre les coupures réseau (bug vécu : Perrine Ayot, charges/reps saisis
+// en séance jamais enregistrés — demande coach explicite). Avant : un échec réseau était avalé
+// silencieusement (catch vide), sans retry ni trace — si le client fermait l'app avant que la
+// connexion revienne, la valeur tapée était perdue pour de bon, sans qu'il en soit averti.
+// Maintenant : chaque champ modifié est d'abord écrit dans localStorage (persiste même à la
+// fermeture de l'onglet/app), puis le fetch retente avec backoff exponentiel ; une entrée ne
+// quitte la file locale qu'après confirmation serveur. Au rechargement de l'app et à chaque
+// retour de connexion (`online`), toute entrée encore en attente est rejouée automatiquement.
+const _PC_OFFLINE_KEY = () => 'at_pc_pending_v1_' + (S.client || '');
+function _pcOfflineRead(){
+  try { return JSON.parse(localStorage.getItem(_PC_OFFLINE_KEY()) || '[]'); } catch(e) { return []; }
+}
+function _pcOfflineWrite(list){
+  try { localStorage.setItem(_PC_OFFLINE_KEY(), JSON.stringify(list)); } catch(e) {}
+}
+function _pcOfflineUpsert(entry){
+  const list = _pcOfflineRead();
+  const k = entry.kind+'|'+entry.id+'|'+entry.semaine+'|'+entry.serie+'|'+entry.field;
+  const idx = list.findIndex(e => (e.kind+'|'+e.id+'|'+e.semaine+'|'+e.serie+'|'+e.field) === k);
+  if (idx >= 0) list[idx] = entry; else list.push(entry);
+  _pcOfflineWrite(list);
+}
+function _pcOfflineRemove(kind, id, semaine, serie, field){
+  const list = _pcOfflineRead();
+  const k = kind+'|'+id+'|'+semaine+'|'+serie+'|'+field;
+  const filtered = list.filter(e => (e.kind+'|'+e.id+'|'+e.semaine+'|'+e.serie+'|'+e.field) !== k);
+  if (filtered.length !== list.length) _pcOfflineWrite(filtered);
+}
+// Rejoue toute entrée encore en attente pour le client courant — appelé au chargement du
+// programme (après que _pcLogs/_pcEquivLogs soient prêts) et à chaque retour de connexion.
+function _pcFlushOfflineQueue(){
+  _pcOfflineRead().forEach(entry => {
+    if (entry.kind === 'log') {
+      const key = entry.id + '|' + entry.semaine + '|' + entry.serie;
+      const current = _pcLogs[key] || { client_programme_exercice_id: entry.id, semaine: entry.semaine, numero_serie: entry.serie, charge:null, reps:null, rir:null, commentaire:null };
+      _pcLogs[key] = Object.assign({}, current, { [entry.field]: entry.value });
+      _pcSaveQueues[key] = (_pcSaveQueues[key] || Promise.resolve()).then(() => _pcEnvoyerLogAvecRetry(entry.id, entry.semaine, entry.serie, entry.field, key));
+    } else if (entry.kind === 'log_equiv') {
+      const key = entry.id + '|' + entry.semaine + '|' + entry.serie;
+      const current = _pcEquivLogs[key] || { equivalent_id: entry.id, semaine: entry.semaine, numero_serie: entry.serie, charge:null, reps:null, rir:null, commentaire:null };
+      _pcEquivLogs[key] = Object.assign({}, current, { [entry.field]: entry.value });
+      _pcEquivSaveQueues[key] = (_pcEquivSaveQueues[key] || Promise.resolve()).then(() => _pcEnvoyerLogEquivAvecRetry(entry.id, entry.semaine, entry.serie, entry.field, key));
+    }
+  });
+}
+if (typeof window !== 'undefined') window.addEventListener('online', _pcFlushOfflineQueue);
+function _pcOfflinePendingCount(){ return _pcOfflineRead().length; }
+// Surveille la file d'attente pour faire disparaître le bandeau "Sauvegarde en attente…" dès
+// que tout est confirmé côté serveur, sans attendre une action du client (changement de champ,
+// navigation…) qui déclencherait un re-render de toute façon.
+let _pcOfflineWatchLastCount = 0;
+setInterval(() => {
+  const n = _pcOfflinePendingCount();
+  if (n !== _pcOfflineWatchLastCount) {
+    _pcOfflineWatchLastCount = n;
+    if (typeof S !== 'undefined' && S.page === 'programme-client' && _pcSubPage === 'seance') setPage('programme-client');
+  }
+}, 4000);
 let _pcSubPage         = 'selector'; // 'selector' | 'seance'
 let _pcObjectifs       = null; // { steps_cible, seances_cible, cardio_consigne } assignés par le coach
 let _pcNotesCoach      = []; // [{ nom, note }] pour la modale bulle coach
@@ -95,6 +155,10 @@ async function loadProgrammeClient(deepLink) {
     // créneau vide" (_pcTrouverPremierTrou) en a besoin pour savoir ce qui est déjà rempli.
     const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
     await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds), _pcChargerGifMap()]);
+    // Rejoue toute saisie restée en attente d'une session précédente (app fermée avant confirmation
+    // serveur, ou hors-ligne prolongé) — _pcLogs/_pcEquivLogs viennent d'être chargés, donc les
+    // entrées avec un id existant repartent en PATCH plutôt qu'en POST doublon.
+    _pcFlushOfflineQueue();
     // Retrouve le BLOC qui contient la séance ciblée — peut différer du bloc_actif_id du coach
     // si celui-ci a changé de bloc actif entre-temps ; sans ce garde-fou, le bloc "par défaut"
     // écraserait _pcBlocId juste après et la séance ciblée ne serait plus trouvable dedans.
@@ -945,6 +1009,7 @@ function renderPcSeancePage() {
         <select class="t-select" style="flex:1;font-size:16px;" onchange="pcChangerSemaineNav(this.value)">${optsSemaines}</select>
       </div>
       ${isReadonly ? `<div style="font-size:12px;color:var(--text-muted);background:var(--surface-2);border-radius:8px;padding:8px 12px;margin-bottom:12px;">👁 Lecture seule — ce bloc n'est pas actif. Aucune saisie possible.</div>` : ''}
+      ${_pcOfflinePendingCount() > 0 ? `<div style="font-size:12px;color:#f0a500;background:#f0a50018;border:1px solid #f0a50044;border-radius:8px;padding:8px 12px;margin-bottom:12px;">⏳ Sauvegarde en attente de connexion — tes saisies (${_pcOfflinePendingCount()}) sont gardées sur ton téléphone et s'enverront automatiquement dès que le réseau revient. Ne quitte pas la page.</div>` : ''}
       ${(_pcAutoEdition() && !isReadonly) ? `<button class="btn-secondary" onclick="pcToggleEdition()" style="margin-bottom:12px;width:100%;">${_pcEditMode ? '✅ Terminer la modification' : '✏️ Modifier cette séance'}</button>` : ''}
       ${rightPanel ? `<div style="margin-bottom:12px;">${rightPanel}</div>` : ''}
       ${exosHtmlFinal}
@@ -1035,10 +1100,12 @@ function _pcFlashSeanceValidee(xpGagne) {
 }
 
 async function pcSauverLog(exerciceId, serie, field, value) {
-  const key = exerciceId + '|' + _pcSemaine + '|' + serie;
+  const semaine = _pcSemaine; // capturé ici, jamais relu depuis le global plus tard (le client
+  // peut changer de semaine avant que le retry ne s'exécute — voir _pcEnvoyerLogAvecRetry)
+  const key = exerciceId + '|' + semaine + '|' + serie;
   const current = _pcLogs[key] || {
     client_programme_exercice_id: exerciceId,
-    semaine: _pcSemaine,
+    semaine: semaine,
     numero_serie: serie,
     charge: null, reps: null, rir: null, commentaire: null
   };
@@ -1048,38 +1115,54 @@ async function pcSauverLog(exerciceId, serie, field, value) {
   // Mise à jour optimiste avant le fetch pour que les appels rapides successifs
   // lisent toujours l'état le plus récent (évite race condition reps/charge)
   _pcLogs[key] = Object.assign({}, current, { [field]: parsed });
+  // Persisté en local AVANT toute tentative réseau — si la connexion coupe ou que l'app se
+  // ferme avant confirmation serveur, la valeur n'est jamais perdue (rejouée au prochain
+  // chargement / retour en ligne, voir _pcFlushOfflineQueue).
+  _pcOfflineUpsert({ kind:'log', id: exerciceId, semaine, serie, field, value: parsed });
 
   // Sérialise les requêtes pour cette clé : chaque item lit l'état courant au moment
   // de son exécution, pas au moment de l'enqueue
-  _pcSaveQueues[key] = (_pcSaveQueues[key] || Promise.resolve()).then(async () => {
-    const log = _pcLogs[key];
-    try {
-      if (log.id) {
-        // Enregistrement existant : PATCH sur un seul champ, aucun risque d'écraser les autres
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/client_programme_logs?id=eq.${log.id}`,
-          { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: parsed }) }
-        );
-      } else {
-        // Nouveau : POST avec tous les champs non-null accumulés jusqu'ici
-        const l = _pcLogs[key];
-        const body = { client_programme_exercice_id: exerciceId, semaine: _pcSemaine, numero_serie: serie };
-        if (l.charge      != null) body.charge      = l.charge;
-        if (l.reps        != null) body.reps        = l.reps;
-        if (l.rir         != null) body.rir         = l.rir;
-        if (l.commentaire != null) body.commentaire = l.commentaire;
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
-          { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
-        );
-        if (res.ok) {
-          const rows = await res.json();
-          // On récupère uniquement l'id pour les PATCH suivants ; on garde l'état optimiste
-          if (rows[0]?.id) _pcLogs[key] = Object.assign({}, _pcLogs[key], { id: rows[0].id });
-        }
-      }
-    } catch(e) { /* silencieux pour ne pas alerter à chaque frappe */ }
-  });
+  _pcSaveQueues[key] = (_pcSaveQueues[key] || Promise.resolve()).then(() => _pcEnvoyerLogAvecRetry(exerciceId, semaine, serie, field, key));
+  return _pcSaveQueues[key];
+}
+
+// Envoie le champ modifié, avec retries à backoff exponentiel (1s, 2s, 4s… jusqu'à 30s, 6
+// tentatives) en cas d'échec réseau — au lieu d'abandonner silencieusement au premier échec.
+// Au-delà des tentatives immédiates, l'entrée reste dans la file locale (_pcOfflineUpsert) et
+// sera rejouée au prochain chargement de l'app ou au prochain événement `online`.
+async function _pcEnvoyerLogAvecRetry(exerciceId, semaine, serie, field, key, attempt){
+  attempt = attempt || 0;
+  const log = _pcLogs[key];
+  try {
+    if (log.id) {
+      // Enregistrement existant : PATCH sur un seul champ, aucun risque d'écraser les autres
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_programme_logs?id=eq.${log.id}`,
+        { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: log[field] }) }
+      );
+      if (!res.ok) throw new Error('save_failed_' + res.status);
+    } else {
+      // Nouveau : POST avec tous les champs non-null accumulés jusqu'ici
+      const body = { client_programme_exercice_id: exerciceId, semaine, numero_serie: serie };
+      if (log.charge      != null) body.charge      = log.charge;
+      if (log.reps        != null) body.reps        = log.reps;
+      if (log.rir         != null) body.rir         = log.rir;
+      if (log.commentaire != null) body.commentaire = log.commentaire;
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_programme_logs?on_conflict=client_programme_exercice_id,semaine,numero_serie`,
+        { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
+      );
+      if (!res.ok) throw new Error('save_failed_' + res.status);
+      const rows = await res.json();
+      // On récupère uniquement l'id pour les PATCH suivants ; on garde l'état optimiste
+      if (rows[0]?.id) _pcLogs[key] = Object.assign({}, _pcLogs[key], { id: rows[0].id });
+    }
+    _pcOfflineRemove('log', exerciceId, semaine, serie, field);
+  } catch(e) {
+    if (attempt >= 6) return; // reste dans la file locale, rejoué au prochain chargement/online
+    await new Promise(r => setTimeout(r, Math.min(30000, 1000 * Math.pow(2, attempt))));
+    return _pcEnvoyerLogAvecRetry(exerciceId, semaine, serie, field, key, attempt + 1);
+  }
 }
 
 async function pcSauverCommentaire(exerciceId, value) {
@@ -1089,10 +1172,11 @@ async function pcSauverCommentaire(exerciceId, value) {
 // Copie exacte du pattern anti-race-condition de pcSauverLog, juste vers la
 // table dédiée aux exercices équivalents (clé equivalentId au lieu de exerciceId).
 async function pcSauverLogEquivalent(equivalentId, serie, field, value) {
-  const key = equivalentId + '|' + _pcSemaine + '|' + serie;
+  const semaine = _pcSemaine;
+  const key = equivalentId + '|' + semaine + '|' + serie;
   const current = _pcEquivLogs[key] || {
     equivalent_id: equivalentId,
-    semaine: _pcSemaine,
+    semaine: semaine,
     numero_serie: serie,
     charge: null, reps: null, rir: null, commentaire: null
   };
@@ -1100,33 +1184,44 @@ async function pcSauverLogEquivalent(equivalentId, serie, field, value) {
     : field === 'reps'   ? (parseInt(value)   || null)
     : (value || null);
   _pcEquivLogs[key] = Object.assign({}, current, { [field]: parsed });
+  _pcOfflineUpsert({ kind:'log_equiv', id: equivalentId, semaine, serie, field, value: parsed });
 
-  _pcEquivSaveQueues[key] = (_pcEquivSaveQueues[key] || Promise.resolve()).then(async () => {
-    const log = _pcEquivLogs[key];
-    try {
-      if (log.id) {
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?id=eq.${log.id}`,
-          { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: parsed }) }
-        );
-      } else {
-        const l = _pcEquivLogs[key];
-        const body = { equivalent_id: equivalentId, semaine: _pcSemaine, numero_serie: serie };
-        if (l.charge      != null) body.charge      = l.charge;
-        if (l.reps        != null) body.reps        = l.reps;
-        if (l.rir         != null) body.rir         = l.rir;
-        if (l.commentaire != null) body.commentaire = l.commentaire;
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?on_conflict=equivalent_id,semaine,numero_serie`,
-          { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
-        );
-        if (res.ok) {
-          const rows = await res.json();
-          if (rows[0]?.id) _pcEquivLogs[key] = Object.assign({}, _pcEquivLogs[key], { id: rows[0].id });
-        }
-      }
-    } catch(e) {}
-  });
+  _pcEquivSaveQueues[key] = (_pcEquivSaveQueues[key] || Promise.resolve()).then(() => _pcEnvoyerLogEquivAvecRetry(equivalentId, semaine, serie, field, key));
+  return _pcEquivSaveQueues[key];
+}
+
+// Copie exacte du pattern retry/offline de _pcEnvoyerLogAvecRetry, vers la table dédiée aux
+// exercices équivalents.
+async function _pcEnvoyerLogEquivAvecRetry(equivalentId, semaine, serie, field, key, attempt){
+  attempt = attempt || 0;
+  const log = _pcEquivLogs[key];
+  try {
+    if (log.id) {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?id=eq.${log.id}`,
+        { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ [field]: log[field] }) }
+      );
+      if (!res.ok) throw new Error('save_failed_' + res.status);
+    } else {
+      const body = { equivalent_id: equivalentId, semaine, numero_serie: serie };
+      if (log.charge      != null) body.charge      = log.charge;
+      if (log.reps        != null) body.reps        = log.reps;
+      if (log.rir         != null) body.rir         = log.rir;
+      if (log.commentaire != null) body.commentaire = log.commentaire;
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/client_programme_logs_equivalents?on_conflict=equivalent_id,semaine,numero_serie`,
+        { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }), body: JSON.stringify(body) }
+      );
+      if (!res.ok) throw new Error('save_failed_' + res.status);
+      const rows = await res.json();
+      if (rows[0]?.id) _pcEquivLogs[key] = Object.assign({}, _pcEquivLogs[key], { id: rows[0].id });
+    }
+    _pcOfflineRemove('log_equiv', equivalentId, semaine, serie, field);
+  } catch(e) {
+    if (attempt >= 6) return;
+    await new Promise(r => setTimeout(r, Math.min(30000, 1000 * Math.pow(2, attempt))));
+    return _pcEnvoyerLogEquivAvecRetry(equivalentId, semaine, serie, field, key, attempt + 1);
+  }
 }
 
 async function pcSauverCommentaireEquivalent(equivalentId, value) {
