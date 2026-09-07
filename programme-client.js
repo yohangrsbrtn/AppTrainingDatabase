@@ -665,7 +665,12 @@ function renderPcSelectorPage() {
   const blocSelectionne = blocs.find(b => b.id === _pcBlocId) || blocs[0];
   const seances    = _pcSeancesForBloc(_pcBlocId);
   const totalSem   = _pcSemainesForBloc(_pcBlocId);
-  const isReadonly = blocActifId && _pcBlocId !== blocActifId;
+  // Un bloc non actif reste consultable ET modifiable (saisie de logs) — seul le bloc actif
+  // (⭐) sert de proposition par défaut à l'ouverture. Avant, un bloc non actif était figé en
+  // lecture seule, ce qui forçait le coach à être hyper réactif pour activer le nouveau bloc
+  // pile au bon moment (dernière séance du bloc en cours) sous peine de bloquer le client qui
+  // a une séance d'avance de prête. Demande coach explicite : supprimer cette contrainte.
+  const isReadonly = false;
 
   // Sélecteur de bloc — uniquement si multi-blocs
   let blocSelectorHtml = '';
@@ -860,7 +865,8 @@ function renderPcSeancePage() {
   if (!seance) { _pcSubPage = 'selector'; return renderPcSelectorPage(); }
 
   const cp          = _pcClientProgramme;
-  const isReadonly  = !!(cp.bloc_actif_id && _pcBlocId !== cp.bloc_actif_id);
+  // Voir le commentaire de renderPcSelectorPage — un bloc non actif reste modifiable.
+  const isReadonly  = false;
   const totalSem    = _pcSemainesForBloc(_pcBlocId);
   const blocSeances = _pcSeancesForBloc(_pcBlocId);
 
