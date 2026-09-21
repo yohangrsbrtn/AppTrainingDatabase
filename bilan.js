@@ -21,7 +21,7 @@ function _chargerBilanHeatmap(clientId) {
   if (_bilanHeatmapClientId === clientId && _bilanHeatmapMap !== null) return;
   _bilanHeatmapClientId = clientId;
   _bilanHeatmapMap = null;
-  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at`, { headers: supaHeaders() })
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at,envoye_coach`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : [])
     .then(rows => {
       _bilanHeatmapMap = _heatmapConstruire(rows, _bilanJourBilanNom);

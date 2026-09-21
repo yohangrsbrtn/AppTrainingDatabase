@@ -141,10 +141,15 @@ function _bilanWeekBounds(jourBilanNom, refDate) {
 // bilan le plus récent. Les dates futures (jours pas encore vécus du bilan en cours, déjà
 // présents dans jours[] avec des valeurs par défaut à false) sont explicitement exclues —
 // sinon la semaine en cours apparaîtrait à tort comme "ratée" avant même d'être terminée.
+// Seuls les bilans ENVOYÉS (envoye_coach=true) sont pris en compte : un bilan jamais envoyé
+// reste à ses valeurs par défaut (tout à false/null) même si le client n'y a jamais touché —
+// le compter donnerait une semaine entière "ratée" à tort, alors qu'en réalité on n'a aucune
+// donnée (bug vécu : Hugo Saubusse, semaine du 22-28 Août jamais envoyée et jamais remplie,
+// affichée comme "ratée" sur toute la semaine au lieu de grise "pas de donnée").
 function _heatmapConstruire(bilansArr, jourBilanNom) {
   const map = {};
   const todayIso = new Date().toISOString().slice(0, 10);
-  const tri = [...(bilansArr || [])].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  const tri = [...(bilansArr || [])].filter(b => b.envoye_coach).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
   tri.forEach(b => {
     if (!b.jours || !b.jours.length || !b.created_at) return;
     const { debut } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));

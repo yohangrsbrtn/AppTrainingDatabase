@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=18"></script>
+<script src="api.js?v=19"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -7860,7 +7860,7 @@ function renderFicheProgressionTab(){
     _ficheHeatmapClientId = clientId;
     _ficheHeatmapMap = null;
     if (clientId) {
-      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at`, { headers: supaHeaders() })
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at,envoye_coach`, { headers: supaHeaders() })
         .then(r => r.ok ? r.json() : [])
         .then(rows => {
           _ficheHeatmapMap = _heatmapConstruire(rows, ficheData.profil && ficheData.profil.jour_bilan);
