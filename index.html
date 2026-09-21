@@ -2175,7 +2175,7 @@ function toggleChatFab() {
 }
 
 // ── Préférences de notifications automatiques ───────────────────────────
-// N'affecte QUE les rappels automatiques (journée 21h30, paiement...) — les
+// N'affecte QUE les rappels automatiques (journée 22h15, paiement...) — les
 // messages envoyés manuellement par le coach passent toujours (voir
 // sql/2026-08-01_rappel_journee.sql).
 let _notifPrefs = { push_actif: true, rappel_journee: true, rappel_bilan: true, chat_push: true };
@@ -2221,7 +2221,7 @@ function ouvrirGererRappels() {
         <button onclick="document.getElementById('rappelsPanel').remove()" style="width:30px;height:30px;background:#1e2235;border-radius:50%;padding:0;font-size:15px;margin:0;min-width:unset;line-height:30px;color:#8892a4;border:1px solid #2d3142;cursor:pointer;">✕</button>
       </div>
       <div style="flex:1;overflow-y:auto;padding:4px 20px calc(16px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;">
-        ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 21h30 si tu n'as pas encore validé ta journée")}
+        ${toggleRow('rappel_journee', 'Rappel de journée', "Chaque soir à 22h15 si tu n'as pas encore validé ta journée")}
         ${toggleRow('rappel_bilan', 'Rappel de bilan', "Vers 10h le jour de ton bilan si tu ne l'as pas encore envoyé")}
         ${toggleRow('chat_push', 'Nouveau message chat', "Une seule notification au premier message non lu, pas à chaque message")}
       </div>
@@ -2300,7 +2300,7 @@ function renderGuideApplication() {
       <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:11px;">
         ${_stepItem('1', '#4f8ef7', "La cloche 🔔 en haut de l'accueil", 'Historique de toutes tes notifications (messages de ton coach + rappels automatiques), avec un badge du nombre non lues')}
         ${_stepItem('2', '#4f8ef7', 'Réglages → Notifications', "Active/désactive le push sur cet appareil (les alertes reçues même app fermée) — l'action est instantanée")}
-        ${_stepItem('3', '#4f8ef7', 'Réglages → Gérer les rappels', "Active/désactive individuellement le rappel de journée (21h30) et le rappel de bilan (10h le jour de ton bilan)")}
+        ${_stepItem('3', '#4f8ef7', 'Réglages → Gérer les rappels', "Active/désactive individuellement le rappel de journée (22h15) et le rappel de bilan (10h le jour de ton bilan)")}
       </div>
       ${_calloutBox('#f59e0b', '💳 Rappel de paiement', "N'apparaît que dans la cloche, jamais en push, et ne peut pas être désactivé — il ne se déclenche de toute façon que si ton coach n'a pas encore marqué ton mois comme payé.")}
     `)}`;
