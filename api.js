@@ -133,6 +133,92 @@ function _bilanWeekBounds(jourBilanNom, refDate) {
   return { debut, fin };
 }
 
+// ── Heatmap régularité (diète / training) — grille façon GitHub contributions ──────────
+// Partagée console + app client (api.js est chargé des deux côtés). Construit une map
+// { 'YYYY-MM-DD': {diete:bool, training:bool} } à partir des bilans d'un client, en
+// recalculant la vraie date de chaque jour via _bilanWeekBounds (même logique que le détail
+// bilan). Traité du plus ancien au plus récent : un chevauchement (rollover) fait gagner le
+// bilan le plus récent. Les dates futures (jours pas encore vécus du bilan en cours, déjà
+// présents dans jours[] avec des valeurs par défaut à false) sont explicitement exclues —
+// sinon la semaine en cours apparaîtrait à tort comme "ratée" avant même d'être terminée.
+function _heatmapConstruire(bilansArr, jourBilanNom) {
+  const map = {};
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tri = [...(bilansArr || [])].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  tri.forEach(b => {
+    if (!b.jours || !b.jours.length || !b.created_at) return;
+    const { debut } = _bilanWeekBounds(jourBilanNom, new Date(b.created_at));
+    for (let i = 0; i < 7; i++) {
+      const dt = new Date(debut); dt.setDate(debut.getDate() + i);
+      const iso = dt.toISOString().slice(0, 10);
+      if (iso > todayIso) continue;
+      const j = b.jours[i] || {};
+      map[iso] = { diete: !!j.diete, training: !!j.training };
+    }
+  });
+  return map;
+}
+
+const _HEATMAP_MOIS_COURT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
+
+// Grille SVG horizontalement scrollable, ~53 semaines (Lundi→Dimanche), colorée par `field`
+// ('diete' ou 'training') — case pleine = fait, case teintée faible = raté (jour tracké dans
+// un bilan mais non validé), case grise = pas de donnée (avant le début du coaching, ou jour
+// futur). `scrollId` est renvoyé pour pouvoir scroller la grille jusqu'à "aujourd'hui" après
+// insertion dans le DOM (voir _heatmapScrollFin).
+function _heatmapHtml(map, field, color, titre, scrollId) {
+  const CELL = 11, GAP = 3, TOPPAD = 16;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const start = new Date(today); start.setDate(start.getDate() - 370);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // aligné sur un Lundi
+  const weeks = [];
+  let cur = new Date(start);
+  while (cur <= today) {
+    const week = [];
+    for (let d = 0; d < 7; d++) { week.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+    weeks.push(week);
+  }
+  const w = weeks.length * (CELL + GAP);
+  const h = TOPPAD + 7 * (CELL + GAP);
+  let svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block;">`;
+  let lastMonth = -1;
+  weeks.forEach((week, wi) => {
+    const first = week[0];
+    if (first.getDate() <= 7 && first.getMonth() !== lastMonth) {
+      lastMonth = first.getMonth();
+      svg += `<text x="${wi*(CELL+GAP)}" y="10" font-size="9" fill="#8892a4">${_HEATMAP_MOIS_COURT[first.getMonth()]}</text>`;
+    }
+    week.forEach((day, di) => {
+      if (day > today) return;
+      const iso = day.toISOString().slice(0, 10);
+      const entry = map[iso];
+      const fill = !entry ? '#1e2235' : (entry[field] ? color : color + '30');
+      const x = wi * (CELL + GAP), y = TOPPAD + di * (CELL + GAP);
+      svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" rx="2" fill="${fill}"><title>${iso}${entry ? (entry[field] ? ' ✓' : ' ✗') : ''}</title></rect>`;
+    });
+  });
+  svg += `</svg>`;
+  return `<div style="margin-bottom:16px;">
+    <div style="font-size:12px;font-weight:700;color:#e8eaf0;margin-bottom:6px;">${titre}</div>
+    <div id="${scrollId}" style="overflow-x:auto;padding-bottom:4px;">${svg}</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:9.5px;color:#8892a4;">
+      <span>Moins</span>
+      <span style="width:9px;height:9px;border-radius:2px;background:#1e2235;display:inline-block;"></span>
+      <span style="width:9px;height:9px;border-radius:2px;background:${color}30;display:inline-block;"></span>
+      <span style="width:9px;height:9px;border-radius:2px;background:${color};display:inline-block;"></span>
+      <span>Plus</span>
+    </div>
+  </div>`;
+}
+
+// À appeler juste après insertion du HTML dans le DOM — scrolle chaque grille jusqu'à
+// "aujourd'hui" (colonne la plus à droite) pour que le coach/client voie d'emblée sa
+// régularité récente sans avoir à chercher.
+function _heatmapScrollFin(scrollId) {
+  const el = document.getElementById(scrollId);
+  if (el) el.scrollLeft = el.scrollWidth;
+}
+
 // Deadline réelle d'un bilan = le jour_bilan lui-même à midi (`fin` de
 // _bilanWeekBounds est la VEILLE du jour_bilan à 23:59:59, donc +1 jour ici).
 // Source unique partagée par _bilanEstPonctuel (bonus XP) ET

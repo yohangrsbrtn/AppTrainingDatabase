@@ -469,7 +469,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=17"></script>
+<script src="api.js?v=18"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -626,6 +626,8 @@ let _ficheMensPeriode = { mode: 'tout', phase: null, debut: null, fin: null };
 let _ficheXpHistoClientId = null;
 let _ficheXpHistorique = null; // null = pas encore chargé
 let _ficheXpHistoLoading = false;
+let _ficheHeatmapClientId = null;
+let _ficheHeatmapMap = null; // null = pas encore chargée (_heatmapConstruire, api.js)
 let _ficheMenusJournalClientId = null;
 let _ficheMenus = null; let _ficheMenusLoading = false;
 let _ficheJournal = null; let _ficheJournalLoading = false;
@@ -7852,8 +7854,33 @@ function renderFicheProgressionTab(){
     ? `<div class="fiche-prog-empty">Chargement…</div>`
     : (_ficheXpHistorique.length ? xpHistoRows : `<div class="fiche-prog-empty">Aucun événement enregistré.</div>`);
 
+  // ── Régularité (heatmap diète/training) — même helper partagé que côté client
+  // (_heatmapConstruire/_heatmapHtml, api.js).
+  if (_ficheHeatmapClientId !== clientId) {
+    _ficheHeatmapClientId = clientId;
+    _ficheHeatmapMap = null;
+    if (clientId) {
+      fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at`, { headers: supaHeaders() })
+        .then(r => r.ok ? r.json() : [])
+        .then(rows => {
+          _ficheHeatmapMap = _heatmapConstruire(rows, ficheData.profil && ficheData.profil.jour_bilan);
+          const el = document.getElementById('ficheTabContent');
+          if (el && ficheTab === 'progression') el.innerHTML = renderFicheProgressionTab();
+        })
+        .catch(() => { _ficheHeatmapMap = {}; });
+    }
+  }
+  const heatmapHtml = _ficheHeatmapMap === null
+    ? `<div class="fiche-card"><div style="font-size:12px;color:var(--text-faint);">Chargement de la régularité…</div></div>`
+    : `<div class="fiche-card">
+        ${_heatmapHtml(_ficheHeatmapMap, 'diete', '#1D9E75', '🥗 Régularité diète', 'ficheHmDieteScroll')}
+        ${_heatmapHtml(_ficheHeatmapMap, 'training', '#378ADD', '🏋️ Régularité training', 'ficheHmTrainingScroll')}
+      </div>`;
+  setTimeout(() => { _heatmapScrollFin('ficheHmDieteScroll'); _heatmapScrollFin('ficheHmTrainingScroll'); }, 50);
+
   return `
     ${xpCard}
+    ${heatmapHtml}
     <div class="fiche-card">
       <h3>Historique XP</h3>
       <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">Tout ce qui fait gagner de l'XP : bilans envoyés, séances et journées validées.</div>

@@ -13,6 +13,23 @@ let _bilanPhotosBilanId = null;  // id du bilan pour lequel _bilanPhotos a été
 let _bilanPhotosUploading = false;
 let _bilanAutresEnAttente = 0; // nb d'anciens bilans non-envoyés/non-archivés autres que le courant
 
+// ── Heatmap régularité diète/training (_heatmapConstruire/_heatmapHtml, api.js) ────────
+let _bilanHeatmapMap = null;       // null = pas encore chargée
+let _bilanHeatmapClientId = null;  // client pour lequel _bilanHeatmapMap a été construite
+
+function _chargerBilanHeatmap(clientId) {
+  if (_bilanHeatmapClientId === clientId && _bilanHeatmapMap !== null) return;
+  _bilanHeatmapClientId = clientId;
+  _bilanHeatmapMap = null;
+  fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&select=jours,created_at`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : [])
+    .then(rows => {
+      _bilanHeatmapMap = _heatmapConstruire(rows, _bilanJourBilanNom);
+      if (S.page === 'bilan') setPage('bilan');
+    })
+    .catch(() => { _bilanHeatmapMap = {}; });
+}
+
 // ── Chargement ────────────────────────────────────────────────────────
 
 async function loadBilan() { await _supaLoadBilan(); }
@@ -781,6 +798,21 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
       <input type="file" accept="image/*" multiple style="display:none;" ${_bilanPhotosUploading ? 'disabled' : ''} onchange="_ajouterBilanPhotoClient(event)">
     </label>
   </div>`;
+
+  // ── Régularité (heatmap diète/training) — uniquement sur la semaine en cours, pas sur
+  // l'historique/semaine précédente/bilans en attente (redondant, jamais utile là-bas).
+  if (!modeHistorique && !attenteMode && !isSemainePrecedente) {
+    _chargerBilanHeatmap(getClient());
+    if (_bilanHeatmapMap === null) {
+      html += `<div class="card"><div style="font-size:12px;color:var(--muted);">Chargement de ta régularité…</div></div>`;
+    } else {
+      html += `<div class="card">
+        ${_heatmapHtml(_bilanHeatmapMap, 'diete', '#1D9E75', '🥗 Régularité diète', 'hmDieteScroll')}
+        ${_heatmapHtml(_bilanHeatmapMap, 'training', '#378ADD', '🏋️ Régularité training', 'hmTrainingScroll')}
+      </div>`;
+      setTimeout(() => { _heatmapScrollFin('hmDieteScroll'); _heatmapScrollFin('hmTrainingScroll'); }, 50);
+    }
+  }
 
   // ── Boutons bas
   if (modeHistorique) {
