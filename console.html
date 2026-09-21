@@ -5964,7 +5964,11 @@ function renderFicheProtocoleTab(c){
 
   const p = _ficheProtocole;
   const mols = (p.client_protocole_molecules || []).slice().sort((a,b)=>(a.ordre||0)-(b.ordre||0));
-  const catColor = cat => cat==='Injectable' ? '#e05c5c' : cat==='Oral' ? '#4f8ef7' : '#a78bfa';
+  // Agenda d'injection (totaux + planning hebdomadaire avec dosages) — même calcul que
+  // l'éditeur (_protocoleCalculer/renderProtocolePreviewHtml), jusqu'ici affiché UNIQUEMENT
+  // pendant l'édition et invisible dès qu'on revenait sur cet onglet après avoir enregistré
+  // (demande coach explicite : le retrouver ici aussi, pas seulement en rouvrant l'éditeur).
+  const preview = mols.length ? _protocoleCalculer(p, mols) : null;
 
   return subTabsHtml + `<div class="fiche-card">
     <div class="field-grid" style="margin-bottom:14px;">
@@ -5973,13 +5977,9 @@ function renderFicheProtocoleTab(c){
       <div class="field-row"><label>Fin de cycle</label><div>${_protocoleDateFinFmt(p.date_debut, p.duree_semaines)}</div></div>
       <div class="field-row" style="grid-column:span 2;"><label>Objectif</label><div>${esc(p.objectif||'—')}</div></div>
     </div>
-    ${mols.length ? mols.map(m=>`
-      <div class="panel-row">
-        <span class="l" style="color:${catColor(m.categorie)};font-weight:600;">${esc(m.nom)}</span>
-        <span class="v">${esc(m.categorie||'')}${m.unite?' · '+esc(m.unite):''}</span>
-      </div>`).join('') : `<p style="color:var(--text-faint);margin-bottom:14px;">Aucune molécule.</p>`}
-    <button class="btn primary" style="margin-top:14px;" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">✎ Éditer le protocole</button>
-  </div>`;
+    <button class="btn primary" onclick="ouvrirEditeurProtocole('${c.id}','${nomEsc}','fiche-client')">✎ Éditer le protocole</button>
+  </div>
+  ${preview ? renderProtocolePreviewHtml(preview) : `<div class="fiche-card"><p style="color:var(--text-faint);">Aucune molécule.</p></div>`}`;
 }
 
 // ── Analyses de sang (fiche client → Protocole → sous-onglet Analyses) ──
