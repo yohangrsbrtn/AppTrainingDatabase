@@ -4904,7 +4904,12 @@ let _cpCollapsed  = new Set();
 // ── Supersets ─────────────────────────────────────────────────────────
 let _tplSupersetPending = null; // {bi,si,ei} en attente de liaison (template)
 let _cpSupersetPending  = null; // idem, éditeur programme client
-let _supersetIdCounter  = Date.now(); // id de groupe interne, jamais affiché tel quel
+// id de groupe interne, jamais affiché tel quel — juste besoin d'être unique au sein d'une
+// même séance en cours d'édition, PAS globalement unique en base. Un timestamp Date.now()
+// (13 chiffres, ~1,79 billion) dépasse la plage d'un entier Postgres standard (int4, max
+// 2 147 483 647) : toute sauvegarde d'un superset échouait avec "value out of range for type
+// integer" (HTTP 400), bug vécu — programme de Roony Timos, plantage à l'enregistrement.
+let _supersetIdCounter  = 1;
 
 // Clic sur 🔗 : délie si déjà lié, sinon entre/sort du mode "choisir le partenaire", sinon lie
 // à l'exercice en attente (même séance uniquement). `edition`/`get`/`render` abstraient template vs client.
@@ -9197,33 +9202,44 @@ async function sauvegarderProgrammeClient(){
   const errEl=document.getElementById('cpErr');
   if(btn){btn.disabled=true;btn.textContent='Enregistrement…';}
   if(errEl) errEl.style.display='none';
+  // Vérifie qu'une réponse Supabase a bien réussi avant d'en lire le contenu — sinon un
+  // échec serveur (contrainte, RLS, champ invalide…) fait planter avec "Cannot read
+  // properties of undefined (reading 'id')" au lieu de faire remonter la VRAIE erreur
+  // (bug vécu : programme de Roony Timos, plus aucun message exploitable pour diagnostiquer).
+  async function _cpAssertOk(r, quoi){
+    if (!r.ok) {
+      const body = await r.text().catch(()=>'');
+      throw new Error(`${quoi} (HTTP ${r.status})` + (body ? ' — ' + body.slice(0,300) : ''));
+    }
+    return r;
+  }
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,objectif:cp.objectif||null,bloc_actif_id:cp.bloc_actif_id||null})});
+    await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,objectif:cp.objectif||null,bloc_actif_id:cp.bloc_actif_id||null})}), 'Programme');
     const newBlocIds=[],newSeanceIds=[],newExoIds=[];
     for(let bi=0;bi<cp.blocs.length;bi++){
       const b=cp.blocs[bi];
       if(b.id){
-        await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=eq.${b.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})});
+        await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs?id=eq.${b.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})}), `Bloc "${b.type||bi+1}"`);
       } else {
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_id:cp.id,type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})});
+        const r=await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({client_programme_id:cp.id,type:b.type||null,nombre_semaines:b.nombre_semaines||null,ordre:bi})}), `Bloc "${b.type||bi+1}"`);
         b.id=(await r.json())[0].id;
       }
       newBlocIds.push(b.id);
       for(let si=0;si<b.seances.length;si++){
         const s=b.seances[si];
         if(s.id){
-          await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${s.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({titre:s.titre,ordre:si})});
+          await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances?id=eq.${s.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({titre:s.titre,ordre:si})}), `Séance "${s.titre}"`);
         } else {
-          const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({bloc_id:b.id,titre:s.titre,ordre:si})});
+          const r=await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({bloc_id:b.id,titre:s.titre,ordre:si})}), `Séance "${s.titre}"`);
           s.id=(await r.json())[0].id;
         }
         newSeanceIds.push(s.id);
         for(let ei=0;ei<s.exercices.length;ei++){
           const ex=s.exercices[ei];
           if(ex.id){
-            await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})});
+            await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})}), `Exercice "${ex.nom}" (${s.titre})`);
           } else {
-            const r=await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})});
+            const r=await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})}), `Exercice "${ex.nom}" (${s.titre})`);
             ex.id=(await r.json())[0].id;
           }
           newExoIds.push(ex.id);
