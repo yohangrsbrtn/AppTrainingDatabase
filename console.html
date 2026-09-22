@@ -1623,7 +1623,10 @@ async function chargerDonnees(){
 
   // Retard : même logique de ponctualité que côté client (_supaCalculerRetard, déjà
   // Supabase-native) pour tout le monde désormais, plus de distinction GAS/Supabase.
-  const retards = await Promise.all(clients.map(c => _supaCalculerRetard(c.id).catch(()=>false)));
+  // Sauf clients en pause ou archivés ("ancien") : coaching suspendu, aucun bilan n'est
+  // attendu d'eux — le statut "en retard" reste figé/faux plutôt que de s'accumuler
+  // pendant toute la pause (demande coach explicite).
+  const retards = await Promise.all(clients.map(c => (c.statut==='pause'||c.statut==='ancien') ? Promise.resolve(false) : _supaCalculerRetard(c.id).catch(()=>false)));
   clients.forEach((c,i) => { c.enRetard = retards[i]; });
 
   const clientsById = {};
