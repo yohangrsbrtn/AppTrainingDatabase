@@ -1015,7 +1015,7 @@ function _renderLightboxDom(){
           const scale = isCur ? 1 : (Math.abs(dist)===1 ? 0.7 : 0.5);
           const opac = isCur ? 1 : (Math.abs(dist)===1 ? 0.4 : 0.18);
           return `<img src="${esc(p.url)}" onclick="event.stopPropagation();lightboxGoto(${i})"
-            style="max-height:${isCur?'70vh':'46vh'};aspect-ratio:9/16;object-fit:cover;border-radius:12px;cursor:pointer;transform:scale(${scale});opacity:${opac};transition:transform .25s ease,opacity .25s ease;flex-shrink:0;box-shadow:${isCur?'0 12px 40px rgba(0,0,0,.6)':'none'};">`;
+            style="max-height:${isCur?'70vh':'46vh'};aspect-ratio:9/16;object-fit:contain;background:#0b0d14;border-radius:12px;cursor:pointer;transform:scale(${scale});opacity:${opac};transition:transform .25s ease,opacity .25s ease;flex-shrink:0;box-shadow:${isCur?'0 12px 40px rgba(0,0,0,.6)':'none'};">`;
         }).join('')}
       </div>
       <button onclick="event.stopPropagation();lightboxNav(1)" ${index>=photos.length-1?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index>=photos.length-1?'.2':'.8'};">›</button>
@@ -6410,16 +6410,16 @@ async function ouvrirEditeurAvantApres(nomClient){
   overlay.id = 'modal-avant-apres';
   overlay.innerHTML = `<div class="modal-box" style="max-width:480px;">
     <h3 style="margin:0 0 4px;">🖼️ Avant / Après</h3>
-    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Glisse chaque photo pour la recadrer, utilise les curseurs pour zoomer.</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Glisse chaque photo pour la recadrer, utilise les curseurs pour zoomer — descends sous 1 pour voir la photo entière si son format ne remplit pas bien le cadre.</div>
     <canvas id="aaCanvas" width="${_AA_SIZE}" height="${_AA_SIZE}" style="width:100%;height:auto;aspect-ratio:1/1;border-radius:var(--radius-sm);background:var(--surface-2);touch-action:none;cursor:grab;display:block;"></canvas>
     <div style="display:flex;gap:16px;margin-top:12px;">
       <div style="flex:1;">
         <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Zoom AVANT (gauche)</div>
-        <input id="aaZoomL" type="range" min="1" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('L',this.value)">
+        <input id="aaZoomL" type="range" min="0.3" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('L',this.value)">
       </div>
       <div style="flex:1;">
         <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Zoom APRÈS (droite)</div>
-        <input id="aaZoomR" type="range" min="1" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('R',this.value)">
+        <input id="aaZoomR" type="range" min="0.3" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('R',this.value)">
       </div>
     </div>
     <div class="modal-actions" style="margin-top:16px;">
@@ -6472,6 +6472,11 @@ function _aaDraw(){
     ctx.beginPath();
     ctx.rect(x0, 0, halfW, halfH);
     ctx.clip();
+    // Fond derrière la photo — visible en bandes si le zoom descend sous 1 (photo affichée en
+    // entier, sans crop, plutôt que forcée à remplir toute la moitié). Sans ce fond, ces bandes
+    // resteraient transparentes et l'export JPEG (pas de canal alpha) les rendrait noires.
+    ctx.fillStyle = '#0b0d14';
+    ctx.fillRect(x0, 0, halfW, halfH);
     const drawW = s.natW * eff, drawH = s.natH * eff;
     const dx = x0 + halfW / 2 - drawW / 2 + s.offX;
     const dy = halfH / 2 - drawH / 2 + s.offY;
