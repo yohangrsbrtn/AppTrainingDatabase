@@ -166,11 +166,17 @@ function _heatmapConstruire(bilansArr, jourBilanNom) {
 
 const _HEATMAP_MOIS_COURT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
 
+const _HEATMAP_JOURS_COURT = ['Lun','','Mer','','Ven','','']; // labels épars (Lun/Mer/Ven), comme GitHub — tous les afficher serait illisible en 11px
+
 // Grille SVG horizontalement scrollable, ~53 semaines (Lundi→Dimanche), colorée par `field`
 // ('diete' ou 'training') — case pleine = fait, case teintée faible = raté (jour tracké dans
 // un bilan mais non validé), case grise = pas de donnée (avant le début du coaching, ou jour
 // futur). `scrollId` est renvoyé pour pouvoir scroller la grille jusqu'à "aujourd'hui" après
 // insertion dans le DOM (voir _heatmapScrollFin).
+// Lisibilité (retour coach 2026-09-23, comprise mais pas au premier coup d'œil) : labels de
+// jours (Lun/Mer/Ven) fixes à gauche pour que le sens de lecture vertical soit évident sans
+// avoir à deviner, repères verticaux + mois en gras à chaque changement de mois, et une légende
+// "il y a 1 an → aujourd'hui" pour le sens horizontal.
 function _heatmapHtml(map, field, color, titre, scrollId) {
   const CELL = 11, GAP = 3, TOPPAD = 16;
   const today = new Date(); today.setHours(0,0,0,0);
@@ -185,27 +191,47 @@ function _heatmapHtml(map, field, color, titre, scrollId) {
   }
   const w = weeks.length * (CELL + GAP);
   const h = TOPPAD + 7 * (CELL + GAP);
+  const rowY = di => TOPPAD + di * (CELL + GAP);
+
+  // Colonne de labels jours — SVG séparé, pas scrollé, pour rester visible pendant le scroll
+  // horizontal des semaines.
+  let daysSvg = `<svg viewBox="0 0 20 ${h}" width="20" height="${h}" style="display:block;flex-shrink:0;">`;
+  _HEATMAP_JOURS_COURT.forEach((label, di) => {
+    if (!label) return;
+    daysSvg += `<text x="0" y="${rowY(di)+CELL-2}" font-size="9" fill="#8892a4">${label}</text>`;
+  });
+  daysSvg += `</svg>`;
+
   let svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block;">`;
   let lastMonth = -1;
   weeks.forEach((week, wi) => {
     const first = week[0];
+    const x = wi * (CELL + GAP);
     if (first.getDate() <= 7 && first.getMonth() !== lastMonth) {
       lastMonth = first.getMonth();
-      svg += `<text x="${wi*(CELL+GAP)}" y="10" font-size="9" fill="#8892a4">${_HEATMAP_MOIS_COURT[first.getMonth()]}</text>`;
+      // Repère vertical au changement de mois — rend la limite visible d'un coup d'œil, pas
+      // seulement via le texte.
+      svg += `<line x1="${x-2}" y1="${TOPPAD-1}" x2="${x-2}" y2="${h}" stroke="#2a3244" stroke-width="1"/>`;
+      svg += `<text x="${x}" y="10" font-size="9.5" font-weight="700" fill="#c8d0e0">${_HEATMAP_MOIS_COURT[first.getMonth()]}</text>`;
     }
     week.forEach((day, di) => {
       if (day > today) return;
       const iso = day.toISOString().slice(0, 10);
       const entry = map[iso];
       const fill = !entry ? '#1e2235' : (entry[field] ? color : color + '30');
-      const x = wi * (CELL + GAP), y = TOPPAD + di * (CELL + GAP);
-      svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" rx="2" fill="${fill}"><title>${iso}${entry ? (entry[field] ? ' ✓' : ' ✗') : ''}</title></rect>`;
+      svg += `<rect x="${x}" y="${rowY(di)}" width="${CELL}" height="${CELL}" rx="2" fill="${fill}"><title>${iso}${entry ? (entry[field] ? ' ✓' : ' ✗') : ''}</title></rect>`;
     });
   });
   svg += `</svg>`;
   return `<div style="margin-bottom:16px;">
-    <div style="font-size:12px;font-weight:700;color:#e8eaf0;margin-bottom:6px;">${titre}</div>
-    <div id="${scrollId}" style="overflow-x:auto;padding-bottom:4px;">${svg}</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+      <div style="font-size:12px;font-weight:700;color:#e8eaf0;">${titre}</div>
+      <div style="font-size:9.5px;color:#8892a4;">Il y a 1 an → Aujourd'hui</div>
+    </div>
+    <div style="display:flex;">
+      ${daysSvg}
+      <div id="${scrollId}" style="overflow-x:auto;padding-bottom:4px;">${svg}</div>
+    </div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:9.5px;color:#8892a4;">
       <span>Moins</span>
       <span style="width:9px;height:9px;border-radius:2px;background:#1e2235;display:inline-block;"></span>
