@@ -801,6 +801,8 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
 
   // ── Régularité (heatmap diète/training) — uniquement sur la semaine en cours, pas sur
   // l'historique/semaine précédente/bilans en attente (redondant, jamais utile là-bas).
+  // Placée AVANT les boutons d'action (retour coach 2026-09-23) : contenu de synthèse
+  // d'abord, actions ensuite — plus logique que de la reléguer tout en bas.
   if (!modeHistorique && !attenteMode && !isSemainePrecedente) {
     _chargerBilanHeatmap(getClient());
     if (_bilanHeatmapMap === null) {
@@ -814,24 +816,26 @@ function _renderBilanDetailSupa(data, modeHistorique, isSemainePrecedente, atten
     }
   }
 
-  // ── Boutons bas
+  // ── Boutons bas — seul "Envoyer au coach" est une vraie action à mettre en avant ; le
+  // reste (Historique, Bilans en attente, retour) est de la navigation secondaire, rendue en
+  // liens discrets plutôt qu'en gros boutons pleins pour ne pas tous les mettre au même
+  // niveau visuel (retour coach 2026-09-23 : "trop gros, trop rond, ça fait grossier").
+  const lienDiscret = (label, onclick) => `<button onclick="${onclick}" style="flex:1;background:transparent;border:1px solid #2d3142;border-radius:10px;padding:9px 4px;font-size:11.5px;font-weight:600;color:#8892a4;cursor:pointer;white-space:nowrap;">${label}</button>`;
   if (modeHistorique) {
-    html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()">📅 Historique des bilans</button>`;
+    html += `<div style="display:flex;">${lienDiscret('📅 Historique des bilans', "loadHistoriqueBilans()")}</div>`;
   } else {
     const deja = !!data.dejaEnvoye;
     html += `<button id="btn-envoyer" onclick="_doEnvoyerBilanSupa(this)"
       ${deja ? 'disabled' : ''}
-      class="${deja ? 'btn-disabled' : 'btn-blue'}" style="width:100%;margin-top:4px;">
+      class="${deja ? 'btn-disabled' : 'btn-blue'}" style="width:100%;">
       ${deja ? '✅ Envoyé au coach' : '📤 Envoyer au coach'}
     </button>`;
     if (attenteMode) {
-      html += `<button class="btn-secondary" onclick="chargerBilansEnAttente()" style="margin-top:8px;">← Bilans en attente</button>`;
+      html += `<div style="display:flex;margin-top:8px;">${lienDiscret('← Bilans en attente', 'chargerBilansEnAttente()')}</div>`;
     } else {
-      html += `<button class="btn-secondary" onclick="loadHistoriqueBilans()" style="margin-top:8px;">📅 Historique des bilans</button>`;
-      html += `<button class="btn-secondary" onclick="chargerBilansEnAttente()" style="margin-top:8px;">⏳ Bilans en attente</button>`;
-      if (isSemainePrecedente) {
-        html += `<button class="btn-secondary" onclick="loadBilan()" style="margin-top:8px;">← Semaine en cours</button>`;
-      }
+      const liens = [lienDiscret('📅 Historique', 'loadHistoriqueBilans()'), lienDiscret('⏳ En attente', 'chargerBilansEnAttente()')];
+      if (isSemainePrecedente) liens.push(lienDiscret('← Sem. en cours', 'loadBilan()'));
+      html += `<div style="display:flex;gap:8px;margin-top:8px;">${liens.join('')}</div>`;
     }
   }
 
