@@ -6810,6 +6810,14 @@ function _bilanWeekBoundsNearest(jourBilanNom, refDate, createdAtDate) {
   fin.setDate(refDate.getDate() + (preferForward ? avant : -arriere));
   fin.setHours(23, 59, 59, 999);
   const debut = new Date(fin); debut.setDate(fin.getDate() - 6); debut.setHours(0, 0, 0, 0);
+  // Garde-fou : un bilan ne peut pas appartenir à une semaine qui a commencé APRÈS sa propre
+  // création. Cas vécu (Adrien Chatelin) : bilan de la semaine 6-12 Sept envoyé très en retard
+  // (16 Sept) → la semaine "la plus proche" de la date d'envoi était 13-19, déjà occupée par le
+  // vrai bilan de cette semaine → deux bilans affichés "13 → 19 Sept". La vraie semaine est
+  // celle dans laquelle il a été créé.
+  if (createdAtDate && createdAtDate.getTime() < debut.getTime()) {
+    return typeof _bilanWeekBounds === 'function' ? _bilanWeekBounds(jourBilanNom, createdAtDate) : { debut, fin };
+  }
   return { debut, fin };
 }
 
