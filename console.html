@@ -2455,6 +2455,26 @@ function ouvrirBilanDashboard(bilanId) {
   if (!b) return;
   _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1;
   openBilanDetailSupabase(b);
+  _chargerBilanNavPourClient(b.client_id, b.id);
+}
+
+// Recharge la liste de navigation prev/next pour CE client — nécessaire quand un bilan est
+// ouvert depuis un point d'entrée qui ne passe pas par l'onglet Bilans de la fiche client
+// (dashboard "à traiter"/"en retard", mensurations…). Sans ça, bilanNavGo restait inopérant
+// tant qu'on n'était pas repassé par la fiche client pour re-sélectionner un bilan — demande
+// coach explicite : la navigation prev/next doit marcher peu importe d'où on ouvre un bilan.
+async function _chargerBilanNavPourClient(clientId, bilanIdCourant) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&order=envoye_coach.asc,date_validation.desc.nullslast,created_at.desc`, { headers: supaHeaders() });
+    const rows = res.ok ? await res.json() : [];
+    const c = data.clients.find(x=>x.id===clientId);
+    const tries = _bilanTrierParPeriode(Array.isArray(rows) ? rows : [], c ? c.jour_bilan : null);
+    const idx = tries.findIndex(x=>x.id===bilanIdCourant);
+    if (idx < 0) return;
+    _bilanNavList = tries;
+    _bilanNavIdx = idx;
+    if (state.nav === 'bilan-detail' && bilanDetailState && bilanDetailState._supabaseBilanId === bilanIdCourant) renderMain();
+  } catch(e) {}
 }
 
 // "Bilans en retard" ne porte que le client (pas de bilan précis) — on va
@@ -2464,7 +2484,7 @@ async function ouvrirBilanEnRetardDashboard(clientId) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&envoye_coach=eq.false&archive=eq.false&order=created_at.asc&limit=1`, { headers: supaHeaders() });
     const rows = res.ok ? await res.json() : [];
-    if (rows[0]) { _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1; openBilanDetailSupabase(rows[0]); return; }
+    if (rows[0]) { _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1; openBilanDetailSupabase(rows[0]); _chargerBilanNavPourClient(clientId, rows[0].id); return; }
   } catch(e) {}
   openPanel(clientId);
 }
@@ -2482,6 +2502,7 @@ async function _ouvrirDernierBilanEnvoye(clientId) {
     if (!rows[0]) { alert('Aucun bilan envoyé pour ce client.'); return; }
     _bilanNavSource = 'fiche'; _bilanNavList = null; _bilanNavIdx = -1;
     openBilanDetailSupabase(rows[0]);
+    _chargerBilanNavPourClient(clientId, rows[0].id);
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
@@ -5632,6 +5653,7 @@ function openBilanByIdFromRecents(id){
   if (!b) return;
   _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
   openBilanDetailSupabase(b);
+  _chargerBilanNavPourClient(b.client_id, b.id);
 }
 
 function openBilanFromHistorique(idx){
@@ -5639,6 +5661,7 @@ function openBilanFromHistorique(idx){
   if (!b) return;
   _bilanNavSource = 'bilans'; _bilanNavList = null; _bilanNavIdx = -1;
   openBilanDetailSupabase(b);
+  _chargerBilanNavPourClient(b.client_id, b.id);
 }
 
 async function changerStatutClient(clientId, statut) {
@@ -13668,6 +13691,24 @@ function _applyDeepLinkNav(){
   renderNotifMenu();
   _applyDeepLinkNav();
 })();
+
+// Rafraîchissement automatique périodique — jusqu'ici la console ne se remettait à jour
+// qu'une fois, à l'ouverture (revalidation en fond après le cache) : un onglet resté ouvert
+// longtemps (dashboard notamment) affichait des données périmées indéfiniment tant que le
+// coach ne rechargeait pas la page à la main (bug vécu : 2e bilan de Hugo Saubusse invisible
+// dans "Bilans à traiter"). Ne re-render QUE sur les pages de consultation (liste jamais en
+// cours de saisie) — sur une page d'édition (programme, diète, protocole…) les données sont
+// quand même rafraîchies en silence, prêtes dès que le coach change de page, mais on ne
+// remplace pas le DOM sous ses doigts pendant qu'il tape.
+const _NAV_PAGES_AUTOREFRESH = new Set(['dashboard','clients','bilans','bilan-detail','classement','mensurations','notifications','facturation']);
+setInterval(() => {
+  if (_dataRefreshing) return;
+  _dataRefreshing = true;
+  chargerDonnees().catch(() => {}).finally(() => {
+    _dataRefreshing = false;
+    if (_NAV_PAGES_AUTOREFRESH.has(state.nav)) { renderSidebar(); renderMain(); }
+  });
+}, 150000); // 2 min 30
 </script>
 </body>
 </html>
