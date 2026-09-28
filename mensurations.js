@@ -258,13 +258,24 @@ function renderSaisieFormSupabase() {
   const d = _mFormData;
   if (!d) return renderSaisieListSupabase();
 
+  // Dernière saisie AVANT celle-ci (la plus récente qui précède, peu importe l'écart) —
+  // affichée en repère sous chaque champ pour que le client détecte une mesure aberrante au
+  // moment même où il prend son mètre ruban (ex: 47 au lieu de 57 au tour de cuisse), sans
+  // avoir à rouvrir l'historique à côté. Demande coach explicite : les clients n'avaient aucun
+  // visuel sur leur mensuration précédente pendant la saisie.
+  const precedentes = _mReleves.filter(r => r.date < d.date);
+  const prec = precedentes.length ? precedentes[precedentes.length - 1] : null;
+  const precDateFmt = prec ? _mAfficherDate(prec.date) : null;
+
   const numInput = (label, field, unit) => {
     const val = d[field] !== null && d[field] !== undefined ? d[field] : '';
+    const precVal = prec && prec[field] != null ? prec[field] : null;
     return `<div style="margin-bottom:12px;">
       <div class="field-label">${label} (${unit})</div>
       <input type="number" inputmode="decimal" step="0.1" value="${val}" placeholder="—"
         class="bilan-input" style="font-size:16px;"
         onchange="sauverMensurationSupa('${field}', parseFloat(this.value)||null)">
+      ${precVal != null ? `<div style="font-size:11px;color:#5a6172;margin-top:3px;">Dernière mesure (${precDateFmt}) : <strong style="color:#8892a4;">${precVal}</strong></div>` : ''}
     </div>`;
   };
 
