@@ -6453,6 +6453,16 @@ async function ouvrirEditeurAvantApres(nomClient){
         <input id="aaZoomR" type="range" min="0.3" max="3" step="0.01" value="1" style="width:100%;" oninput="_aaSetZoom('R',this.value)">
       </div>
     </div>
+    <div style="display:flex;gap:16px;margin-top:8px;">
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Rotation AVANT <span id="aaRotLVal">0°</span></div>
+        <input id="aaRotL" type="range" min="-15" max="15" step="0.5" value="0" style="width:100%;" oninput="_aaSetRotation('L',this.value)">
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">Rotation APRÈS <span id="aaRotRVal">0°</span></div>
+        <input id="aaRotR" type="range" min="-15" max="15" step="0.5" value="0" style="width:100%;" oninput="_aaSetRotation('R',this.value)">
+      </div>
+    </div>
     <div class="modal-actions" style="margin-top:16px;">
       <button class="btn" onclick="document.getElementById('modal-avant-apres').remove()">Fermer</button>
       <button class="btn primary" id="aaExportBtn" onclick="_aaExporter('${esc(nomClient||'client')}')">⬇ Télécharger le JPEG</button>
@@ -6463,8 +6473,8 @@ async function ouvrirEditeurAvantApres(nomClient){
 
   _aaState = { L: null, R: null };
   const [imgL, imgR] = await Promise.all([_aaLoadImage(pL.url), _aaLoadImage(pR.url)]);
-  _aaState.L = { img: imgL, natW: imgL.naturalWidth, natH: imgL.naturalHeight, zoom: 1, offX: 0, offY: 0 };
-  _aaState.R = { img: imgR, natW: imgR.naturalWidth, natH: imgR.naturalHeight, zoom: 1, offX: 0, offY: 0 };
+  _aaState.L = { img: imgL, natW: imgL.naturalWidth, natH: imgL.naturalHeight, zoom: 1, offX: 0, offY: 0, rotation: 0 };
+  _aaState.R = { img: imgR, natW: imgR.naturalWidth, natH: imgR.naturalHeight, zoom: 1, offX: 0, offY: 0, rotation: 0 };
   _aaDraw();
 
   const canvas = document.getElementById('aaCanvas');
@@ -6508,9 +6518,18 @@ function _aaDraw(){
     // resteraient transparentes et l'export JPEG (pas de canal alpha) les rendrait noires.
     ctx.fillStyle = '#0b0d14';
     ctx.fillRect(x0, 0, halfW, halfH);
+    // Rotation (correction d'une photo prise pas tout à fait droite) — appliquée APRÈS le clip
+    // (qui reste un rectangle fixe non tourné) et centrée sur le milieu de la moitié, pour que
+    // la photo pivote sur place sans déborder de son cadre.
+    const cx = x0 + halfW / 2, cy = halfH / 2;
+    if (s.rotation) {
+      ctx.translate(cx, cy);
+      ctx.rotate(s.rotation * Math.PI / 180);
+      ctx.translate(-cx, -cy);
+    }
     const drawW = s.natW * eff, drawH = s.natH * eff;
-    const dx = x0 + halfW / 2 - drawW / 2 + s.offX;
-    const dy = halfH / 2 - drawH / 2 + s.offY;
+    const dx = cx - drawW / 2 + s.offX;
+    const dy = cy - drawH / 2 + s.offY;
     ctx.drawImage(s.img, dx, dy, drawW, drawH);
     ctx.restore();
   });
@@ -6522,6 +6541,15 @@ function _aaDraw(){
 function _aaSetZoom(side, val){
   if (!_aaState || !_aaState[side]) return;
   _aaState[side].zoom = parseFloat(val) || 1;
+  _aaDraw();
+}
+
+function _aaSetRotation(side, val){
+  if (!_aaState || !_aaState[side]) return;
+  const deg = parseFloat(val) || 0;
+  _aaState[side].rotation = deg;
+  const label = document.getElementById(side === 'L' ? 'aaRotLVal' : 'aaRotRVal');
+  if (label) label.textContent = deg + '°';
   _aaDraw();
 }
 
