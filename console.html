@@ -1605,6 +1605,7 @@ async function chargerDonnees(){
       verrouile: false,
       verrouilleApp: !!p.verrouille_app,
       dernConnexion: null,
+      dateNaissance: p.date_naissance || null,
       derniereConnexionSupa: p.derniere_connexion || null,
       _hasSupaProfil: true,
       supabaseOnlyActif: !!p.supabase_only,
@@ -5441,6 +5442,19 @@ async function reparerDietesPartagees(){
   if (statusEl) statusEl.innerHTML += `<div style="margin-top:6px;color:var(--text-faint);">Terminé.</div>`;
 }
 
+// Anniversaire du jour — comparaison jour/mois uniquement (l'année de date_naissance sert à
+// calculer l'âge, pas à savoir si c'est "aujourd'hui"). Demande coach explicite : une notif
+// perso pour ne jamais rater l'anniversaire d'un client.
+function _estAnniversaireAujourdhui(dateNaissance){
+  if (!dateNaissance) return false;
+  const d = new Date(dateNaissance + 'T12:00:00');
+  const now = new Date();
+  return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+}
+function _anniversairesAujourdhui(){
+  return (data.clients || []).filter(c => !c.estCoach && _estAnniversaireAujourdhui(c.dateNaissance));
+}
+
 function renderDashboard(el){
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
   const bilansSupaATrait = _bilansATraiterListe().map(b => {
@@ -5525,6 +5539,18 @@ function renderDashboard(el){
               <button class="btn" style="font-size:10px;padding:3px 8px;" onclick="event.stopPropagation();toggleBilanEnAttente(${b.id}, false)">↩ À traiter</button>
             </div>`; }).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
+        `; })()}
+      </div>
+      <div class="card">
+        ${(() => { const anniv = _anniversairesAujourdhui(); return `
+        <div class="card-head">🎂<span class="t">Anniversaires du jour</span>${anniv.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${anniv.length}</span>`:''}</div>
+        ${anniv.length ? `<div class="card-list">
+          ${anniv.map(c => { const age = ageDepuisDate(c.dateNaissance); return `
+            <div class="card-list-row" onclick="openPanel('${c.id}')">
+              <div class="mini-avatar">${initials(c.nom)}</div>
+              <div><div class="t">🎉 ${esc(c.nom)}</div><div class="s">${age!=null?age+" ans aujourd'hui":"Anniversaire aujourd'hui"}</div></div>
+            </div>`; }).join('')}
+        </div>` : `<div class="card-empty">${iCheckCircle()}Aucun anniversaire aujourd'hui.</div>`}
         `; })()}
       </div>
       <div class="card timeline-card" style="grid-row: span 2;">
@@ -9831,13 +9857,17 @@ function _notifMarquerVues(keys){
 function renderNotifMenu(){
   const bilans = data.bilansCoach.filter(b=>!b.coachTraite).slice(0,3);
   const retards = data.clients.filter(c=>c.enRetard).slice(0,3);
+  const anniv = _anniversairesAujourdhui();
   const items = [
+    ...anniv.map(c => `<div class="menu-item" style="align-items:flex-start;flex-direction:column;gap:1px;cursor:pointer;" onclick="openPanel('${c.id}')"><b>🎂 ${esc(c.nom)}</b><span style="color:var(--text-faint);font-size:11.5px;">anniversaire aujourd'hui</span></div>`),
     ...bilans.map(b => `<div class="menu-item" style="align-items:flex-start;flex-direction:column;gap:1px;"><b>${esc(b.nom)}</b><span style="color:var(--text-faint);font-size:11.5px;">bilan à traiter · semaine ${esc(b.semaine||'')}</span></div>`),
     ...retards.map(c => `<div class="menu-item" style="align-items:flex-start;flex-direction:column;gap:1px;"><b>${esc(c.nom)}</b><span style="color:var(--text-faint);font-size:11.5px;">bilan en retard</span></div>`),
   ];
   const menu = document.getElementById('menu-notif');
   menu.innerHTML = `<div class="menu-label">À traiter</div>` + (items.length ? items.join('') : `<div class="menu-item" style="color:var(--text-faint);">Rien à signaler.</div>`);
-  const keys = [...bilans.map(b => 'bilan:'+b.client+'|'+b.ts), ...retards.map(c => 'retard:'+c.id)];
+  // Clé datée (jour+mois+année) pour un anniversaire : redevient "non vu" chaque année plutôt
+  // que de rester marqué lu indéfiniment après le premier clic un jour donné.
+  const keys = [...anniv.map(c => 'anniv:'+c.id+'|'+new Date().toISOString().slice(0,10)), ...bilans.map(b => 'bilan:'+b.client+'|'+b.ts), ...retards.map(c => 'retard:'+c.id)];
   menu.dataset.keys = JSON.stringify(keys);
   const seen = _notifSeenKeys();
   const nonVus = keys.filter(k => !seen.has(k)).length;
