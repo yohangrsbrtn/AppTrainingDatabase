@@ -6059,6 +6059,26 @@ function _chargerAnalyses(clientId){
     .catch(() => { _ficheAnalyses = []; _ficheAnalysesLoading = false; });
 }
 
+// Récap auto par marqueur : dernière valeur connue + statut (haut/bas/normal),
+// groupé par catégorie (mots-clés, categoriserMarqueur/statutAnalyse — api.js,
+// même logique que le récap client dans protocole.js). Une ligne par marqueur
+// distinct (nom), peu importe la date à laquelle il a été saisi en dernier.
+function _analysesRecapParMarqueur(rows){
+  const parNom = new Map();
+  rows.forEach(r => {
+    const existant = parNom.get(r.nom);
+    if (!existant || r.date > existant.date) parNom.set(r.nom, r);
+  });
+  const groupes = new Map();
+  parNom.forEach(m => {
+    const cat = categoriserMarqueur(m.nom);
+    if (!groupes.has(cat)) groupes.set(cat, []);
+    groupes.get(cat).push(m);
+  });
+  const ordreCategories = [...CATEGORIES_ANALYSES.map(c => c.nom), 'Autres'].filter(cat => groupes.has(cat));
+  return ordreCategories.map(cat => ({ cat, marqueurs: groupes.get(cat).sort((a,b) => a.nom.localeCompare(b.nom)) }));
+}
+
 function renderFicheAnalysesSubTab(c){
   if (_analyseEnEdition) return renderFormAnalyseHtml(c);
 
@@ -6073,6 +6093,21 @@ function renderFicheAnalysesSubTab(c){
     parDate.get(r.date).push(r);
   });
   const dates = [...parDate.keys()].sort((a,b) => b.localeCompare(a));
+
+  const recapHtml = _ficheAnalyses.length ? `<div class="fiche-card" style="margin-bottom:14px;">
+    <strong style="display:block;margin-bottom:10px;">Récap par marqueur</strong>
+    ${_analysesRecapParMarqueur(_ficheAnalyses).map(g => `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--text-faint);margin-bottom:5px;">${esc(g.cat)}</div>
+        ${g.marqueurs.map(m => {
+          const st = statutAnalyse(m.valeur, m.ref_min, m.ref_max);
+          return `<div class="panel-row" style="border-left:3px solid ${st.couleur};padding-left:8px;">
+            <span class="l">${esc(m.nom)} <span style="color:var(--text-faint);font-size:11px;">(${new Date(m.date+'T00:00:00').toLocaleDateString('fr-FR')})</span></span>
+            <span class="v">${m.valeur}${m.unite?' '+esc(m.unite):''}${(m.ref_min!==null&&m.ref_max!==null)?` <span style="color:var(--text-faint);">(réf. ${m.ref_min}–${m.ref_max})</span>`:''} <span style="color:${st.couleur};font-weight:700;">${st.label}</span></span>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}
+  </div>` : '';
 
   const listeHtml = dates.length ? dates.map(date => {
     const marqueurs = parDate.get(date);
@@ -6092,7 +6127,7 @@ function renderFicheAnalysesSubTab(c){
     </div>`;
   }).join('') : `<p style="color:var(--text-faint);margin-bottom:14px;">Aucune prise de sang enregistrée.</p>`;
 
-  return `${listeHtml}<button class="btn primary" onclick="ouvrirFormAnalyse('${c.id}')">+ Nouvelle prise de sang</button>`;
+  return `${recapHtml}${listeHtml}<button class="btn primary" onclick="ouvrirFormAnalyse('${c.id}')">+ Nouvelle prise de sang</button>`;
 }
 
 function ouvrirFormAnalyse(clientId, date){
