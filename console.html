@@ -2573,7 +2573,13 @@ function openBilanDetailSupabase(bilan) {
   // les revérifier dans l'onglet Programme à chaque bilan.
   fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(bilan.client_id)}&select=steps_cible,seances_cible`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : [])
-    .then(rows => { bilanDetailState.objectifs = rows[0] || {}; if (state.nav==='bilan-detail') renderMain(); })
+    .then(rows => {
+      const obj = rows[0] || {};
+      // Objectifs figés à l'envoi du bilan (xp_detail) : un changement ultérieur d'objectif ne doit pas réécrire les anciens bilans.
+      const snap = bilanDetailState.xpDetail;
+      if (snap && snap.stepsCible !== undefined) { obj.steps_cible = snap.stepsCible; obj.seances_cible = snap.seancesCible; }
+      bilanDetailState.objectifs = obj; if (state.nav==='bilan-detail') renderMain();
+    })
     .catch(() => { bilanDetailState.objectifs = {}; if (state.nav==='bilan-detail') renderMain(); });
 }
 

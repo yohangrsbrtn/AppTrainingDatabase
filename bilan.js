@@ -1142,6 +1142,7 @@ async function _crediterXpBilanEnvoye(bilanId, jours, clientId, bilanCreatedAt, 
   const xpDetail = {
     base: XP_BILAN_BASE, bonusDiete, bonusSeances100, xpPasExcedent,
     bonusPonctualite, bonusStreak, streakCount, ponctuel,
+    stepsCible: profil.steps_cible || null, seancesCible: profil.seances_cible || null,
   };
 
   await fetch(`${SUPABASE_URL}/rest/v1/bilans?id=eq.${bilanId}`, {
