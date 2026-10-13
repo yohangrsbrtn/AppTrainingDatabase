@@ -234,7 +234,7 @@ function _sbDateToIso(fr)  { const [d,m,y] = fr.split('/'); return `${y}-${m}-${
 // sont reconnus par leur nom. Ils restent résolvables par le journal mais masqués de "Mes menus".
 const _MENU_TEMP_MARK = '\u200B';
 function _menuNomEstTemp(nom) {
-  return !!nom && (nom.charAt(0) === _MENU_TEMP_MARK || /^Repas \d+ (du \d{2}\/\d{2}\/\d{4}| · )/.test(nom));
+  return !!nom && (nom.charAt(0) === _MENU_TEMP_MARK || /^Repas \d+ (du \d{2}\/\d{2}\/\d{4}|· )/.test(nom));
 }
 function _menusSauves() { return (_dMenus || []).filter(m => !m.temp); }
 
