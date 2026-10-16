@@ -4019,7 +4019,7 @@ async function chargerExercices(){
 async function sauvegarderExercice(ex){
   const method = ex.id ? 'PATCH' : 'POST';
   const url = ex.id ? `${SUPABASE_URL}/rest/v1/exercices?id=eq.${ex.id}` : `${SUPABASE_URL}/rest/v1/exercices`;
-  const body = { nom: ex.nom, groupe_musculaire: ex.groupe_musculaire || null, groupe_secondaire: ex.groupe_secondaire || null, equipement: ex.equipement || null, video_url: ex.video_url || null, gif_url: ex.gif_url || null, notes: ex.notes || null,
+  const body = { nom: ex.nom, groupe_musculaire: ex.groupe_musculaire || null, groupe_secondaire: ex.groupe_secondaire || null, equipement: ex.equipement || null, video_url: ex.video_url || null, notes: ex.notes || null,
     reps_metabolique: ex.reps_metabolique || null, repos_metabolique: ex.repos_metabolique || null,
     reps_mecanique: ex.reps_mecanique || null, repos_mecanique: ex.repos_mecanique || null,
     reps_force: ex.reps_force || null, repos_force: ex.repos_force || null };
@@ -4315,7 +4315,7 @@ function renderExercicesSub(){
         <button class="btn primary" onclick="ouvrirFormExercice(null)">+ Nouvel exercice</button>
       </div>
       <div class="table-scroll"><table class="clients">
-        <thead><tr><th>Démo</th><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
+        <thead><tr><th>Nom</th><th>Groupe</th><th>Groupe secondaire</th><th>Reps · repos · RIR · tempo par bloc</th><th>Vidéo</th><th></th></tr></thead>
         <tbody id="progrExoTbody"></tbody>
       </table></div>
     </div>`;
@@ -4339,7 +4339,6 @@ function _majExercicesListe(){
   const tbody = document.getElementById('progrExoTbody');
   if (tbody) tbody.innerHTML = list.map(e => `
     <tr onclick="ouvrirFormExercice(${e.id})">
-      <td>${e.gif_url ? `<img src="${esc(e.gif_url)}" onclick="event.stopPropagation();ouvrirPhotoLightbox([{url:'${esc(e.gif_url)}'}],0)" style="width:34px;height:34px;object-fit:contain;background:#eef1f8;border-radius:6px;cursor:pointer;" alt="">` : '—'}</td>
       <td style="font-weight:600;">${esc(e.nom)}</td>
       <td>${e.groupe_musculaire ? `<span class="chip off">${esc(e.groupe_musculaire)}</span>` : '—'}</td>
       <td>${e.groupe_secondaire ? `<span class="chip off">${esc(e.groupe_secondaire)}</span>` : '—'}</td>
@@ -4492,13 +4491,6 @@ function ouvrirFormExercice(id){
       </div>
       <div class="field-row"><label>Équipement</label><input id="fExoEquip" type="text" value="${esc(ex.equipement||'')}" placeholder="ex: Barre, haltères, machine…"></div>
       <div class="field-row"><label>Lien vidéo (YouTube, Instagram…)</label><input id="fExoVideo" type="text" value="${esc(ex.video_url||'')}" placeholder="https://…"></div>
-      <div class="field-row"><label>Gif de démo (miniature affichée au client)</label>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <input id="fExoGif" type="text" value="${esc(ex.gif_url||'')}" placeholder="https://…" style="flex:1;" oninput="_refreshGifPreview()">
-          <img id="fExoGifPreview" src="${esc(ex.gif_url||'')}" style="width:32px;height:32px;object-fit:contain;background:#eef1f8;border-radius:6px;flex-shrink:0;${ex.gif_url?'':'display:none;'}" alt="">
-          <button type="button" class="btn" style="flex-shrink:0;white-space:nowrap;" onclick="ouvrirPickerGifExo()">🔍 Chercher</button>
-        </div>
-      </div>
       <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px;">Reps / repos / RIR / tempo par bloc</label>
       <div class="field-grid" style="grid-template-columns:repeat(3,1fr);">
         <div class="field-row"><label>Métabolique — reps</label><input id="fExoRepsMeta" type="text" value="${esc(ex.reps_metabolique||'')}" placeholder="15-20"></div>
@@ -4535,7 +4527,6 @@ async function confirmerFormExercice(id){
     groupe_secondaire: document.getElementById('fExoGroupeSec').value,
     equipement: document.getElementById('fExoEquip').value.trim(),
     video_url: document.getElementById('fExoVideo').value.trim(),
-    gif_url: document.getElementById('fExoGif').value.trim(),
     notes: document.getElementById('fExoNotes').value.trim(),
     reps_metabolique: document.getElementById('fExoRepsMeta').value.trim(),
     repos_metabolique: document.getElementById('fExoReposMeta').value.trim(),
@@ -4708,7 +4699,6 @@ function _renderExoGifPickerGrid(){
 
 function choisirExoGifPicker(url){
   document.getElementById('fExoGif').value = url;
-  _refreshGifPreview();
   document.getElementById('modal-exo-gif-picker').remove();
 }
 

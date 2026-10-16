@@ -318,8 +318,6 @@ async function _pcChargerGifMap() {
   if (_pcGifMap) return _pcGifMap;
   _pcGifMap = {};
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?select=id,gif_url&gif_url=not.is.null`, { headers: supaHeaders() });
-    if (res.ok) (await res.json()).forEach(e => { _pcGifMap[e.id] = e.gif_url; });
   } catch(e) {}
   return _pcGifMap;
 }
