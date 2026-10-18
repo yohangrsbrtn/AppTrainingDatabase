@@ -659,3 +659,24 @@ async function _giphyRechercher(query) {
     new MutationObserver(appliquerVerrouScroll).observe(document.body, { childList: true });
   }
 })();
+
+
+// Compresse une photo avant upload (côté navigateur) : côté le plus long ramené à 1800px max,
+// JPEG qualité 0.85 — assez fin pour des avant/après, ~5-10x plus léger qu'une photo de téléphone.
+// Garde l'orientation EXIF (le canvas applique la rotation), et retombe sur le fichier d'origine
+// si le format n'est pas lisible (HEIC sur navigateur non compatible…) ou si le résultat est plus gros.
+async function compresserImagePourUpload(file, maxCote = 1800, qualite = 0.85) {
+  try {
+    if (!file || !/^image\//.test(file.type || '') || /gif|svg/.test(file.type)) return file;
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const ratio = Math.min(1, maxCote / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * ratio), h = Math.round(bmp.height * ratio);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', qualite));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (e) { return file; }
+}

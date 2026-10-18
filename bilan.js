@@ -879,7 +879,8 @@ async function _ajouterBilanPhotoClient(e) {
   const bilanId = _bilanId;
   _bilanPhotosUploading = true; render();
   try {
-    for (const file of files) {
+    for (const fichierBrut of files) {
+      const file = await compresserImagePourUpload(fichierBrut);
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
       const path = `${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
       const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {

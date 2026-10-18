@@ -470,7 +470,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=20"></script>
+<script src="api.js?v=21"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -801,6 +801,7 @@ async function chargerBilanPhotos(bilanId){
   return res.json();
 }
 async function uploaderBilanPhoto(bilanId, clientId, file){
+  file = await compresserImagePourUpload(file);
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const path = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
@@ -821,6 +822,7 @@ async function uploaderBilanPhoto(bilanId, clientId, file){
 // juste une date choisie (ex: rattraper une ancienne photo jamais uploadée). Même bucket/table
 // que les photos de bilan (bilan_id NULL, date portée directement par la colonne `date`).
 async function uploaderPhotoManuelle(clientId, file, dateStr){
+  file = await compresserImagePourUpload(file);
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const path = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
@@ -842,6 +844,7 @@ async function uploaderPhotoManuelle(clientId, file, dateStr){
 // photo apparaisse comme "📏 Mensuration" et hérite des vraies valeurs de cette entrée plutôt
 // que d'un simple rapprochement par date.
 async function uploaderPhotoMensurationManuelle(clientId, mensurationId, file){
+  file = await compresserImagePourUpload(file);
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const path = `mensurations/${clientId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
@@ -957,7 +960,7 @@ let _photoLightbox = null; // { photos, index, compare } ou null si fermé
 // réservé aux appels depuis l'onglet Photos dédié, les autres lightbox (bilan detail...) n'ont pas
 // ce comparatif donc n'activent pas ce bouton.
 function ouvrirPhotoLightbox(photos, startIndex, enableCompare){
-  _photoLightbox = { photos: photos || [], index: startIndex || 0, compare: !!enableCompare };
+  _photoLightbox = { photos: photos || [], index: startIndex || 0, compare: !!enableCompare, zoom: 1, px: 0, py: 0 };
   document.addEventListener('keydown', _lightboxKeyHandler);
   _renderLightboxDom();
 }
@@ -971,17 +974,68 @@ function lightboxNav(delta){
   const ni = _photoLightbox.index + delta;
   if (ni < 0 || ni >= _photoLightbox.photos.length) return;
   _photoLightbox.index = ni;
+  _photoLightbox.zoom = 1; _photoLightbox.px = 0; _photoLightbox.py = 0;
   _renderLightboxDom();
 }
 function lightboxGoto(i){
   if (!_photoLightbox) return;
   _photoLightbox.index = i;
+  _photoLightbox.zoom = 1; _photoLightbox.px = 0; _photoLightbox.py = 0;
   _renderLightboxDom();
+}
+// Zoom sur la photo courante : molette, boutons +/−, double-clic, glisser pour déplacer, pincer (tactile).
+// Au-delà de 1×, la visionneuse passe en vue "photo seule" plein écran (le carrousel redevient visible à 1×).
+function lightboxZoom(z){
+  if (!_photoLightbox) return;
+  _photoLightbox.zoom = Math.max(1, Math.min(6, z));
+  if (_photoLightbox.zoom === 1) { _photoLightbox.px = 0; _photoLightbox.py = 0; }
+  _renderLightboxDom();
+}
+function lightboxWheel(e){
+  if (!_photoLightbox) return;
+  e.preventDefault();
+  lightboxZoom(_photoLightbox.zoom * (e.deltaY < 0 ? 1.25 : 0.8));
+}
+function _lightboxApplyTransform(){
+  const img = document.getElementById('lbZoomImg');
+  if (img && _photoLightbox) img.style.transform = `translate(${_photoLightbox.px}px,${_photoLightbox.py}px) scale(${_photoLightbox.zoom})`;
+}
+const _lbPointers = new Map();
+let _lbPinchDist = null, _lbPinchZoom = 1;
+function lightboxPointerDown(e){
+  if (!_photoLightbox) return;
+  e.preventDefault();
+  _lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch(_) {}
+  if (_lbPointers.size === 2) {
+    const [a, b] = [..._lbPointers.values()];
+    _lbPinchDist = Math.hypot(a.x - b.x, a.y - b.y); _lbPinchZoom = _photoLightbox.zoom;
+  }
+}
+function lightboxPointerMove(e){
+  if (!_photoLightbox || !_lbPointers.has(e.pointerId)) return;
+  const prev = _lbPointers.get(e.pointerId);
+  _lbPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (_lbPointers.size === 2 && _lbPinchDist) {
+    const [a, b] = [..._lbPointers.values()];
+    _photoLightbox.zoom = Math.max(1, Math.min(6, _lbPinchZoom * Math.hypot(a.x - b.x, a.y - b.y) / _lbPinchDist));
+  } else if (_lbPointers.size === 1) {
+    _photoLightbox.px += e.clientX - prev.x; _photoLightbox.py += e.clientY - prev.y;
+  }
+  _lightboxApplyTransform();
+}
+function lightboxPointerUp(e){
+  _lbPointers.delete(e.pointerId);
+  _lbPinchDist = null;
+  if (_photoLightbox && _photoLightbox.zoom <= 1.02) lightboxZoom(1);
 }
 function _lightboxKeyHandler(e){
   if (e.key === 'Escape') fermerPhotoLightbox();
   else if (e.key === 'ArrowLeft') lightboxNav(-1);
   else if (e.key === 'ArrowRight') lightboxNav(1);
+  else if (e.key === '+' || e.key === '=') lightboxZoom((_photoLightbox ? _photoLightbox.zoom : 1) * 1.25);
+  else if (e.key === '-') lightboxZoom((_photoLightbox ? _photoLightbox.zoom : 1) / 1.25);
+  else if (e.key === '0') lightboxZoom(1);
 }
 function _lightboxDateLabel(p){
   const iso = (p.bilans && p.bilans.date_validation) || p.date_validation || p._date || p.created_at;
@@ -998,14 +1052,23 @@ function _lightboxToggleCompare(){
 function _renderLightboxDom(){
   const existing = document.getElementById('photoLightboxOverlay');
   if (!_photoLightbox) { if (existing) existing.remove(); return; }
-  const { photos, index, compare } = _photoLightbox;
+  const { photos, index, compare, zoom, px, py } = _photoLightbox;
   const cur = photos[index] || {};
   const label = _lightboxDateLabel(cur);
   const isCmp = compare && (cur._key === _fichePhotosSlotL || cur._key === _fichePhotosSlotR);
-  const html = `<div id="photoLightboxOverlay" style="position:fixed;inset:0;background:rgba(5,6,10,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;" onclick="if(event.target===this)fermerPhotoLightbox()">
+  const html = `<div id="photoLightboxOverlay" style="position:fixed;inset:0;background:rgba(5,6,10,.94);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;" onclick="if(event.target===this)fermerPhotoLightbox()" onwheel="lightboxWheel(event)">
+    <div style="position:absolute;top:16px;left:20px;display:flex;gap:6px;align-items:center;z-index:2;">
+      <button onclick="event.stopPropagation();lightboxZoom(${zoom}/1.25)" title="Dézoomer" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:20px;cursor:pointer;">−</button>
+      <span style="color:#fff;font-size:12px;min-width:38px;text-align:center;opacity:.8;">${Math.round(zoom*100)}%</span>
+      <button onclick="event.stopPropagation();lightboxZoom(${zoom}*1.25)" title="Zoomer" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:20px;cursor:pointer;">+</button>
+      ${zoom>1 ? `<button onclick="event.stopPropagation();lightboxZoom(1)" style="height:36px;padding:0 12px;border-radius:18px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:12px;cursor:pointer;">Réinitialiser</button>` : ''}
+    </div>
     <button onclick="fermerPhotoLightbox()" title="Fermer" style="position:absolute;top:16px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:16px;cursor:pointer;">✕</button>
     ${compare ? `<button onclick="event.stopPropagation();_lightboxToggleCompare()" title="Ajouter à la comparaison" style="position:absolute;top:16px;right:64px;height:36px;padding:0 14px;border-radius:18px;background:${isCmp?'var(--accent)':'rgba(255,255,255,.1)'};border:none;color:#fff;font-size:13px;cursor:pointer;">🆚 ${isCmp?'Dans la comparaison':'Comparer'}</button>` : ''}
-    <div style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:960px;padding:0 16px;">
+    ${zoom > 1 ? `<div style="flex:1;width:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab;"
+        onpointerdown="lightboxPointerDown(event)" onpointermove="lightboxPointerMove(event)" onpointerup="lightboxPointerUp(event)" onpointercancel="lightboxPointerUp(event)" ondblclick="lightboxZoom(1)">
+        <img id="lbZoomImg" src="${esc(cur.url)}" draggable="false" style="max-height:88vh;max-width:96vw;object-fit:contain;transform:translate(${px}px,${py}px) scale(${zoom});user-select:none;-webkit-user-drag:none;">
+      </div>` : `<div style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:960px;padding:0 16px;">
       <button onclick="event.stopPropagation();lightboxNav(-1)" ${index<=0?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index<=0?'.2':'.8'};">‹</button>
       <div style="display:flex;align-items:center;justify-content:center;gap:14px;overflow:hidden;flex:1;min-width:0;">
         ${photos.map((p,i) => {
@@ -1014,12 +1077,12 @@ function _renderLightboxDom(){
           const isCur = dist === 0;
           const scale = isCur ? 1 : (Math.abs(dist)===1 ? 0.7 : 0.5);
           const opac = isCur ? 1 : (Math.abs(dist)===1 ? 0.4 : 0.18);
-          return `<img src="${esc(p.url)}" onclick="event.stopPropagation();lightboxGoto(${i})"
+          return `<img src="${esc(p.url)}" onclick="event.stopPropagation();lightboxGoto(${i})" ${isCur ? 'ondblclick="event.stopPropagation();lightboxZoom(2.5)"' : ''}
             style="max-height:${isCur?'70vh':'46vh'};aspect-ratio:9/16;object-fit:contain;background:#0b0d14;border-radius:12px;cursor:pointer;transform:scale(${scale});opacity:${opac};transition:transform .25s ease,opacity .25s ease;flex-shrink:0;box-shadow:${isCur?'0 12px 40px rgba(0,0,0,.6)':'none'};">`;
         }).join('')}
       </div>
       <button onclick="event.stopPropagation();lightboxNav(1)" ${index>=photos.length-1?'disabled':''} style="background:none;border:none;color:#fff;font-size:30px;cursor:pointer;flex-shrink:0;padding:8px;opacity:${index>=photos.length-1?'.2':'.8'};">›</button>
-    </div>
+    </div>`}
     ${label ? `<div style="color:#fff;font-size:13px;margin-top:18px;opacity:.75;">${esc(label)} · ${index+1}/${photos.length}</div>` : `<div style="color:#fff;font-size:13px;margin-top:18px;opacity:.75;">${index+1}/${photos.length}</div>`}
   </div>`;
   if (existing) existing.outerHTML = html;
