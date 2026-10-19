@@ -2639,7 +2639,7 @@ function openBilanDetailSupabase(bilan) {
     .then(rows => {
       const obj = rows[0] || {};
       // Objectifs figés à l'envoi du bilan (xp_detail) : un changement ultérieur d'objectif ne doit pas réécrire les anciens bilans.
-      const snap = bilanDetailState.xpDetail;
+      const snap = bilanDetailState.data && bilanDetailState.data.xpDetail;
       if (snap && snap.stepsCible !== undefined) { obj.steps_cible = snap.stepsCible; obj.seances_cible = snap.seancesCible; }
       bilanDetailState.objectifs = obj; if (state.nav==='bilan-detail') renderMain();
     })
