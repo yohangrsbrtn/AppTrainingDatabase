@@ -4028,11 +4028,33 @@ function renderEditeurProtocolePage(el){
 function renderProtocolePreviewHtml(preview){
   const catColor = c => c==='Injectable' ? '#e05c5c' : c==='Oral' ? '#4f8ef7' : '#a78bfa';
 
-  const totalsHtml = preview.molecules.map(m => `
-    <div class="panel-row">
-      <span class="l" style="color:${catColor(m.categorie)};font-weight:600;">${esc(m.nom)}</span>
-      <span class="v">${Math.round(m.totalMg*10)/10} mg · ${esc(m.totalConverti||'')}${m.quantiteRequise ? ' · ' + esc(m.quantiteRequise) : ''}</span>
-    </div>`).join('');
+  const fmtNb = n => (Math.round(n*10)/10).toString().replace('.', ',');
+  // Dosage "qui flashe" : injectable = mg/semaine, oral et GH = par jour. Le détail (par prise) et le
+  // total du cycle (mg, ml, viales…) passent en second plan.
+  const dosageFlash = m => {
+    if (m.categorie === 'Injectable') {
+      const detail = m.nbInjParSem ? (m.intervalle === 1 ? `${fmtNb(m.doseParPrise)} mg/jour` : `${fmtNb(m.nbInjParSem)} inj. de ${fmtNb(m.doseParPrise)} mg`) : '';
+      return { gros: `${fmtNb(m.dosageHebdoMg)} mg/sem`, detail };
+    }
+    if (m.categorie === 'GH') return { gros: `${fmtNb(m.doseParPrise)} UI/jour`, detail: '' };
+    const cp = m.dosageProduit > 0 ? ` (${fmtNb(m.doseParPrise / m.dosageProduit)} cp)` : '';
+    return { gros: `${fmtNb(m.doseParPrise)} mg/jour`, detail: cp ? cp.trim().replace(/^\(|\)$/g, '') : '' };
+  };
+  const totalsHtml = preview.molecules.map(m => {
+    const f = dosageFlash(m);
+    const periode = m.categorie === 'GH' ? '' : `S${m.semDebut}→S${m.semFin}`;
+    const totalTxt = [`${fmtNb(m.totalMg)} mg`, m.totalConverti, m.quantiteRequise].filter(Boolean).join(' · ');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--hairline);">
+      <div style="min-width:0;">
+        <div style="color:${catColor(m.categorie)};font-weight:700;font-size:14px;">${esc(m.nom)}</div>
+        <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px;">${[periode, 'Total cycle : ' + esc(totalTxt)].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:20px;font-weight:800;line-height:1.1;color:var(--text);">${f.gros}</div>
+        ${f.detail ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:2px;">${esc(f.detail)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 
   const fmtDate = d => new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
   const rowStyle = s => s==='passee' ? 'opacity:.4;text-decoration:line-through;' : s==='encours' ? 'background:#0d1a13;color:#3ddc84;font-weight:600;' : '';
@@ -4046,7 +4068,7 @@ function renderProtocolePreviewHtml(preview){
 
   return `
     <div class="table-card" style="margin-top:14px;">
-      <div class="table-toolbar"><div class="title">Totaux du cycle</div></div>
+      <div class="table-toolbar"><div class="title">Dosages du cycle</div></div>
       ${totalsHtml || '<div style="padding:16px;color:var(--text-faint);">Aucune molécule.</div>'}
     </div>
     <div class="table-card" style="margin-top:14px;">
