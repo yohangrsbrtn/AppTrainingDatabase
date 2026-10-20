@@ -680,3 +680,59 @@ async function compresserImagePourUpload(file, maxCote = 1800, qualite = 0.85) {
     return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
   } catch (e) { return file; }
 }
+
+// ── Carte de personnage (radar de développement musculaire) — partagée coach + client ──
+const CARTE_AXES = ['Pecs', 'Dos', 'Épaules', 'Bras', 'Quadris', 'Ischios', 'Fessiers', 'Mollets'];
+
+// Renvoie { 'YYYY-MM-01': { axe: score } } trié par mois ; {} si la table n'existe pas encore.
+async function chargerCarteClient(clientId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&order=mois.asc&select=mois,axe,score`, { headers: supaHeaders() });
+    if (!res.ok) return {};
+    const out = {};
+    (await res.json()).forEach(r => { (out[r.mois] = out[r.mois] || {})[r.axe] = r.score; });
+    return out;
+  } catch (e) { return {}; }
+}
+
+// SVG du radar. axes = libellés affichés (ordre = sens horaire depuis le haut), now/prev = { axe: score }.
+function _carteRadarSvg(axes, now, prev) {
+  const n = axes.length;
+  if (n < 3) return '';
+  const cx = 170, cy = 140, R = 98;
+  const pt = (i, v) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [cx + Math.cos(a) * R * v / 100, cy + Math.sin(a) * R * v / 100]; };
+  const poly = f => axes.map((a, i) => pt(i, f(a)).map(x => x.toFixed(1)).join(',')).join(' ');
+  let s = '';
+  [25, 50, 75, 100].forEach(l => { s += `<polygon points="${poly(() => l)}" fill="none" stroke="#2d3142" stroke-width="1"/>`; });
+  axes.forEach((a, i) => {
+    const [x, y] = pt(i, 100);
+    s += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2d3142" stroke-width="1"/>`;
+    const [lx, ly] = pt(i, 122);
+    const anchor = lx < cx - 5 ? 'end' : lx > cx + 5 ? 'start' : 'middle';
+    s += `<text x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${anchor}" font-size="12" fill="#e8eaf0">${a}</text>`;
+    s += `<text x="${lx.toFixed(1)}" y="${(ly + 18).toFixed(1)}" text-anchor="${anchor}" font-size="11" fill="#1D9E75">${now[a] ?? ''}</text>`;
+  });
+  if (prev) s += `<polygon points="${poly(a => prev[a] ?? 0)}" fill="none" stroke="#8892a4" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  s += `<polygon points="${poly(a => now[a] ?? 0)}" fill="#1D9E7533" stroke="#1D9E75" stroke-width="2"/>`;
+  axes.forEach((a, i) => { const [x, y] = pt(i, now[a] ?? 0); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#1D9E75"/>`; });
+  return `<svg viewBox="0 0 340 290" width="100%" role="img" aria-label="Carte de personnage">${s}</svg>`;
+}
+
+// Bloc complet (radar + légende + plus gros progrès) pour le mois le plus récent vs le précédent.
+function _carteHtml(carte) {
+  const mois = Object.keys(carte || {}).sort();
+  if (!mois.length) return '';
+  const m = mois[mois.length - 1], now = carte[m];
+  const prev = mois.length > 1 ? carte[mois[mois.length - 2]] : null;
+  const axes = CARTE_AXES.filter(a => now[a] != null);
+  let best = null;
+  if (prev) axes.forEach(a => { if (prev[a] != null) { const d = now[a] - prev[a]; if (!best || d > best.d) best = { a, d }; } });
+  const label = new Date(m + 'T12:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  return `<div style="font-size:11px;color:#8892a4;margin-bottom:2px;">Mise à jour : ${label}</div>
+    ${_carteRadarSvg(axes, now, prev)}
+    <div style="display:flex;gap:14px;justify-content:center;font-size:11px;color:#8892a4;">
+      <span><span style="display:inline-block;width:10px;height:10px;background:#1D9E75;border-radius:2px;margin-right:5px;"></span>Ce mois-ci</span>
+      ${prev ? `<span><span style="display:inline-block;width:10px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Mois précédent</span>` : ''}
+    </div>
+    ${best && best.d > 0 ? `<div style="background:#1e2230;border-radius:10px;padding:8px 12px;margin-top:10px;font-size:12px;display:flex;justify-content:space-between;"><span>Plus gros progrès</span><span style="color:#1D9E75;font-weight:600;">${best.a} +${best.d}</span></div>` : ''}`;
+}

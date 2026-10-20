@@ -169,7 +169,22 @@ function renderGauge(pct, color, label, valide, total) {
   </div>`;
 }
 
+// Carte de personnage : chargée en différé (hors rendu synchrone de la page), mise en cache par client.
+let _carteCache = null;
+function _carteCardHtml(inner) {
+  return inner ? `<div style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:12px 14px;margin-bottom:10px;">
+    <div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Ma carte de personnage</div>${inner}</div>` : '';
+}
+async function _chargerCarteProgression() {
+  const client = S.client;
+  const carte = await chargerCarteClient(client);
+  _carteCache = { client, html: _carteHtml(carte) };
+  const el = document.getElementById('carteProgression');
+  if (el && S.client === client) el.innerHTML = _carteCardHtml(_carteCache.html);
+}
+
 function renderProgressionPage() {
+  setTimeout(_chargerCarteProgression, 0);
   const p = S.data.prog || {};
   const niveau = p.niveau || 1;
   const tier = niveauToTier(niveau);
@@ -298,6 +313,7 @@ function renderProgressionPage() {
     ${renderGauge(p.pctBilans || 0, '#a78bfa', 'Bilans', p.bilansValidies || 0, p.bilansAttendus || 0)}
     ${renderGauge(p.assiduiteGlobale || 0, '#f59e0b', 'Assiduité globale', (p.assiduiteGlobale || 0) + '%', '')}
     ${pasHtml}
+    <div id="carteProgression">${_carteCache && _carteCache.client === S.client ? _carteCardHtml(_carteCache.html) : ''}</div>
     ${collectionHtml}
     ${historiqueHtml}
 

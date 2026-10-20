@@ -470,7 +470,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=21"></script>
+<script src="api.js?v=22"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -639,6 +639,7 @@ let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole,
 let _ficheProtocoleLoading = false;
 let _ficheProtocoleSubTab = 'cycle'; // 'cycle' | 'analyses'
 let _ficheAnalysesClientId = null;
+let _ficheCarte = undefined, _ficheCarteClientId = null, _carteEdition = null; // carte de personnage (radar)
 let _ficheAnalyses = undefined; // undefined=pas chargé, [] = vide, tableau de lignes brutes chargé
 let _ficheAnalysesLoading = false;
 let _analyseEnEdition = null; // { date, marqueurs:[{nom,valeur,unite,ref_min,ref_max}], estNouvelle }
@@ -7991,6 +7992,56 @@ function _dieteMacrosBadge(d){
   return ` · <span style="color:var(--text);font-weight:600;">${Math.round(m.kcal)} kcal</span> · P${Math.round(m.prot)} G${Math.round(m.glu)} L${Math.round(m.lip)}`;
 }
 
+// ── Carte de personnage (fiche client → Progression) ──
+function _carteMoisCourant(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
+function _rerenderFicheTab(){
+  const el = document.getElementById('ficheTabContent');
+  const c = data.clients.find(x=>x.id===state.selected);
+  if (el && c) el.innerHTML = renderFicheTabContent(c);
+}
+function renderFicheCarteHtml(){
+  const cid = state.selected;
+  if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _carteEdition = null; }
+  if (_ficheCarte === undefined) {
+    _ficheCarte = null;
+    chargerCarteClient(cid).then(r => { _ficheCarte = r; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
+  }
+  const carte = _ficheCarte || {};
+  const cadre = inner => `<div class="fiche-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">Carte de personnage</h3>${_carteEdition ? '' : `<button class="btn" onclick="ouvrirEditionCarte()">✎ ${Object.keys(carte).length ? 'Mettre à jour' : 'Créer la carte'}</button>`}</div>${inner}</div>`;
+  if (_carteEdition) {
+    return cadre(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:10px;">Mise à jour de ${new Date(_carteMoisCourant()+'T12:00:00').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})} — décoche une zone pour la masquer sur la carte de ce client.</div>
+      ${CARTE_AXES.map(a => { const v = _carteEdition[a]; const on = v != null; return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <input type="checkbox" id="carteOn_${a}" ${on?'checked':''} onchange="_carteEdition['${a}']=this.checked?(parseInt(document.getElementById('carteSl_${a}').value)||50):null;">
+        <span style="width:70px;font-size:13px;">${a}</span>
+        <input type="range" id="carteSl_${a}" min="0" max="100" value="${on?v:50}" style="flex:1;" oninput="document.getElementById('carteVal_${a}').textContent=this.value;if(document.getElementById('carteOn_${a}').checked)_carteEdition['${a}']=parseInt(this.value);">
+        <span id="carteVal_${a}" style="width:28px;text-align:right;font-size:13px;">${on?v:50}</span>
+      </div>`; }).join('')}
+      <div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" onclick="_carteEdition=null;_rerenderFicheTab()">Annuler</button><button class="btn primary" onclick="sauverCarte('${state.selected}')">Enregistrer</button></div>`);
+  }
+  if (_ficheCarte === null) return cadre('<div style="padding:20px;text-align:center;color:var(--text-faint);">Chargement…</div>');
+  if (!Object.keys(carte).length) return cadre('<p style="color:var(--text-faint);margin:6px 0 0;">Aucune carte pour l\'instant.</p>');
+  return cadre(`<div style="max-width:380px;margin:0 auto;">${_carteHtml(carte)}</div>`);
+}
+function ouvrirEditionCarte(){
+  const mois = Object.keys(_ficheCarte || {}).sort();
+  const base = mois.length ? _ficheCarte[mois[mois.length-1]] : null;
+  _carteEdition = {};
+  CARTE_AXES.forEach(a => { _carteEdition[a] = base ? (base[a] ?? null) : (a === 'Fessiers' ? null : 50); });
+  _rerenderFicheTab();
+}
+async function sauverCarte(clientId){
+  const mois = _carteMoisCourant();
+  const lignes = CARTE_AXES.filter(a => _carteEdition[a] != null).map(a => ({ client_id: clientId, mois, axe: a, score: Math.max(0, Math.min(100, Math.round(_carteEdition[a]))) }));
+  if (lignes.length < 3) { alert('Garde au moins 3 zones sur la carte.'); return; }
+  try {
+    const del = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&mois=eq.${mois}`, { method:'DELETE', headers: supaHeaders() });
+    const ins = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage`, { method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(lignes) });
+    if (!del.ok || !ins.ok) throw new Error('La table client_carte_personnage n\'existe pas encore : exécute sql/2026-10-21_carte_personnage.sql dans Supabase.');
+    _carteEdition = null; _ficheCarte = undefined;
+    _rerenderFicheTab();
+  } catch(e) { alert(e.message); }
+}
+
 function renderFicheProgressionTab(){
   const xp = ficheData.xpData || null;
 
@@ -8122,6 +8173,7 @@ function renderFicheProgressionTab(){
 
   return `
     ${xpCard}
+    ${renderFicheCarteHtml()}
     ${heatmapHtml}
     <div class="fiche-card">
       <h3>Historique XP</h3>
