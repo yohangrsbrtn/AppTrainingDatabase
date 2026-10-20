@@ -639,7 +639,7 @@ let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole,
 let _ficheProtocoleLoading = false;
 let _ficheProtocoleSubTab = 'cycle'; // 'cycle' | 'analyses'
 let _ficheAnalysesClientId = null;
-let _ficheCarte = undefined, _ficheCarteBrouillon = undefined, _ficheCarteClientId = null, _carteEdition = null; // carte de personnage (radar)
+let _ficheCarteAnalyse = null, _ficheCarte = undefined, _ficheCarteBrouillon = undefined, _ficheCarteClientId = null, _carteEdition = null; // carte de personnage (radar)
 let _ficheAnalyses = undefined; // undefined=pas chargé, [] = vide, tableau de lignes brutes chargé
 let _ficheAnalysesLoading = false;
 let _analyseEnEdition = null; // { date, marqueurs:[{nom,valeur,unite,ref_min,ref_max}], estNouvelle }
@@ -1843,6 +1843,7 @@ function renderMain(){
   if (state.nav === 'bilans') { renderBilansPage(el); return; }
   if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
+  if (state.nav === 'cartes-analyses') { renderCartesAnalysesPage(el); return; }
   if (state.nav === 'notifications') { renderNotificationsPage(el); return; }
   if (state.nav === 'chat') { renderChatCoachPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
@@ -3228,6 +3229,19 @@ async function supprimerBilanDetailPhoto(photoId, url){
 }
 
 // ── Page Classement ───────────────────────────────────────────────────
+async function renderCartesAnalysesPage(el){
+  el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Historique des analyses</h1></div><div class="meta"><button class="btn" onclick="setNav('dashboard')">← Accueil</button></div></div><div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+  let rows = [];
+  try { const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?order=created_at.desc&limit=200&select=*`, { headers: supaHeaders() }); rows = res.ok ? await res.json() : []; } catch(e) {}
+  if (state.nav !== 'cartes-analyses') return;
+  const chip = st => st === 'valide' ? '<span class="chip on">Validée</span>' : st === 'rejete' ? '<span class="chip off">Rejetée</span>' : '<span class="chip" style="background:#6b5a2a;color:#fff;">À valider</span>';
+  el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Historique des analyses</h1></div><div class="meta"><button class="btn" onclick="setNav('dashboard')">← Accueil</button></div></div>
+    ${rows.length ? rows.map(r => { const c = data.clients.find(x => x.id === r.client_id); return `<div class="fiche-card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+        <div><b style="cursor:pointer;" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">${esc(c ? c.nom : r.client_id)}</b> <span style="color:var(--text-faint);font-size:12px;">· ${new Date(r.created_at).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})}</span></div>${chip(r.statut)}</div>
+      <div style="white-space:pre-wrap;line-height:1.55;font-size:13px;">${esc(r.texte)}</div></div>`; }).join('') : '<p style="color:var(--text-faint);">Aucune analyse pour l\'instant. Elles apparaîtront ici dès que la tâche planifiée aura traité des photos (pense à exécuter sql/2026-10-23_carte_analyses.sql).</p>'}`;
+}
+
 function renderClassementPage(el){
   // Clients en pause ou anciens exclus du classement (demande explicite du coach) —
   // même filtre que côté client (index.html renderClassement/renderTop5Home).
@@ -8001,6 +8015,10 @@ function _rerenderFicheTab(){
   const c = data.clients.find(x=>x.id===state.selected);
   if (el && c) el.innerHTML = renderFicheTabContent(c);
 }
+function _carteChargerAnalyse(cid){
+  return fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?client_id=eq.${encodeURIComponent(cid)}&statut=eq.brouillon&order=created_at.desc&limit=1&select=texte`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : []).catch(() => []).then(rows => rows[0] ? rows[0].texte : null);
+}
 function _carteChargerBrouillon(cid){
   return fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(cid)}&brouillon=eq.true&order=mois.asc&select=mois,axe,score`, { headers: supaHeaders() })
     .then(r => r.ok ? r.json() : []).catch(() => [])
@@ -8011,7 +8029,7 @@ function renderFicheCarteHtml(){
   if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _ficheCarteBrouillon = undefined; _carteEdition = null; }
   if (_ficheCarte === undefined) {
     _ficheCarte = null;
-    Promise.all([chargerCarteClient(cid), _carteChargerBrouillon(cid)]).then(([r, b]) => { _ficheCarte = r; _ficheCarteBrouillon = b; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
+    Promise.all([chargerCarteClient(cid), _carteChargerBrouillon(cid), _carteChargerAnalyse(cid)]).then(([r, b, a]) => { _ficheCarte = r; _ficheCarteBrouillon = b; _ficheCarteAnalyse = a; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
   }
   const carte = _ficheCarte || {};
   const brouillon = _ficheCarteBrouillon || null;
@@ -8035,6 +8053,7 @@ function renderFicheCarteHtml(){
   if (_ficheCarte === null) return cadre('<div style="padding:20px;text-align:center;color:var(--text-faint);">Chargement…</div>');
   const bandeau = brouillon ? `<div style="background:#2a2418;border:1px solid #6b5a2a;border-radius:10px;padding:10px 12px;margin:8px 0 12px;font-size:12.5px;">
       <div style="margin-bottom:8px;">🤖 <b>Brouillon proposé</b> à partir des dernières photos — à relire et valider.</div>
+      ${_ficheCarteAnalyse ? `<details style="margin-bottom:10px;"><summary style="cursor:pointer;color:var(--accent);">Voir l'analyse détaillée</summary><div style="white-space:pre-wrap;line-height:1.5;margin-top:8px;font-size:12.5px;">${esc(_ficheCarteAnalyse)}</div></details>` : ''}
       <div style="display:flex;gap:8px;"><button class="btn primary" onclick="ouvrirEditionCarte(true)">Relire et valider</button><button class="btn" onclick="rejeterBrouillonCarte('${state.selected}')">Rejeter</button></div></div>` : '';
   if (!Object.keys(carte).length) return cadre(`${bandeau}<p style="color:var(--text-faint);margin:6px 0 0;">Aucune carte validée pour l'instant.</p>`);
   return cadre(`${bandeau}<div style="max-width:380px;margin:0 auto;">${_carteHtml(carte)}</div>`);
@@ -8047,10 +8066,14 @@ function ouvrirEditionCarte(depuisBrouillon){
   [CARTE_DEF, CARTE_GRAS_MIN, CARTE_GRAS_MAX].forEach(k => { _carteEdition[k] = base ? (base[k] ?? null) : null; });
   _rerenderFicheTab();
 }
+function _carteMajStatutAnalyse(clientId, statut){
+  return fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?client_id=eq.${encodeURIComponent(clientId)}&statut=eq.brouillon`, { method:'PATCH', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ statut }) }).catch(() => {});
+}
 async function rejeterBrouillonCarte(clientId){
   if (!confirm('Rejeter ce brouillon ?')) return;
   await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&brouillon=eq.true`, { method:'DELETE', headers: supaHeaders() });
-  _ficheCarteBrouillon = null; _rerenderFicheTab();
+  await _carteMajStatutAnalyse(clientId, 'rejete');
+  _ficheCarteBrouillon = null; _ficheCarteAnalyse = null; _rerenderFicheTab();
 }
 async function sauverCarte(clientId){
   const mois = _carteMoisCourant();
@@ -8062,6 +8085,7 @@ async function sauverCarte(clientId){
     const ins = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage`, { method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(lignes) });
     if (!del.ok || !ins.ok) throw new Error('Enregistrement impossible : vérifie que sql/2026-10-21_carte_personnage.sql et sql/2026-10-22_carte_brouillon.sql ont bien été exécutés dans Supabase.');
     await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&brouillon=eq.true`, { method:'DELETE', headers: supaHeaders() });
+    await _carteMajStatutAnalyse(clientId, 'valide');
     _carteEdition = null; _ficheCarte = undefined; _ficheCarteBrouillon = undefined;
     _rerenderFicheTab();
   } catch(e) { alert(e.message); }
@@ -8073,8 +8097,9 @@ async function _chargerCartesABrouillon(){
     const ids = res.ok ? [...new Set((await res.json()).map(r => r.client_id))] : [];
     const el = document.getElementById('dashCartesBrouillon');
     if (!el) return;
-    el.innerHTML = ids.length ? `<div class="card"><div class="card-head">🎯<span class="t">Cartes de personnage à valider</span><span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span></div>
-      <div class="card-list">${ids.map(id => { const c = data.clients.find(x => x.id === id); if (!c) return ''; return `<div class="card-list-row" onclick="openPanel('${id}').then(()=>setFicheTab('progression'))"><div class="mini-avatar">${initials(c.nom)}</div><div><div class="t">${esc(c.nom)}</div><div class="s">Brouillon proposé — relire et valider</div></div></div>`; }).join('')}</div></div>` : '';
+    el.innerHTML = `<div class="card"><div class="card-head">🎯<span class="t">Cartes de personnage</span>${ids.length ? `<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span>` : ''}</div>
+      <div class="card-list">${ids.map(id => { const c = data.clients.find(x => x.id === id); if (!c) return ''; return `<div class="card-list-row" onclick="openPanel('${id}').then(()=>setFicheTab('progression'))"><div class="mini-avatar">${initials(c.nom)}</div><div><div class="t">${esc(c.nom)}</div><div class="s">Brouillon proposé — relire et valider</div></div></div>`; }).join('')}
+      <div class="card-list-row" onclick="setNav('cartes-analyses')"><div class="mini-avatar">📜</div><div><div class="t">Historique des analyses</div><div class="s">${ids.length ? '' : 'Aucune carte à valider · '}toutes les analyses de photos</div></div></div></div></div>`;
   } catch(e) {}
 }
 
