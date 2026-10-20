@@ -3229,17 +3229,47 @@ async function supprimerBilanDetailPhoto(photoId, url){
 }
 
 // ── Page Classement ───────────────────────────────────────────────────
-async function renderCartesAnalysesPage(el){
-  el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Historique des analyses</h1></div><div class="meta"><button class="btn" onclick="setNav('dashboard')">← Accueil</button></div></div><div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
-  let rows = [];
-  try { const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?order=created_at.desc&limit=200&select=*`, { headers: supaHeaders() }); rows = res.ok ? await res.json() : []; } catch(e) {}
+let _cartesAnalysesRows = null, _cartesBrouillonScores = {}, _cartesAnalyseEditId = null;
+async function renderCartesAnalysesPage(el, depuisCache){
+  const head = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Analyses des cartes</h1></div><div class="meta"><button class="btn" onclick="setNav('dashboard')">← Accueil</button></div></div>`;
+  if (!depuisCache || !_cartesAnalysesRows) {
+    el.innerHTML = `${head}<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>`;
+    let rows = [], br = [];
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?order=created_at.desc&limit=300&select=*`, { headers: supaHeaders() }),
+        fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?brouillon=eq.true&select=client_id,axe,score`, { headers: supaHeaders() })]);
+      rows = r1.ok ? await r1.json() : []; br = r2.ok ? await r2.json() : [];
+    } catch(e) {}
+    _cartesAnalysesRows = rows; _cartesBrouillonScores = {};
+    br.forEach(r => { (_cartesBrouillonScores[r.client_id] = _cartesBrouillonScores[r.client_id] || {})[r.axe] = r.score; });
+  }
   if (state.nav !== 'cartes-analyses') return;
+  const rows = _cartesAnalysesRows, parId = {};
+  rows.forEach(r => { parId[r.id] = r; });
+  const nom = id => { const c = data.clients.find(x => x.id === id); return esc(c ? c.nom : id); };
+  const fmt = d => new Date(d).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
   const chip = st => st === 'valide' ? '<span class="chip on">Validée</span>' : st === 'rejete' ? '<span class="chip off">Rejetée</span>' : '<span class="chip" style="background:#6b5a2a;color:#fff;">À valider</span>';
-  el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Historique des analyses</h1></div><div class="meta"><button class="btn" onclick="setNav('dashboard')">← Accueil</button></div></div>
-    ${rows.length ? rows.map(r => { const c = data.clients.find(x => x.id === r.client_id); return `<div class="fiche-card" style="margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
-        <div><b style="cursor:pointer;" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">${esc(c ? c.nom : r.client_id)}</b> <span style="color:var(--text-faint);font-size:12px;">· ${new Date(r.created_at).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})}</span></div>${chip(r.statut)}</div>
-      <div style="white-space:pre-wrap;line-height:1.55;font-size:13px;">${esc(r.texte)}</div></div>`; }).join('') : '<p style="color:var(--text-faint);">Aucune analyse pour l\'instant. Elles apparaîtront ici dès que la tâche planifiée aura traité des photos (pense à exécuter sql/2026-10-23_carte_analyses.sql).</p>'}`;
+  const anciennes = r => { const out = []; let x = r.revision_de ? parId[r.revision_de] : null; while (x) { out.push(x); x = x.revision_de ? parId[x.revision_de] : null; } return out; };
+  const versionsHtml = r => { const v = anciennes(r); return v.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:var(--text-faint);">Versions précédentes (${v.length})</summary>${v.map(x => `<div style="border-left:2px solid var(--hairline);padding-left:10px;margin-top:8px;"><div style="font-size:11.5px;color:var(--text-faint);margin-bottom:4px;">Version ${x.version||1} · ${fmt(x.created_at)} par ${x.auteur === 'coach' ? 'toi' : 'l\'IA'}</div><div style="white-space:pre-wrap;line-height:1.5;font-size:12.5px;">${esc(x.texte)}</div></div>`).join('')}</details>` : ''; };
+  const brouillons = rows.filter(r => r.statut === 'brouillon');
+  const resume = r => ['POINTS FORTS','POINTS FAIBLES'].map(t => { const txt = _carteSection(r.texte, t); return txt ? `<div style="font-size:12.5px;margin-top:6px;"><b style="font-size:11px;letter-spacing:.04em;color:var(--text-faint);">${t === 'POINTS FORTS' ? 'POINTS FORTS' : 'À TRAVAILLER'}</b><div style="line-height:1.45;">${esc(txt)}</div></div>` : ''; }).join('');
+  const carteBrouillon = r => { const a = { ...r, _prec: r.revision_de ? parId[r.revision_de] || null : null }; const edit = _cartesAnalyseEditId === r.id; return `<div class="fiche-card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b style="cursor:pointer;" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">${nom(r.client_id)}</b>${chip(r.statut)}</div>
+      ${resume(r)}
+      <details style="margin-top:8px;" ${edit || a._prec ? 'open' : ''}><summary style="cursor:pointer;color:var(--accent);font-size:12.5px;">Analyse détaillée${(r.version||1) > 1 ? ` · version ${r.version}` : ''}</summary>
+        ${_carteAnalyseBlocHtml(a, _cartesBrouillonScores[r.client_id], { edition: edit, idEdit: 'carteAnalyseTexte_'+r.id, rerender: `_cartesAnalyseEditId=_carteAnalyseEdition?${r.id}:null;_carteAnalyseEdition=false;renderCartesAnalysesPage(document.getElementById('main'),true)`, onSave: `reviserAnalyseCarte('${r.client_id}', document.getElementById('carteAnalyseTexte_${r.id}').value, ()=>{_cartesAnalyseEditId=null;renderCartesAnalysesPage(document.getElementById('main'))})` })}
+        ${versionsHtml(r)}</details>
+      <div style="margin-top:10px;"><button class="btn primary" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">Ouvrir la fiche pour valider</button></div></div>`; };
+  const historique = rows.filter(r => r.statut === 'valide' || r.statut === 'rejete');
+  el.innerHTML = `${head}
+    <h3 style="margin:4px 0 10px;">À valider (${brouillons.length})</h3>
+    ${brouillons.length ? brouillons.map(carteBrouillon).join('') : '<p style="color:var(--text-faint);">Aucun brouillon en attente.</p>'}
+    <h3 style="margin:24px 0 10px;">Historique</h3>
+    ${historique.length ? historique.map(r => `<div class="fiche-card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;"><div><b style="cursor:pointer;" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">${nom(r.client_id)}</b> <span style="color:var(--text-faint);font-size:12px;">· ${fmt(r.created_at)}${(r.version||1) > 1 ? ` · version ${r.version}` : ''}</span></div>${chip(r.statut)}</div>
+      ${r.scores ? `<div style="margin-bottom:6px;">${_carteScoresHtml(r.scores)}</div>` : ''}
+      <details><summary style="cursor:pointer;color:var(--accent);font-size:12.5px;">Analyse</summary><div style="white-space:pre-wrap;line-height:1.55;font-size:13px;margin-top:6px;">${esc(r.texte)}</div>${versionsHtml(r)}</details></div>`).join('') : '<p style="color:var(--text-faint);">Rien pour l\'instant.</p>'}`;
 }
 
 function renderClassementPage(el){
@@ -8015,9 +8045,78 @@ function _rerenderFicheTab(){
   const c = data.clients.find(x=>x.id===state.selected);
   if (el && c) el.innerHTML = renderFicheTabContent(c);
 }
+// Analyse en brouillon courante + version précédente (revision_de) pour afficher les différences.
 function _carteChargerAnalyse(cid){
-  return fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?client_id=eq.${encodeURIComponent(cid)}&statut=eq.brouillon&order=created_at.desc&limit=1&select=texte`, { headers: supaHeaders() })
-    .then(r => r.ok ? r.json() : []).catch(() => []).then(rows => rows[0] ? rows[0].texte : null);
+  return fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?client_id=eq.${encodeURIComponent(cid)}&order=created_at.desc&limit=30&select=*`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : []).catch(() => []).then(rows => {
+      const cur = rows.find(r => r.statut === 'brouillon');
+      if (!cur) return null;
+      return { ...cur, _prec: cur.revision_de ? rows.find(r => r.id === cur.revision_de) || null : null };
+    });
+}
+// Diff mot à mot (LCS) : ajouts en vert, suppressions barrées en rouge.
+function _carteDiffHtml(avant, apres){
+  const a = String(avant||'').split(/(\s+)/).filter(Boolean), b = String(apres||'').split(/(\s+)/).filter(Boolean);
+  const n = a.length, m = b.length;
+  if (n * m > 6e6) return esc(apres);
+  const L = new Uint16Array((n+1)*(m+1));
+  for (let i = n-1; i >= 0; i--) for (let j = m-1; j >= 0; j--)
+    L[i*(m+1)+j] = a[i] === b[j] ? L[(i+1)*(m+1)+j+1] + 1 : Math.max(L[(i+1)*(m+1)+j], L[i*(m+1)+j+1]);
+  const out = []; let i = 0, j = 0;
+  const push = (t, txt) => { const last = out[out.length-1]; if (last && last.t === t) last.s += txt; else out.push({ t, s: txt }); };
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { push('=', a[i]); i++; j++; }
+    else if (L[(i+1)*(m+1)+j] >= L[i*(m+1)+j+1]) push('-', a[i++]);
+    else push('+', b[j++]);
+  }
+  while (i < n) push('-', a[i++]);
+  while (j < m) push('+', b[j++]);
+  return out.map(o => o.t === '=' ? esc(o.s)
+    : o.t === '+' ? (/^\s+$/.test(o.s) ? esc(o.s) : `<span style="background:rgba(52,168,83,.22);color:#5fd38a;border-radius:3px;">${esc(o.s)}</span>`)
+    : (/^\s+$/.test(o.s) ? '' : `<span style="background:rgba(217,48,37,.18);color:#ff8a80;text-decoration:line-through;border-radius:3px;">${esc(o.s)}</span>`)).join('');
+}
+// Puces de scores (zones + définition + gras), avec écart par rapport à une version précédente si fournie.
+function _carteScoresHtml(sc, prec){
+  if (!sc) return '';
+  const cles = [...CARTE_AXES, CARTE_DEF].filter(k => sc[k] != null);
+  const puce = k => { const v = sc[k], p = prec ? prec[k] : null, d = p != null ? v - p : 0;
+    const coul = d > 0 ? '#5fd38a' : d < 0 ? '#ff8a80' : 'var(--text-faint)';
+    return `<span style="display:inline-block;border:1px solid var(--hairline);border-radius:8px;padding:2px 7px;margin:0 4px 4px 0;font-size:12px;">${esc(k)} <b>${v}</b>${p != null && d ? ` <span style="color:${coul};">(${p}→${v})</span>` : ''}</span>`; };
+  const gras = sc[CARTE_GRAS_MIN] != null ? (() => { const pm = prec && prec[CARTE_GRAS_MIN] != null ? `${prec[CARTE_GRAS_MIN]}-${prec[CARTE_GRAS_MAX]}` : null, cur = `${sc[CARTE_GRAS_MIN]}-${sc[CARTE_GRAS_MAX]}`;
+    return `<span style="display:inline-block;border:1px solid var(--hairline);border-radius:8px;padding:2px 7px;margin:0 4px 4px 0;font-size:12px;">Gras <b>${cur} %</b>${pm && pm !== cur ? ` <span style="color:var(--accent);">(avant ${pm} %)</span>` : ''}</span>`; })() : '';
+  return cles.map(puce).join('') + gras;
+}
+// Extrait une section ("POINTS FORTS"…) d'une analyse en texte brut.
+function _carteSection(texte, titre){
+  const bloc = String(texte||'').split(/\n\s*\n/).find(b => b.trim().toUpperCase().startsWith(titre));
+  return bloc ? bloc.trim().split('\n').slice(1).join('\n').trim() : '';
+}
+// Le coach retape l'analyse : nouvelle version (auteur coach), l'ancienne passe en 'revise'.
+async function reviserAnalyseCarte(clientId, texte, onDone){
+  const cur = await _carteChargerAnalyse(clientId);
+  if (!cur) { alert('Aucun brouillon en cours pour ce client.'); return; }
+  if (texte.trim() === String(cur.texte).trim()) { onDone && onDone(); return; }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses`, { method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }),
+    body: JSON.stringify({ client_id: clientId, mois: cur.mois, texte, statut:'brouillon', scores: cur.scores ?? null, revision_de: cur.id, version: (cur.version||1) + 1, auteur:'coach' }) });
+  if (!res.ok) { alert('Enregistrement impossible : exécute d\'abord sql/2026-10-24_carte_analyses_versions.sql dans Supabase.'); return; }
+  await fetch(`${SUPABASE_URL}/rest/v1/client_carte_analyses?id=eq.${cur.id}`, { method:'PATCH', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ statut:'revise' }) });
+  onDone && onDone();
+}
+let _carteVoirDiff = true, _carteAnalyseOuverte = false, _carteAnalyseEdition = false;
+function _carteAnalyseBlocHtml(a, brouillonScores, opts){
+  // a = analyse courante (avec a._prec) ; opts.idEdit = préfixe unique, opts.onSave = code JS à exécuter
+  const prec = a._prec;
+  const auteur = r => r.auteur === 'coach' ? 'toi' : 'l\'IA';
+  const fmt = d => new Date(d).toLocaleDateString('fr-FR',{day:'numeric',month:'long'});
+  const scores = a.scores || brouillonScores || null;
+  const meta = `Version ${a.version||1} · ${fmt(a.created_at)} par ${auteur(a)}${prec ? ` — révise la version ${prec.version||1} du ${fmt(prec.created_at)}` : ''}`;
+  return `<div style="font-size:11.5px;color:var(--text-faint);margin:6px 0;">${meta}</div>
+    ${scores ? `<div style="margin:6px 0;">${_carteScoresHtml(scores, prec && _carteVoirDiff ? prec.scores : null)}</div>` : ''}
+    ${prec ? `<label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;margin:4px 0 6px;cursor:pointer;"><input type="checkbox" ${_carteVoirDiff?'checked':''} onchange="_carteVoirDiff=this.checked;${opts.rerender}"> Afficher les modifications <span style="color:#5fd38a;">ajouts</span> / <span style="color:#ff8a80;text-decoration:line-through;">retraits</span></label>` : ''}
+    ${opts.edition ? `<textarea id="${opts.idEdit}" style="width:100%;min-height:340px;font-size:16px;line-height:1.5;padding:8px;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--hairline);border-radius:8px;">${esc(a.texte)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn" onclick="_carteAnalyseEdition=false;${opts.rerender}">Annuler</button><button class="btn primary" onclick="${opts.onSave}">Enregistrer ma version</button></div>`
+    : `<div style="white-space:pre-wrap;line-height:1.5;font-size:12.5px;">${prec && _carteVoirDiff ? _carteDiffHtml(prec.texte, a.texte) : esc(a.texte)}</div>
+      <button class="btn" style="margin-top:8px;" onclick="_carteAnalyseEdition=true;_carteAnalyseOuverte=true;${opts.rerender}">✎ Retaper l'analyse</button>`}`;
 }
 function _carteChargerBrouillon(cid){
   return fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(cid)}&brouillon=eq.true&order=mois.asc&select=mois,axe,score`, { headers: supaHeaders() })
@@ -8026,7 +8125,7 @@ function _carteChargerBrouillon(cid){
 }
 function renderFicheCarteHtml(){
   const cid = state.selected;
-  if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _ficheCarteBrouillon = undefined; _carteEdition = null; }
+  if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _ficheCarteBrouillon = undefined; _carteEdition = null; _carteAnalyseEdition = false; _carteAnalyseOuverte = false; }
   if (_ficheCarte === undefined) {
     _ficheCarte = null;
     Promise.all([chargerCarteClient(cid), _carteChargerBrouillon(cid), _carteChargerAnalyse(cid)]).then(([r, b, a]) => { _ficheCarte = r; _ficheCarteBrouillon = b; _ficheCarteAnalyse = a; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
@@ -8053,7 +8152,8 @@ function renderFicheCarteHtml(){
   if (_ficheCarte === null) return cadre('<div style="padding:20px;text-align:center;color:var(--text-faint);">Chargement…</div>');
   const bandeau = brouillon ? `<div style="background:#2a2418;border:1px solid #6b5a2a;border-radius:10px;padding:10px 12px;margin:8px 0 12px;font-size:12.5px;">
       <div style="margin-bottom:8px;">🤖 <b>Brouillon proposé</b> à partir des dernières photos — à relire et valider.</div>
-      ${_ficheCarteAnalyse ? `<details style="margin-bottom:10px;"><summary style="cursor:pointer;color:var(--accent);">Voir l'analyse détaillée</summary><div style="white-space:pre-wrap;line-height:1.5;margin-top:8px;font-size:12.5px;">${esc(_ficheCarteAnalyse)}</div></details>` : ''}
+      ${_ficheCarteAnalyse ? `<details style="margin-bottom:10px;" ${_carteAnalyseOuverte?'open':''} ontoggle="_carteAnalyseOuverte=this.open"><summary style="cursor:pointer;color:var(--accent);">Voir l'analyse détaillée${(_ficheCarteAnalyse.version||1) > 1 ? ` · version ${_ficheCarteAnalyse.version}` : ''}</summary>
+        ${_carteAnalyseBlocHtml(_ficheCarteAnalyse, brouillon, { edition: _carteAnalyseEdition, idEdit: 'carteAnalyseTexte', rerender: '_rerenderFicheTab()', onSave: `reviserAnalyseCarte('${state.selected}', document.getElementById('carteAnalyseTexte').value, ()=>{_carteAnalyseEdition=false;_ficheCarte=undefined;_rerenderFicheTab();})` })}</details>` : ''}
       <div style="display:flex;gap:8px;"><button class="btn primary" onclick="ouvrirEditionCarte(true)">Relire et valider</button><button class="btn" onclick="rejeterBrouillonCarte('${state.selected}')">Rejeter</button></div></div>` : '';
   if (!Object.keys(carte).length) return cadre(`${bandeau}<p style="color:var(--text-faint);margin:6px 0 0;">Aucune carte validée pour l'instant.</p>`);
   return cadre(`${bandeau}<div style="max-width:380px;margin:0 auto;">${_carteHtml(carte)}</div>`);
@@ -8099,7 +8199,7 @@ async function _chargerCartesABrouillon(){
     if (!el) return;
     el.innerHTML = `<div class="card"><div class="card-head">🎯<span class="t">Cartes de personnage</span>${ids.length ? `<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span>` : ''}</div>
       <div class="card-list">${ids.map(id => { const c = data.clients.find(x => x.id === id); if (!c) return ''; return `<div class="card-list-row" onclick="openPanel('${id}').then(()=>setFicheTab('progression'))"><div class="mini-avatar">${initials(c.nom)}</div><div><div class="t">${esc(c.nom)}</div><div class="s">Brouillon proposé — relire et valider</div></div></div>`; }).join('')}
-      <div class="card-list-row" onclick="setNav('cartes-analyses')"><div class="mini-avatar">📜</div><div><div class="t">Historique des analyses</div><div class="s">${ids.length ? '' : 'Aucune carte à valider · '}toutes les analyses de photos</div></div></div></div></div>`;
+      <div class="card-list-row" onclick="setNav('cartes-analyses')"><div class="mini-avatar">📜</div><div><div class="t">Résumé des analyses</div><div class="s">${ids.length ? 'brouillons à valider (modifications en couleur) · ' : 'Aucune carte à valider · '}historique</div></div></div></div></div>`;
   } catch(e) {}
 }
 
