@@ -683,11 +683,15 @@ async function compresserImagePourUpload(file, maxCote = 1800, qualite = 0.85) {
 
 // ── Carte de personnage (radar de développement musculaire) — partagée coach + client ──
 const CARTE_AXES = ['Pecs', 'Dos', 'Épaules', 'Bras', 'Quadris', 'Ischios', 'Fessiers', 'Mollets'];
+// Axes spéciaux stockés dans la même table (jamais tracés sur le radar) : score de définition + fourchette de gras estimé.
+const CARTE_DEF = 'Définition', CARTE_GRAS_MIN = 'Gras min', CARTE_GRAS_MAX = 'Gras max';
 
 // Renvoie { 'YYYY-MM-01': { axe: score } } trié par mois ; {} si la table n'existe pas encore.
 async function chargerCarteClient(clientId) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&order=mois.asc&select=mois,axe,score`, { headers: supaHeaders() });
+    const base = `${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&order=mois.asc&select=mois,axe,score`;
+    let res = await fetch(base + '&brouillon=eq.false', { headers: supaHeaders() });
+    if (!res.ok) res = await fetch(base, { headers: supaHeaders() }); // colonne "brouillon" pas encore créée (SQL non exécuté)
     if (!res.ok) return {};
     const out = {};
     (await res.json()).forEach(r => { (out[r.mois] = out[r.mois] || {})[r.axe] = r.score; });
@@ -734,5 +738,11 @@ function _carteHtml(carte) {
       <span><span style="display:inline-block;width:10px;height:10px;background:#1D9E75;border-radius:2px;margin-right:5px;"></span>Ce mois-ci</span>
       ${prev ? `<span><span style="display:inline-block;width:10px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Mois précédent</span>` : ''}
     </div>
+    ${now[CARTE_DEF] != null ? `<div style="background:#1e2230;border-radius:10px;padding:10px 12px;margin-top:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-size:11px;color:#8892a4;">Définition</span>
+        <span><span style="font-size:20px;font-weight:600;">${now[CARTE_DEF]}</span>${prev && prev[CARTE_DEF] != null ? ` <span style="font-size:11px;color:${now[CARTE_DEF]>=prev[CARTE_DEF]?'#1D9E75':'#e05c5c'};">${now[CARTE_DEF]>=prev[CARTE_DEF]?'+':''}${now[CARTE_DEF]-prev[CARTE_DEF]}</span>` : ''}</span></div>
+      <div style="height:5px;background:#2d3142;border-radius:3px;margin:6px 0 4px;"><div style="width:${now[CARTE_DEF]}%;height:5px;background:#1D9E75;border-radius:3px;"></div></div>
+      ${now[CARTE_GRAS_MIN] != null && now[CARTE_GRAS_MAX] != null ? `<div style="font-size:11px;color:#8892a4;">Gras estimé ${now[CARTE_GRAS_MIN]}–${now[CARTE_GRAS_MAX]} %</div>` : ''}
+    </div>` : ''}
     ${best && best.d > 0 ? `<div style="background:#1e2230;border-radius:10px;padding:8px 12px;margin-top:10px;font-size:12px;display:flex;justify-content:space-between;"><span>Plus gros progrès</span><span style="color:#1D9E75;font-weight:600;">${best.a} +${best.d}</span></div>` : ''}`;
 }

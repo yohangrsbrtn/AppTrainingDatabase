@@ -470,7 +470,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=22"></script>
+<script src="api.js?v=23"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -639,7 +639,7 @@ let _ficheProtocole = undefined; // undefined=pas chargé, null=aucun protocole,
 let _ficheProtocoleLoading = false;
 let _ficheProtocoleSubTab = 'cycle'; // 'cycle' | 'analyses'
 let _ficheAnalysesClientId = null;
-let _ficheCarte = undefined, _ficheCarteClientId = null, _carteEdition = null; // carte de personnage (radar)
+let _ficheCarte = undefined, _ficheCarteBrouillon = undefined, _ficheCarteClientId = null, _carteEdition = null; // carte de personnage (radar)
 let _ficheAnalyses = undefined; // undefined=pas chargé, [] = vide, tableau de lignes brutes chargé
 let _ficheAnalysesLoading = false;
 let _analyseEnEdition = null; // { date, marqueurs:[{nom,valeur,unite,ref_min,ref_max}], estNouvelle }
@@ -5538,6 +5538,7 @@ function _anniversairesAujourdhui(){
 }
 
 function renderDashboard(el){
+  setTimeout(_chargerCartesABrouillon, 0);
   const bilansATraiter = data.bilansCoach.filter(b=>!b.coachTraite).sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
   const bilansSupaATrait = _bilansATraiterListe().map(b => {
     const c = data.clients.find(x=>x.id===b.client_id);
@@ -5623,6 +5624,7 @@ function renderDashboard(el){
         </div>` : `<div class="card-empty">${iCheckCircle()}Aucun bilan en attente.</div>`}
         `; })()}
       </div>
+      <div id="dashCartesBrouillon"></div>
       <div class="card">
         ${(() => { const anniv = _anniversairesAujourdhui(); return `
         <div class="card-head">🎂<span class="t">Anniversaires du jour</span>${anniv.length?`<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${anniv.length}</span>`:''}</div>
@@ -7999,47 +8001,81 @@ function _rerenderFicheTab(){
   const c = data.clients.find(x=>x.id===state.selected);
   if (el && c) el.innerHTML = renderFicheTabContent(c);
 }
+function _carteChargerBrouillon(cid){
+  return fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(cid)}&brouillon=eq.true&order=mois.asc&select=mois,axe,score`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : []).catch(() => [])
+    .then(rows => { const out = {}; rows.forEach(r => { out[r.axe] = r.score; out._mois = r.mois; }); return rows.length ? out : null; });
+}
 function renderFicheCarteHtml(){
   const cid = state.selected;
-  if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _carteEdition = null; }
+  if (_ficheCarteClientId !== cid) { _ficheCarteClientId = cid; _ficheCarte = undefined; _ficheCarteBrouillon = undefined; _carteEdition = null; }
   if (_ficheCarte === undefined) {
     _ficheCarte = null;
-    chargerCarteClient(cid).then(r => { _ficheCarte = r; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
+    Promise.all([chargerCarteClient(cid), _carteChargerBrouillon(cid)]).then(([r, b]) => { _ficheCarte = r; _ficheCarteBrouillon = b; if (state.selected === cid && ficheTab === 'progression') _rerenderFicheTab(); });
   }
   const carte = _ficheCarte || {};
-  const cadre = inner => `<div class="fiche-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">Carte de personnage</h3>${_carteEdition ? '' : `<button class="btn" onclick="ouvrirEditionCarte()">✎ ${Object.keys(carte).length ? 'Mettre à jour' : 'Créer la carte'}</button>`}</div>${inner}</div>`;
+  const brouillon = _ficheCarteBrouillon || null;
+  const cadre = inner => `<div class="fiche-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">Carte de personnage</h3>${_carteEdition || brouillon ? '' : `<button class="btn" onclick="ouvrirEditionCarte()">✎ ${Object.keys(carte).length ? 'Mettre à jour' : 'Créer la carte'}</button>`}</div>${inner}</div>`;
   if (_carteEdition) {
-    return cadre(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:10px;">Mise à jour de ${new Date(_carteMoisCourant()+'T12:00:00').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})} — décoche une zone pour la masquer sur la carte de ce client.</div>
-      ${CARTE_AXES.map(a => { const v = _carteEdition[a]; const on = v != null; return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-        <input type="checkbox" id="carteOn_${a}" ${on?'checked':''} onchange="_carteEdition['${a}']=this.checked?(parseInt(document.getElementById('carteSl_${a}').value)||50):null;">
-        <span style="width:70px;font-size:13px;">${a}</span>
-        <input type="range" id="carteSl_${a}" min="0" max="100" value="${on?v:50}" style="flex:1;" oninput="document.getElementById('carteVal_${a}').textContent=this.value;if(document.getElementById('carteOn_${a}').checked)_carteEdition['${a}']=parseInt(this.value);">
-        <span id="carteVal_${a}" style="width:28px;text-align:right;font-size:13px;">${on?v:50}</span>
-      </div>`; }).join('')}
+    const slider = (cle, label, min, max) => { const v = _carteEdition[cle]; const on = v != null; return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <input type="checkbox" id="carteOn_${cle}" ${on?'checked':''} onchange="_carteEdition['${cle}']=this.checked?(parseInt(document.getElementById('carteSl_${cle}').value)||${min}):null;">
+        <span style="width:80px;font-size:13px;">${label}</span>
+        <input type="range" id="carteSl_${cle}" min="${min}" max="${max}" value="${on?v:Math.round((min+max)/2)}" style="flex:1;" oninput="document.getElementById('carteVal_${cle}').textContent=this.value;if(document.getElementById('carteOn_${cle}').checked)_carteEdition['${cle}']=parseInt(this.value);">
+        <span id="carteVal_${cle}" style="width:28px;text-align:right;font-size:13px;">${on?v:Math.round((min+max)/2)}</span></div>`; };
+    return cadre(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:10px;">${_carteEdition._depuisBrouillon ? '🤖 Brouillon proposé à partir des photos — relis, ajuste, puis enregistre pour le valider. ' : ''}Mise à jour de ${new Date(_carteMoisCourant()+'T12:00:00').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})} — décoche une zone pour la masquer sur la carte de ce client.</div>
+      ${CARTE_AXES.map(a => slider(a, a, 0, 100)).join('')}
+      <div style="border-top:1px solid var(--hairline);margin:10px 0;padding-top:10px;">
+        ${slider(CARTE_DEF, 'Définition', 0, 100)}
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-left:26px;">Gras estimé
+          <input type="number" id="carteGrasMin" min="3" max="50" value="${_carteEdition[CARTE_GRAS_MIN] ?? ''}" style="width:64px;font-size:16px;" oninput="_carteEdition['${CARTE_GRAS_MIN}']=this.value===''?null:parseInt(this.value)"> à
+          <input type="number" id="carteGrasMax" min="3" max="50" value="${_carteEdition[CARTE_GRAS_MAX] ?? ''}" style="width:64px;font-size:16px;" oninput="_carteEdition['${CARTE_GRAS_MAX}']=this.value===''?null:parseInt(this.value)"> %</div>
+      </div>
       <div style="display:flex;gap:8px;margin-top:12px;"><button class="btn" onclick="_carteEdition=null;_rerenderFicheTab()">Annuler</button><button class="btn primary" onclick="sauverCarte('${state.selected}')">Enregistrer</button></div>`);
   }
   if (_ficheCarte === null) return cadre('<div style="padding:20px;text-align:center;color:var(--text-faint);">Chargement…</div>');
-  if (!Object.keys(carte).length) return cadre('<p style="color:var(--text-faint);margin:6px 0 0;">Aucune carte pour l\'instant.</p>');
-  return cadre(`<div style="max-width:380px;margin:0 auto;">${_carteHtml(carte)}</div>`);
+  const bandeau = brouillon ? `<div style="background:#2a2418;border:1px solid #6b5a2a;border-radius:10px;padding:10px 12px;margin:8px 0 12px;font-size:12.5px;">
+      <div style="margin-bottom:8px;">🤖 <b>Brouillon proposé</b> à partir des dernières photos — à relire et valider.</div>
+      <div style="display:flex;gap:8px;"><button class="btn primary" onclick="ouvrirEditionCarte(true)">Relire et valider</button><button class="btn" onclick="rejeterBrouillonCarte('${state.selected}')">Rejeter</button></div></div>` : '';
+  if (!Object.keys(carte).length) return cadre(`${bandeau}<p style="color:var(--text-faint);margin:6px 0 0;">Aucune carte validée pour l'instant.</p>`);
+  return cadre(`${bandeau}<div style="max-width:380px;margin:0 auto;">${_carteHtml(carte)}</div>`);
 }
-function ouvrirEditionCarte(){
+function ouvrirEditionCarte(depuisBrouillon){
   const mois = Object.keys(_ficheCarte || {}).sort();
-  const base = mois.length ? _ficheCarte[mois[mois.length-1]] : null;
-  _carteEdition = {};
+  const base = depuisBrouillon && _ficheCarteBrouillon ? _ficheCarteBrouillon : (mois.length ? _ficheCarte[mois[mois.length-1]] : null);
+  _carteEdition = { _depuisBrouillon: !!(depuisBrouillon && _ficheCarteBrouillon) };
   CARTE_AXES.forEach(a => { _carteEdition[a] = base ? (base[a] ?? null) : (a === 'Fessiers' ? null : 50); });
+  [CARTE_DEF, CARTE_GRAS_MIN, CARTE_GRAS_MAX].forEach(k => { _carteEdition[k] = base ? (base[k] ?? null) : null; });
   _rerenderFicheTab();
+}
+async function rejeterBrouillonCarte(clientId){
+  if (!confirm('Rejeter ce brouillon ?')) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&brouillon=eq.true`, { method:'DELETE', headers: supaHeaders() });
+  _ficheCarteBrouillon = null; _rerenderFicheTab();
 }
 async function sauverCarte(clientId){
   const mois = _carteMoisCourant();
-  const lignes = CARTE_AXES.filter(a => _carteEdition[a] != null).map(a => ({ client_id: clientId, mois, axe: a, score: Math.max(0, Math.min(100, Math.round(_carteEdition[a]))) }));
-  if (lignes.length < 3) { alert('Garde au moins 3 zones sur la carte.'); return; }
+  const cles = [...CARTE_AXES, CARTE_DEF, CARTE_GRAS_MIN, CARTE_GRAS_MAX];
+  const lignes = cles.filter(a => _carteEdition[a] != null).map(a => ({ client_id: clientId, mois, axe: a, score: Math.max(0, Math.min(100, Math.round(_carteEdition[a]))), brouillon: false }));
+  if (lignes.filter(l => CARTE_AXES.includes(l.axe)).length < 3) { alert('Garde au moins 3 zones sur la carte.'); return; }
   try {
-    const del = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&mois=eq.${mois}`, { method:'DELETE', headers: supaHeaders() });
+    const del = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&mois=eq.${mois}&brouillon=eq.false`, { method:'DELETE', headers: supaHeaders() });
     const ins = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage`, { method:'POST', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify(lignes) });
-    if (!del.ok || !ins.ok) throw new Error('La table client_carte_personnage n\'existe pas encore : exécute sql/2026-10-21_carte_personnage.sql dans Supabase.');
-    _carteEdition = null; _ficheCarte = undefined;
+    if (!del.ok || !ins.ok) throw new Error('Enregistrement impossible : vérifie que sql/2026-10-21_carte_personnage.sql et sql/2026-10-22_carte_brouillon.sql ont bien été exécutés dans Supabase.');
+    await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?client_id=eq.${encodeURIComponent(clientId)}&brouillon=eq.true`, { method:'DELETE', headers: supaHeaders() });
+    _carteEdition = null; _ficheCarte = undefined; _ficheCarteBrouillon = undefined;
     _rerenderFicheTab();
   } catch(e) { alert(e.message); }
+}
+// Accueil : cartes de personnage en brouillon (proposées par la tâche planifiée), à valider.
+async function _chargerCartesABrouillon(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_carte_personnage?brouillon=eq.true&select=client_id`, { headers: supaHeaders() });
+    const ids = res.ok ? [...new Set((await res.json()).map(r => r.client_id))] : [];
+    const el = document.getElementById('dashCartesBrouillon');
+    if (!el) return;
+    el.innerHTML = ids.length ? `<div class="card"><div class="card-head">🎯<span class="t">Cartes de personnage à valider</span><span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span></div>
+      <div class="card-list">${ids.map(id => { const c = data.clients.find(x => x.id === id); if (!c) return ''; return `<div class="card-list-row" onclick="openPanel('${id}').then(()=>setFicheTab('progression'))"><div class="mini-avatar">${initials(c.nom)}</div><div><div class="t">${esc(c.nom)}</div><div class="s">Brouillon proposé — relire et valider</div></div></div>`; }).join('')}</div></div>` : '';
+  } catch(e) {}
 }
 
 function renderFicheProgressionTab(){
