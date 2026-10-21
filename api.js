@@ -719,7 +719,7 @@ function _carteRadarSvg(axes, now, prev) {
   if (prev) s += `<polygon points="${poly(a => prev[a] ?? 0)}" fill="none" stroke="#8892a4" stroke-width="1.5" stroke-dasharray="4 3"/>`;
   s += `<polygon points="${poly(a => now[a] ?? 0)}" fill="#1D9E7533" stroke="#1D9E75" stroke-width="2"/>`;
   axes.forEach((a, i) => { const [x, y] = pt(i, now[a] ?? 0); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#1D9E75"/>`; });
-  return `<svg viewBox="0 0 340 290" width="100%" role="img" aria-label="Carte de personnage">${s}</svg>`;
+  return `<svg viewBox="0 0 340 290" width="100%" role="img" aria-label="Carte de compétence">${s}</svg>`;
 }
 
 // Bloc complet (radar + légende + plus gros progrès) pour le mois le plus récent vs le précédent.
@@ -742,7 +742,7 @@ function _carteHtml(carte) {
       <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-size:11px;color:#8892a4;">Définition</span>
         <span><span style="font-size:20px;font-weight:600;">${now[CARTE_DEF]}</span>${prev && prev[CARTE_DEF] != null ? ` <span style="font-size:11px;color:${now[CARTE_DEF]>=prev[CARTE_DEF]?'#1D9E75':'#e05c5c'};">${now[CARTE_DEF]>=prev[CARTE_DEF]?'+':''}${now[CARTE_DEF]-prev[CARTE_DEF]}</span>` : ''}</span></div>
       <div style="height:5px;background:#2d3142;border-radius:3px;margin:6px 0 4px;"><div style="width:${now[CARTE_DEF]}%;height:5px;background:#1D9E75;border-radius:3px;"></div></div>
-      ${now[CARTE_GRAS_MIN] != null && now[CARTE_GRAS_MAX] != null ? `<div style="font-size:11px;color:#8892a4;">Gras estimé ${now[CARTE_GRAS_MIN]}–${now[CARTE_GRAS_MAX]} %</div>` : ''}
+      ${now[CARTE_GRAS_MIN] != null && now[CARTE_GRAS_MAX] != null ? `<div style="font-size:11px;color:#8892a4;">Taux de fat ${now[CARTE_GRAS_MIN]}–${now[CARTE_GRAS_MAX]} %</div>` : ''}
     </div>` : ''}
     ${best && best.d > 0 ? `<div style="background:#1e2230;border-radius:10px;padding:8px 12px;margin-top:10px;font-size:12px;display:flex;justify-content:space-between;"><span>Plus gros progrès</span><span style="color:#1D9E75;font-weight:600;">${best.a} +${best.d}</span></div>` : ''}`;
 }

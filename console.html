@@ -470,7 +470,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=23"></script>
+<script src="api.js?v=24"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -8102,7 +8102,7 @@ function _carteScoresHtml(sc, prec){
     const coul = d > 0 ? '#5fd38a' : d < 0 ? '#ff8a80' : 'var(--text-faint)';
     return `<span style="display:inline-block;border:1px solid var(--hairline);border-radius:8px;padding:2px 7px;margin:0 4px 4px 0;font-size:12px;">${esc(k)} <b>${v}</b>${p != null && d ? ` <span style="color:${coul};">(${p}→${v})</span>` : ''}</span>`; };
   const gras = sc[CARTE_GRAS_MIN] != null ? (() => { const pm = prec && prec[CARTE_GRAS_MIN] != null ? `${prec[CARTE_GRAS_MIN]}-${prec[CARTE_GRAS_MAX]}` : null, cur = `${sc[CARTE_GRAS_MIN]}-${sc[CARTE_GRAS_MAX]}`;
-    return `<span style="display:inline-block;border:1px solid var(--hairline);border-radius:8px;padding:2px 7px;margin:0 4px 4px 0;font-size:12px;">Gras <b>${cur} %</b>${pm && pm !== cur ? ` <span style="color:var(--accent);">(avant ${pm} %)</span>` : ''}</span>`; })() : '';
+    return `<span style="display:inline-block;border:1px solid var(--hairline);border-radius:8px;padding:2px 7px;margin:0 4px 4px 0;font-size:12px;">Taux de fat <b>${cur} %</b>${pm && pm !== cur ? ` <span style="color:var(--accent);">(avant ${pm} %)</span>` : ''}</span>`; })() : '';
   return cles.map(puce).join('') + gras;
 }
 // Extrait une section ("POINTS FORTS"…) d'une analyse en texte brut.
@@ -8151,7 +8151,7 @@ function renderFicheCarteHtml(){
   }
   const carte = _ficheCarte || {};
   const brouillon = _ficheCarteBrouillon || null;
-  const cadre = inner => `<div class="fiche-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">Carte de personnage</h3>${_carteEdition || brouillon ? '' : `<button class="btn" onclick="ouvrirEditionCarte()">✎ ${Object.keys(carte).length ? 'Mettre à jour' : 'Créer la carte'}</button>`}</div>${inner}</div>`;
+  const cadre = inner => `<div class="fiche-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">Carte de compétence</h3>${_carteEdition || brouillon ? '' : `<button class="btn" onclick="ouvrirEditionCarte()">✎ ${Object.keys(carte).length ? 'Mettre à jour' : 'Créer la carte'}</button>`}</div>${inner}</div>`;
   if (_carteEdition) {
     const slider = (cle, label, min, max) => { const v = _carteEdition[cle]; const on = v != null; return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
         <input type="checkbox" id="carteOn_${cle}" ${on?'checked':''} onchange="_carteEdition['${cle}']=this.checked?(parseInt(document.getElementById('carteSl_${cle}').value)||${min}):null;">
@@ -8162,7 +8162,7 @@ function renderFicheCarteHtml(){
       ${CARTE_AXES.map(a => slider(a, a, 0, 100)).join('')}
       <div style="border-top:1px solid var(--hairline);margin:10px 0;padding-top:10px;">
         ${slider(CARTE_DEF, 'Définition', 0, 100)}
-        <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-left:26px;">Gras estimé
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-left:26px;">Taux de fat
           <input type="number" id="carteGrasMin" min="3" max="50" value="${_carteEdition[CARTE_GRAS_MIN] ?? ''}" style="width:64px;font-size:16px;" oninput="_carteEdition['${CARTE_GRAS_MIN}']=this.value===''?null:parseInt(this.value)"> à
           <input type="number" id="carteGrasMax" min="3" max="50" value="${_carteEdition[CARTE_GRAS_MAX] ?? ''}" style="width:64px;font-size:16px;" oninput="_carteEdition['${CARTE_GRAS_MAX}']=this.value===''?null:parseInt(this.value)"> %</div>
       </div>
@@ -8220,7 +8220,7 @@ async function _chargerCartesABrouillon(){
     const ids = res.ok ? [...new Set((await res.json()).map(r => r.client_id))] : [];
     const el = document.getElementById('dashCartesBrouillon');
     if (!el) return;
-    el.innerHTML = `<div class="card"><div class="card-head">🎯<span class="t">Cartes de personnage</span>${ids.length ? `<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span>` : ''}</div>
+    el.innerHTML = `<div class="card"><div class="card-head">🎯<span class="t">Cartes de compétence</span>${ids.length ? `<span style="margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;">${ids.length}</span>` : ''}</div>
       <div class="card-list">${ids.map(id => { const c = data.clients.find(x => x.id === id); if (!c) return ''; return `<div class="card-list-row" onclick="openPanel('${id}').then(()=>setFicheTab('progression'))"><div class="mini-avatar">${initials(c.nom)}</div><div><div class="t">${esc(c.nom)}</div><div class="s">Brouillon proposé — relire et valider</div></div></div>`; }).join('')}
       <div class="card-list-row" onclick="setNav('cartes-analyses')"><div class="mini-avatar">📜</div><div><div class="t">Résumé des analyses</div><div class="s">${ids.length ? 'brouillons à valider (modifications en couleur) · ' : 'Aucune carte à valider · '}historique</div></div></div></div></div>`;
   } catch(e) {}

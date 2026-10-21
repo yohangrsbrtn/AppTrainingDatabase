@@ -173,7 +173,7 @@ function renderGauge(pct, color, label, valide, total) {
 let _carteCache = null;
 function _carteCardHtml(inner) {
   return inner ? `<div style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:12px 14px;margin-bottom:10px;">
-    <div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Ma carte de personnage</div>${inner}</div>` : '';
+    <div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Ma carte de compétence</div>${inner}</div>` : '';
 }
 async function _chargerCarteProgression() {
   const client = S.client;
