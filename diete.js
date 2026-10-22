@@ -23,6 +23,7 @@ let _dJournalSlotEnEdition= null; // 1-7 : numéro du "Repas N" en cours de remp
 let _dJournalAjoutEtape   = null; // null | 'choix' | 'coach-dietes' | 'coach-repas' | 'menu' | 'compose'
 let _dJournalDerniereErreur = null; // message d'erreur persistant (survit au toast) affiché dans le picker diagnostiqué
 let _dJournalDieteChoisie = null; // { ligne, col, nom, repas } — diète en cours de parcours (choix d'un repas coach)
+let _dQuickEdit = false; // true : modification rapide de la quantité d'un aliment depuis la carte du journal → enregistre directement à la validation de la quantité
 let _dJournalAppendMode  = false; // true : le choix coach-dietes/coach-repas/menu en cours doit AJOUTER ses aliments à _dMenuDraft (déjà ouvert en compose) au lieu d'écrire directement le slot — cf. "+ Ajouter un repas de ma diète"/"+ Ajouter un de mes menus" depuis l'écran Composer
 let _dDieteDetailCache    = {};   // "ligne|col" -> détail chargerDieteParPosition (résolution cible + slots coach)
 
@@ -682,9 +683,10 @@ function rendreCorpsRepas(r, ri, vi) {
     const prot = a.prot || 0, glu = a.glu || 0, lip = a.lip || 0;
     const qte  = a.qte != null ? a.qte : Math.round(a.quantite || 0);
     const canEdit = editable && a.kcalPG != null;
+    const rapide = r.journalSlot != null; // carte du journal : un tap sur l'aliment ouvre la modification de quantité
     return `<div ${editable ? `id="dAlim_${ri}_${vi}_${ai}"` : ''}
-      style="padding:7px 0;border-bottom:1px solid var(--border);${canEdit ? 'cursor:pointer;' : ''}"
-      ${canEdit ? `onclick="ouvrirEditAliment(${ri},${vi},${ai})"` : ''}>
+      style="padding:7px 0;border-bottom:1px solid var(--border);${canEdit || rapide ? 'cursor:pointer;' : ''}"
+      ${canEdit ? `onclick="ouvrirEditAliment(${ri},${vi},${ai})"` : rapide ? `onclick="event.stopPropagation();ouvrirQuantiteRapide(${r.journalSlot},${ai})"` : ''}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <div style="font-size:13px;flex:1;line-height:1.3;">${esc(a.nom)}${a.modifie ? `<span style="font-size:8px;font-weight:700;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">modifié</span>` : ''}</div>
         <div class="d-alim-qte" style="font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;">${qte}${a.unite==='unite'?' u.':a.unite==='portion'?' portion':(a.unite?' '+a.unite:'g')}</div>
@@ -694,7 +696,7 @@ function rendreCorpsRepas(r, ri, vi) {
         <span class="d-alim-prot" style="font-size:11px;font-weight:600;color:#378ADD;">${Number(prot.toFixed(1))}P</span>
         <span class="d-alim-glu"  style="font-size:11px;font-weight:600;color:var(--green);">${Number(glu.toFixed(1))}G</span>
         <span class="d-alim-lip"  style="font-size:11px;font-weight:600;color:#D85A30;">${Number(lip.toFixed(1))}L</span>
-        ${canEdit ? `<span style="font-size:10px;color:#a78bfa;margin-left:auto;">✎</span>` : ''}
+        ${canEdit || rapide ? `<span style="font-size:10px;color:#a78bfa;margin-left:auto;">✎</span>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1240,7 +1242,7 @@ function renderRepasSlotCard(slotNum, slotReel, repasCible) {
         </div>
         <button onclick="event.stopPropagation();_guardAction(() => supprimerSlotJournalClient(${slotReel.ligne}), this)" style="background:transparent;border:none;color:#8892a4;font-size:16px;cursor:pointer;line-height:1;">✕</button>
       </div>
-      ${rendreCorpsRepas({ aliments })}
+      ${rendreCorpsRepas({ aliments, journalSlot: slotNum })}
       <button onclick="event.stopPropagation();ouvrirAjoutExtraJournal(${slotNum})" style="width:100%;margin-top:10px;padding:10px;background:#161b2e;border:1px dashed #a78bfa66;border-radius:10px;color:#a78bfa;font-size:13px;font-weight:700;cursor:pointer;">+ Ajouter des aliments à ce repas</button>
     </div>`;
   }
@@ -1394,6 +1396,7 @@ function ouvrirAjoutExtraJournal(slotNum) {
 }
 
 function annulerComposeJournal() {
+  _dQuickEdit = false;
   const enEdition = !!(_dMenuDraft && (_dMenuDraft.menuIdEdition || _dMenuDraft._remplaceSlot));
   _dMenuDraft = null;
   _dJournalAppendMode = false;
@@ -1655,6 +1658,17 @@ function selectionnerAliment(nom, source) {
 // Les valeurs par gramme sont reconstituées en divisant les totaux stockés par la quantité —
 // le brouillon ne garde que les totaux, pas le prix au gramme d'origine, mais la division
 // reste exacte (pas d'arrondi accumulé, la quantité d'origine est toujours > 0).
+// Tap sur un aliment d'un repas du journal : ouvre directement la quantité de cet aliment ; valider enregistre
+// aussitôt (repas du coach → copie privée "photo + modif", la diète d'origine n'est jamais touchée).
+function ouvrirQuantiteRapide(slotNum, index) {
+  const slotReel = (_dJournal||[]).find(s => s.date === _dJournalDateOuverte && s.slot === slotNum && s.type !== 'cible');
+  if (!slotReel) return;
+  if (slotReel.type === 'menu') ouvrirModificationSlotJournal(slotNum); else ouvrirAjoutExtraJournal(slotNum);
+  if (!_dMenuDraft) return;
+  _dQuickEdit = true;
+  ouvrirModifQuantiteDraft(index);
+}
+
 function ouvrirModifQuantiteDraft(index) {
   const item = _dMenuDraft.aliments[index];
   if (!item) return;
@@ -1690,7 +1704,7 @@ function renderModalAjoutQuantite() {
     <div id="dAjoutPreviewDetail" style="font-size:11px;color:var(--muted);text-align:center;margin:8px 0 20px;">${aDetail ? 'dont sucres <span id="dPrevSucres">0</span>g · fibres <span id="dPrevFibres">0</span>g · dont AGS <span id="dPrevAgs">0</span>g' : ''}</div>
     <button onclick="_guardAction(confirmerAjoutAliment, this)" style="width:100%;padding:14px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">${enEdition ? 'Enregistrer' : 'Ajouter'}</button>
     ${enEdition ? `<button onclick="_guardAction(supprimerAlimentDraftDepuisModal, this)" style="width:100%;margin-top:8px;padding:12px;background:transparent;border:none;color:#e05252;font-size:14px;cursor:pointer;">Supprimer cet aliment</button>` : ''}
-    <button onclick="_dAjoutEtape='recherche';_dModifIndex=null;_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
+    <button onclick="_dQuickEdit=false;_dAjoutEtape='recherche';_dModifIndex=null;_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
 }
 
 function _majPreviewAjout() {
@@ -1727,13 +1741,16 @@ function confirmerAjoutAliment() {
   const modal = document.getElementById('modalAjoutAliment');
   if (modal) modal.remove();
   setPage('diete');
+  if (_dQuickEdit) { _dQuickEdit = false; confirmerComposeJournal(); }
 }
 
 function supprimerAlimentDraftDepuisModal() {
+  const rapide = _dQuickEdit; _dQuickEdit = false;
   if (_dModifIndex != null) { _dMenuDraft.aliments.splice(_dModifIndex, 1); _dModifIndex = null; }
   const modal = document.getElementById('modalAjoutAliment');
   if (modal) modal.remove();
   setPage('diete');
+  if (rapide && _dMenuDraft.aliments.length) confirmerComposeJournal();
 }
 
 // ── Scan code-barres (Open Food Facts) ────────────────────────────────────────
