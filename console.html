@@ -4128,7 +4128,7 @@ function renderProtocolePreviewHtml(preview){
 // ── Programmes : bibliothèque d'exercices + templates (Supabase) ──────────
 // Portage depuis AppTrainingPWA/console.html (code identique, même Supabase) — cf. CLAUDE.md du bac à sable.
 const GROUPES_MUSCULAIRES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Dos (global)','Epaules (anterieur)','Epaules (latéral)','Epaules (posterieur)','Biceps','Triceps','Abdos','Lombaires','Quadriceps','Ischios','Fessiers','Adducteurs','Abducteurs','Mollets','Cardio'];
-let progTab = 'exercices'; // 'exercices' | 'templates' | 'recensement-meta'
+let progTab = 'exercices'; // 'exercices' | 'templates' | 'architecture' | 'recensement-meta'
 let exercicesData = null;  // null = pas encore chargé
 let templatesData = null;
 let exoGroupeFiltre = 'all';
@@ -4412,6 +4412,7 @@ async function renderProgrammesPage(el){
     <div class="chip-filter" style="margin-bottom:16px;">
       <button class="${progTab==='exercices'?'active':''}" onclick="progTab='exercices';renderProgrammesPage(document.getElementById('main'))">Exercices</button>
       <button class="${progTab==='templates'?'active':''}" onclick="progTab='templates';renderProgrammesPage(document.getElementById('main'))">Templates</button>
+      <button class="${progTab==='architecture'?'active':''}" onclick="progTab='architecture';renderProgrammesPage(document.getElementById('main'))">Architecture</button>
       <button class="${progTab==='recensement-meta'?'active':''}" onclick="progTab='recensement-meta';renderProgrammesPage(document.getElementById('main'))">Recensement Métabolique</button>
     </div>
     <div id="progrSub"><div style="text-align:center;padding:30px;color:var(--text-faint);">Chargement…</div></div>`;
@@ -4422,6 +4423,10 @@ async function renderProgrammesPage(el){
     } else if (progTab === 'templates') {
       if (templatesData === null) templatesData = await chargerTemplates();
       renderTemplatesSub();
+    } else if (progTab === 'architecture') {
+      if (exercicesData === null) exercicesData = await chargerExercices();
+      if (templatesData === null) templatesData = await chargerTemplates();
+      renderArchitectureSub();
     } else {
       if (exercicesData === null) exercicesData = await chargerExercices();
       if (recensementMetaData === null) recensementMetaData = await chargerRecensementMeta();
@@ -4431,6 +4436,246 @@ async function renderProgrammesPage(el){
   } catch(e) {
     document.getElementById('progrSub').innerHTML = `<div class="empty-panel"><strong>Erreur de chargement</strong>${esc(e.message)}<br><br><button class="btn primary" onclick="renderProgrammesPage(document.getElementById('main'))" style="margin-top:10px;">Réessayer</button></div>`;
   }
+}
+
+// ── Programmes → Architecture : construction guidée en 4 temps ───────────
+// 1) nombre de séances + structure  2) exercices par groupe musculaire et par séance
+// 3) choix des exercices (+ séries)  4) programme final → template / assignation.
+// Réutilise sauvegarderTemplateComplet, _appliquerTypeAuxExercicesDuBloc, ouvrirAssignerTemplate.
+const ARCH_FAMILLES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Epaules','Biceps','Triceps','Quadriceps','Ischios','Fessiers','Mollets','Adducteurs','Abducteurs','Abdos','Lombaires'];
+const ARCH_PRESETS = {
+  ppl3: { label:'Push / Pull / Legs', nb:3, seances:[
+    ['Push',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs',{Quadriceps:3,Ischios:2,Mollets:1}]] },
+  ul4: { label:'Upper / Lower ×2', nb:4, seances:[
+    ['Upper A',{'Dos (dorsaux)':2,Pectoraux:2,Epaules:1,Biceps:1,Triceps:1}],['Lower A',{Quadriceps:2,Ischios:2,Mollets:1,Abdos:1}],
+    ['Upper B',{'Dos (dorsaux)':2,Pectoraux:2,Epaules:2,Biceps:1,Triceps:1}],['Lower B',{Ischios:2,Quadriceps:2,Fessiers:1,Mollets:1}]] },
+  ppl5: { label:'Push / Pull / Legs + Upper / Lower', nb:5, seances:[
+    ['Push',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs',{Quadriceps:3,Ischios:2,Mollets:1}],
+    ['Upper',{'Dos (dorsaux)':2,Pectoraux:2,Epaules:1,Biceps:1,Triceps:1}],['Lower',{Ischios:3,Quadriceps:2,Adducteurs:1,Abducteurs:1,Mollets:1}]] },
+  ppl6: { label:'Push / Pull / Legs ×2', nb:6, seances:[
+    ['Push A',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull A',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs A',{Quadriceps:3,Ischios:2,Mollets:1}],
+    ['Push B',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull B',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs B',{Ischios:3,Quadriceps:2,Fessiers:1,Mollets:1}]] },
+  fb3: { label:'Full body ×3', nb:3, seances:[
+    ['Full body A',{Quadriceps:2,Pectoraux:2,'Dos (dorsaux)':2,Epaules:1,Biceps:1,Triceps:1}],
+    ['Full body B',{Ischios:2,Pectoraux:1,'Dos (dorsaux)':2,Epaules:2,Mollets:1,Abdos:1}],
+    ['Full body C',{Quadriceps:1,Ischios:1,Pectoraux:2,'Dos (dorsaux)':2,Epaules:1,Biceps:1,Triceps:1}]] },
+};
+// Ordre de suggestion par famille (composé principal d'abord, isolation ensuite, angles variés) ;
+// les exercices absents de cette liste passent après, dans l'ordre de la bibliothèque.
+const ARCH_PREF = {
+  'Pectoraux':['Développé incliné haltères','Développé couché machine','Ecarté poulie vis à vis','Développé incliné machine','Pec deck','Développé couché haltères'],
+  'Dos (dorsaux)':['Tirage poitrine','Tirage horizontal prise serrée dorsaux','Pull over','Tirage vertical prise serrée','Rowing horizontal machine','Latéral pull down machine'],
+  'Dos (trapèzes)':['Tirage horizontal prise semi large pronation','Face pull','Rowing machine','Shrug'],
+  'Epaules':['Développé militaire machine','Elévations latérales poulie','Pec deck inversé','Elévations latérales haltères','Développé militaire haltères'],
+  'Biceps':['Curl biceps banc incliné','Curl marteau','Biceps curl poulie basse','Biceps curl pupitre machine'],
+  'Triceps':['Extension triceps overhead','Pushdown cable corde','Triceps crossover poulie haute','Kick back poulie basse'],
+  'Quadriceps':['Squat','Leg presse','Leg extension','Hack squat','Squat pendulaire','Fentes unilatérales smith machine quadri'],
+  'Ischios':['RDL','Leg curl assis','Leg curl allongé','Leg curl debout unilatéral'],
+  'Fessiers':['Hiptrust','Fentes bulgares','Kick back fessier poulie basse','Hip abduction'],
+  'Mollets':['Mollets assis','Mollet presse à mollet','Mollet sur rebord unilatéral'],
+};
+function _archTriSuggestion(fam, cands){
+  const pref = ARCH_PREF[fam] || [];
+  const rang = e => { const i = pref.indexOf(e.nom); return i < 0 ? 1000 : i; };
+  return cands.slice().sort((x, y) => rang(x) - rang(y));
+}
+let _arch = null;
+
+function _archPreset(cle){
+  const p = ARCH_PRESETS[cle];
+  return p.seances.map(([titre, gr]) => ({ titre, groupes: Object.entries(gr).map(([g, n]) => ({ g, n })) }));
+}
+function _archInit(){
+  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, nom:'', categorie:'', blocType:'metabolique', nbSemaines:6 };
+}
+function _archExosFamille(fam){
+  return (exercicesData||[]).filter(e => fam === 'Epaules' ? (e.groupe_musculaire||'').startsWith('Epaules') : e.groupe_musculaire === fam);
+}
+function _archSlots(){
+  const out = [];
+  _arch.seances.forEach((s, si) => s.groupes.forEach((gr, gi) => { for (let k = 0; k < gr.n; k++) out.push({ si, gi, k, g: gr.g, key: `${si}|${gi}|${k}` }); }));
+  return out;
+}
+function _archSeriesEst(){ // séries/semaine par famille (estimation étape 2 = 2,5 séries/exo ; étape 3+ = séries réelles)
+  const tot = {};
+  _archSlots().forEach(sl => { tot[sl.g] = (tot[sl.g]||0) + (_arch.step >= 3 && _arch.series[sl.key] ? _arch.series[sl.key] : 2.5); });
+  return tot;
+}
+function _archZone(n){
+  if (n < 8)  return { c:'#e05c5c', t:'sous le minimum' };
+  if (n < 12) return { c:'#d9a030', t:'minimum efficace' };
+  if (n <= 18) return { c:'#1D9E75', t:'zone optimale' };
+  if (n <= 22) return { c:'#d9a030', t:'haut' };
+  return { c:'#e05c5c', t:'trop élevé' };
+}
+
+async function renderArchitectureSub(){
+  if (!_arch) _archInit();
+  const sub = document.getElementById('progrSub');
+  const labels = ['Architecture','Répartition','Exercices','Programme final'];
+  const stepper = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">${labels.map((l,i) => `<button class="btn ${_arch.step===i+1?'primary':''}" ${i+1<_arch.step?`onclick="archGo(${i+1})"`:''} style="font-size:12px;${i+1>_arch.step?'opacity:.5;cursor:default;':''}">${i+1}. ${l}</button>`).join('')}</div>`;
+  let body = '';
+  if (_arch.step === 1) body = _archStep1();
+  else if (_arch.step === 2) body = _archStep2();
+  else if (_arch.step === 3) body = _archStep3();
+  else body = _archStep4();
+  sub.innerHTML = stepper + body;
+}
+function archGo(n){ _arch.step = n; renderArchitectureSub(); }
+function archReset(){ if (confirm('Repartir de zéro ?')) { _archInit(); renderArchitectureSub(); } }
+
+// Étape 1 — nombre de séances et structure
+function _archStep1(){
+  const presets = Object.entries(ARCH_PRESETS);
+  return `<div class="table-card" style="padding:18px;margin-bottom:14px;">
+    <div style="font-weight:700;margin-bottom:4px;">Structure de la semaine</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Choisis un point de départ, puis renomme, ajoute ou retire des séances.</div>
+    <div class="chip-filter" style="margin-bottom:14px;">${presets.map(([k,p]) => `<button class="${_arch.preset===k?'active':''}" onclick="archChoisirPreset('${k}')">${p.nb} séances · ${esc(p.label)}</button>`).join('')}</div>
+    ${_arch.seances.map((s, i) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="width:70px;font-size:12px;color:var(--text-faint);">Séance ${i+1}</span>
+      <input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${i}].titre=this.value" style="flex:1;font-size:16px;">
+      <button class="icon-btn del" onclick="archSupprimerSeance(${i})" title="Retirer">${iTrash()}</button></div>`).join('')}
+    <button class="btn" onclick="archAjouterSeance()">+ Ajouter une séance</button>
+  </div>
+  <div style="display:flex;justify-content:flex-end;"><button class="btn primary" onclick="${'archGo(2)'}">Suivant : répartition →</button></div>`;
+}
+function archChoisirPreset(k){ _arch.preset = k; _arch.seances = _archPreset(k); _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+function archAjouterSeance(){ _arch.seances.push({ titre:'Séance ' + (_arch.seances.length + 1), groupes:[] }); renderArchitectureSub(); }
+function archSupprimerSeance(i){ if (_arch.seances.length <= 1) return; _arch.seances.splice(i, 1); _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+
+// Étape 2 — nombre d'exercices par groupe musculaire et par séance
+function _archStep2(){
+  const tot = _archSeriesEst();
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px;">
+    ${_arch.seances.map((s, si) => {
+      const nbEx = s.groupes.reduce((a, g) => a + g.n, 0);
+      const dispo = ARCH_FAMILLES.filter(f => !s.groupes.some(g => g.g === f));
+      return `<div class="table-card" style="padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;"><b>${esc(s.titre)}</b><span style="font-size:12px;color:${nbEx*2.5>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${Math.round(nbEx*2.5)} séries</span></div>
+        ${s.groupes.map((g, gi) => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="flex:1;font-size:13px;">${esc(g.g)}</span>
+          <button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},-1)" title="Monter">↑</button><button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},1)" title="Descendre">↓</button>
+          <button class="btn" style="padding:2px 10px;" onclick="archNbExos(${si},${gi},-1)">−</button><b style="width:18px;text-align:center;">${g.n}</b><button class="btn" style="padding:2px 10px;" onclick="archNbExos(${si},${gi},1)">+</button>
+          <button class="icon-btn del" onclick="archRetirerGroupe(${si},${gi})" title="Retirer">${iTrash()}</button></div>`).join('')}
+        ${dispo.length ? `<select onchange="archAjouterGroupe(${si},this.value)" style="margin-top:6px;font-size:16px;"><option value="">+ Ajouter un groupe…</option>${dispo.map(f => `<option>${esc(f)}</option>`).join('')}</select>` : ''}
+      </div>`; }).join('')}
+  </div>
+  <div class="table-card" style="padding:14px;margin-bottom:14px;">
+    <div style="font-weight:700;margin-bottom:8px;">Volume hebdomadaire estimé (≈ 2,5 séries par exercice)</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
+      ${Object.entries(tot).map(([g, n]) => { const z = _archZone(n); return `<div style="display:flex;justify-content:space-between;font-size:13px;border-left:3px solid ${z.c};padding-left:8px;"><span>${esc(g)}</span><span><b>${Math.round(n)}</b> <span style="color:${z.c};font-size:11px;">${z.t}</span></span></div>`; }).join('') || '<span style="color:var(--text-faint);">Aucun groupe.</span>'}
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;"><button class="btn" onclick="archGo(1)">← Retour</button><button class="btn primary" onclick="archVersEtape3()">Suivant : choisir les exercices →</button></div>`;
+}
+function archNbExos(si, gi, d){ const g = _arch.seances[si].groupes[gi]; g.n = Math.max(1, Math.min(6, g.n + d)); _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+function archRetirerGroupe(si, gi){ _arch.seances[si].groupes.splice(gi, 1); _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+function archAjouterGroupe(si, f){ if (!f) return; _arch.seances[si].groupes.push({ g:f, n:2 }); _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+function archMoveGroupe(si, gi, d){ const a = _arch.seances[si].groupes; const j = gi + d; if (j < 0 || j >= a.length) return; [a[gi], a[j]] = [a[j], a[gi]]; _arch.choix = {}; _arch.series = {}; renderArchitectureSub(); }
+async function archVersEtape3(){
+  if (exercicesData === null) exercicesData = await chargerExercices();
+  if (!_archSlots().length) { alert('Ajoute au moins un exercice.'); return; }
+  if (!Object.keys(_arch.choix).length) archPrerempli(true);
+  _arch.step = 3; renderArchitectureSub();
+}
+
+// Étape 3 — choix des exercices (suggestion automatique sans doublon sur la semaine)
+function archPrerempli(silencieux){
+  _arch.choix = {}; _arch.series = {};
+  const utilises = new Set();
+  _archSlots().forEach(sl => {
+    const cands = _archTriSuggestion(sl.g, _archExosFamille(sl.g));
+    const pick = cands.find(e => !utilises.has(e.id)) || cands[0];
+    if (pick) { _arch.choix[sl.key] = pick.id; utilises.add(pick.id); }
+  });
+  // Séries : 3 sur le 1er exercice de chaque groupe dans la séance, 2 ensuite ; plafond ≈ 18 séries/séance.
+  _arch.seances.forEach((s, si) => {
+    const slots = _archSlots().filter(x => x.si === si);
+    slots.forEach(sl => { _arch.series[sl.key] = sl.k === 0 ? 3 : 2; });
+    let total = slots.reduce((a, sl) => a + _arch.series[sl.key], 0);
+    for (let i = slots.length - 1; i >= 0 && total > 18; i--) { if (_arch.series[slots[i].key] === 3) { _arch.series[slots[i].key] = 2; total--; } }
+  });
+  if (!silencieux) renderArchitectureSub();
+}
+function _archStep3(){
+  const utiliseCount = {};
+  Object.values(_arch.choix).forEach(id => { utiliseCount[id] = (utiliseCount[id]||0) + 1; });
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:12.5px;color:var(--text-faint);">Chaque exercice doit apporter un angle ou un profil de résistance différent. Les doublons sur la semaine sont signalés.</div>
+      <button class="btn" onclick="archPrerempli()">✨ Pré-remplir automatiquement</button></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-bottom:14px;">
+    ${_arch.seances.map((s, si) => {
+      const slots = _archSlots().filter(x => x.si === si);
+      const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
+      return `<div class="table-card" style="padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;"><b>${esc(s.titre)}</b><span style="font-size:12px;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
+        ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
+          return `<div style="margin-bottom:10px;">
+            <div style="font-size:11px;color:var(--text-faint);margin-bottom:3px;">${esc(sl.g)} · exercice ${sl.k+1}${dbl?' <span style="color:#d9a030;">· déjà utilisé ailleurs</span>':''}</div>
+            <div style="display:flex;gap:6px;">
+              <select style="flex:1;font-size:16px;min-width:0;" onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
+              <select style="width:64px;font-size:16px;" onchange="archSeries('${sl.key}',this.value)">${[1,2,3].map(n => `<option ${(_arch.series[sl.key]||2)===n?'selected':''}>${n}</option>`).join('')}</select>
+            </div></div>`; }).join('')}
+      </div>`; }).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;"><button class="btn" onclick="archGo(2)">← Retour</button><button class="btn primary" onclick="archGo(4)">Suivant : programme final →</button></div>`;
+}
+function archChoisirExo(key, id){ if (id) _arch.choix[key] = parseInt(id); else delete _arch.choix[key]; renderArchitectureSub(); }
+function archSeries(key, v){ _arch.series[key] = parseInt(v); renderArchitectureSub(); }
+
+// Étape 4 — programme final
+function _archBuildTpl(){
+  const bloc = { type:_arch.blocType, nombre_semaines:_arch.nbSemaines, seances: _arch.seances.map((s, si) => ({
+    titre: `Séance ${si+1} - ${s.titre}`,
+    exercices: _archSlots().filter(x => x.si === si && _arch.choix[x.key]).map(sl => {
+      const e = exercicesData.find(x => x.id === _arch.choix[sl.key]);
+      return { exercice_id:e.id, nom:e.nom, groupe_musculaire:e.groupe_musculaire||null, series:_arch.series[sl.key]||2, reps:'', repos:'', tempo:'', rir:'', notes:'', superset_groupe:null };
+    }) })) };
+  _appliquerTypeAuxExercicesDuBloc(bloc, exercicesData);
+  return { id:null, nom:(_arch.nom||'').trim(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
+}
+function _archStep4(){
+  if (!_arch.nom) _arch.nom = `Programme ${_arch.seances.length} séances`;
+  const tpl = _archBuildTpl();
+  const tot = _archSeriesEst();
+  return `<div class="table-card" style="padding:18px;margin-bottom:14px;">
+    <div class="field-grid" style="grid-template-columns:2fr 1fr;">
+      <div class="field-row" style="margin-bottom:0;"><label>Nom du programme</label><input type="text" value="${esc(_arch.nom)}" oninput="_arch.nom=this.value"></div>
+      <div class="field-row" style="margin-bottom:0;"><label>Catégorie</label><input type="text" value="${esc(_arch.categorie)}" placeholder="ex: Prise de masse" oninput="_arch.categorie=this.value"></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:12px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--text-faint);">Type de bloc</label>
+      <select style="font-size:16px;" onchange="_arch.blocType=this.value;renderArchitectureSub()">${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1).replace('que','que')}</option>`).join('')}</select>
+      <label style="font-size:12px;color:var(--text-faint);">Semaines</label>
+      <input type="number" min="1" max="12" value="${_arch.nbSemaines}" style="width:70px;font-size:16px;" oninput="_arch.nbSemaines=parseInt(this.value)||6">
+    </div></div>
+  ${tpl.blocs[0].seances.map(s => `<div class="table-card" style="padding:14px;margin-bottom:10px;"><b>${esc(s.titre)}</b>
+    ${s.exercices.map(e => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--hairline);"><span>${esc(e.nom)} <span style="color:var(--text-faint);font-size:11px;">${esc(e.groupe_musculaire||'')}</span></span><span style="color:var(--text-faint);">${e.series} × ${esc(e.reps)} · ${esc(e.repos)} · RIR ${esc(e.rir)}</span></div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;">Aucun exercice choisi.</div>'}</div>`).join('')}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;margin-top:14px;">
+    <button class="btn" onclick="archGo(3)">← Retour</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" onclick="archOuvrirEditeur()">✎ Affiner dans l'éditeur</button>
+      <button class="btn" onclick="archEnregistrer(false)">💾 Enregistrer comme template</button>
+      <button class="btn primary" onclick="archEnregistrer(true)">👤 Enregistrer et assigner à un client</button>
+    </div></div>
+  <div id="archErr" style="display:none;color:var(--critical);font-size:12px;margin-top:10px;"></div>`;
+}
+function archOuvrirEditeur(){
+  tplEnEdition = _archBuildTpl();
+  if (!tplEnEdition.nom) tplEnEdition.nom = 'Nouveau programme';
+  renderEditeurTemplate();
+}
+async function archEnregistrer(assigner){
+  const err = document.getElementById('archErr');
+  const tpl = _archBuildTpl();
+  if (!tpl.nom) { err.textContent = 'Donne un nom au programme.'; err.style.display = 'block'; return; }
+  if (!tpl.blocs[0].seances.some(s => s.exercices.length)) { err.textContent = 'Choisis au moins un exercice.'; err.style.display = 'block'; return; }
+  try {
+    const saved = await sauvegarderTemplateComplet(tpl);
+    if (templatesData === null) templatesData = await chargerTemplates(); else templatesData.push(saved);
+    if (assigner) { ouvrirAssignerTemplate(saved.id); return; }
+    _arch = null; progTab = 'templates'; renderProgrammesPage(document.getElementById('main'));
+  } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
 }
 
 // ── Sous-onglet Exercices ──────────────────────────────────────────────
