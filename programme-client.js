@@ -359,25 +359,34 @@ async function pcMachineAjouter(e, cle, nom) {
   if (!f) return;
   const recadre = await recadrerPhotoModal(f);
   if (!recadre) return;
-  showToast('Envoi de la photo…', '#378ADD');
+  const voile = document.createElement('div');
+  voile.style.cssText = 'position:fixed;inset:0;background:rgba(5,6,10,.8);z-index:10001;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:600;';
+  voile.textContent = 'Envoi de la photo…';
+  document.body.appendChild(voile);
+  let path = null;
   try {
     const fichier = await compresserImagePourUpload(recadre);
     const ext = (fichier.name.split('.').pop() || 'jpg').toLowerCase();
-    const path = `machines/${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    path = `machines/${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
     const up = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
       method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': fichier.type || 'application/octet-stream' }, body: fichier });
-    if (!up.ok) throw new Error('Envoi impossible.');
+    if (!up.ok) throw new Error('Envoi impossible (' + up.status + ').');
     const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
     const ancien = _pcMachinePhotos[cle];
     const ins = await fetch(`${SUPABASE_URL}/rest/v1/client_machine_photos?on_conflict=client_id,cle`, {
       method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
       body: JSON.stringify({ client_id: S.client, cle, nom, url }) });
-    if (!ins.ok) throw new Error('Enregistrement impossible, réessaie plus tard.');
+    if (!ins.ok) throw new Error('Enregistrement impossible (' + ins.status + ') ' + (await ins.text().catch(() => '')).slice(0, 160));
     const row = (await ins.json())[0];
     _pcMachinePhotos[cle] = { id: row.id, url };
     if (ancien) _pcSupprimerFichierPhoto(ancien.url);
+    voile.remove();
     setPage('programme-client');
-  } catch(err) { showToast(err.message || 'Erreur.', '#c0392b'); }
+  } catch(err) {
+    voile.remove();
+    if (path) _pcSupprimerFichierPhoto(`${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`);
+    alert('Photo non enregistrée : ' + (err.message || err));
+  }
 }
 function _pcSupprimerFichierPhoto(url) {
   const marker = '/object/public/bilans-photos/';
