@@ -81,6 +81,7 @@ let _pcEquivalents     = {}; // `${client_programme_exercice_id}` → { id, nom,
 let _pcEquivLogs       = {}; // `${equivalentId}|${semaine}|${serie}` → log
 const _pcEquivSaveQueues = {};
 let _pcExercicesLib    = null; // cache bibliothèque exercices (lazy)
+let _pcMachinePhotos   = {};   // cle → { id, url } — photos de machines du client (table client_machine_photos)
 let _pcGifMap          = null; // `${exercice_id}` → gif_url (cache, lazy)
 let _pcEquivCibleId    = null; // exercice prévu ciblé par la modale de création en cours
 
@@ -154,7 +155,7 @@ async function loadProgrammeClient(deepLink) {
     // Logs chargés AVANT la sélection par défaut de semaine/séance — la détection du "premier
     // créneau vide" (_pcTrouverPremierTrou) en a besoin pour savoir ce qui est déjà rempli.
     const exoIds = _pcAllSeances().flatMap(s => (s.client_programme_exercices || []).map(ex => ex.id));
-    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds), _pcChargerGifMap()]);
+    await Promise.all([chargerLogsProgramme(), _pcChargerEquivalents(exoIds), _pcChargerGifMap(), _pcChargerMachinePhotos()]);
     // Rejoue toute saisie restée en attente d'une session précédente (app fermée avant confirmation
     // serveur, ou hors-ligne prolongé) — _pcLogs/_pcEquivLogs viennent d'être chargés, donc les
     // entrées avec un id existant repartent en PATCH plutôt qu'en POST doublon.
@@ -312,6 +313,84 @@ async function _pcChargerExercicesLib() {
     _pcExercicesLib = res.ok ? await res.json() : [];
   } catch(e) { _pcExercicesLib = []; }
   return _pcExercicesLib;
+}
+
+// ── Photos de machines (encart par exercice) ───────────────────────────
+function _pcMachineCle(exerciceId, nom) { return exerciceId != null ? String(exerciceId) : 'n:' + String(nom || '').trim().toLowerCase(); }
+async function _pcChargerMachinePhotos() {
+  _pcMachinePhotos = {};
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_machine_photos?client_id=eq.${encodeURIComponent(S.client)}&select=id,cle,url`, { headers: supaHeaders() });
+    if (res.ok) (await res.json()).forEach(r => { _pcMachinePhotos[r.cle] = { id: r.id, url: r.url }; });
+  } catch(e) {}
+}
+// Encart sous le titre : photo cliquable (agrandit/réduit sur place) ou bouton d'ajout. uid = identifiant DOM unique.
+function _pcMachineHtml(exerciceId, nom, uid, readonly) {
+  const cle = _pcMachineCle(exerciceId, nom);
+  const ph = _pcMachinePhotos[cle];
+  const nomJs = esc(String(nom || '')).replace(/'/g, "\\'");
+  const input = `<input type="file" accept="image/*" style="display:none;" onchange="pcMachineAjouter(event,'${cle.replace(/'/g, "\\'")}','${nomJs}')">`;
+  if (ph) {
+    return `<div style="margin-bottom:8px;">
+      <div id="pcMach_${uid}" onclick="pcMachineToggle('${uid}')" style="height:84px;border-radius:10px;overflow:hidden;background:#0b0d14;cursor:zoom-in;transition:height .2s ease;">
+        <img src="${esc(ph.url)}" style="width:100%;height:100%;object-fit:cover;display:block;" alt="Photo de la machine">
+      </div>
+      ${readonly ? '' : `<div style="display:flex;gap:14px;margin-top:4px;font-size:11px;color:#8892a4;">
+        <label style="cursor:pointer;">📷 Changer la photo${input}</label>
+        <span style="cursor:pointer;" onclick="pcMachineSupprimer('${cle.replace(/'/g, "\\'")}')">🗑 Retirer</span></div>`}
+    </div>`;
+  }
+  if (readonly) return '';
+  return `<label style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px;padding:7px;border:1px dashed #3a4157;border-radius:10px;color:#8892a4;font-size:12px;cursor:pointer;">📷 Photo de la machine${input}</label>`;
+}
+function pcMachineToggle(uid) {
+  const el = document.getElementById('pcMach_' + uid);
+  if (!el) return;
+  const ouvert = el.dataset.ouvert === '1';
+  el.dataset.ouvert = ouvert ? '0' : '1';
+  el.style.height = ouvert ? '84px' : '62vh';
+  el.style.cursor = ouvert ? 'zoom-in' : 'zoom-out';
+  const img = el.querySelector('img');
+  if (img) img.style.objectFit = ouvert ? 'cover' : 'contain';
+}
+async function pcMachineAjouter(e, cle, nom) {
+  const f = (e.target.files || [])[0];
+  e.target.value = '';
+  if (!f) return;
+  showToast('Envoi de la photo…', '#378ADD');
+  try {
+    const fichier = await compresserImagePourUpload(f);
+    const ext = (fichier.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `machines/${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const up = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {
+      method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': fichier.type || 'application/octet-stream' }, body: fichier });
+    if (!up.ok) throw new Error('Envoi impossible.');
+    const url = `${SUPABASE_URL}/storage/v1/object/public/bilans-photos/${path}`;
+    const ancien = _pcMachinePhotos[cle];
+    const ins = await fetch(`${SUPABASE_URL}/rest/v1/client_machine_photos?on_conflict=client_id,cle`, {
+      method: 'POST', headers: supaHeaders({ Prefer: 'return=representation,resolution=merge-duplicates' }),
+      body: JSON.stringify({ client_id: S.client, cle, nom, url }) });
+    if (!ins.ok) throw new Error('Enregistrement impossible, réessaie plus tard.');
+    const row = (await ins.json())[0];
+    _pcMachinePhotos[cle] = { id: row.id, url };
+    if (ancien) _pcSupprimerFichierPhoto(ancien.url);
+    setPage('programme-client');
+  } catch(err) { showToast(err.message || 'Erreur.', '#c0392b'); }
+}
+function _pcSupprimerFichierPhoto(url) {
+  const marker = '/object/public/bilans-photos/';
+  const i = url.indexOf(marker);
+  if (i >= 0) fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${url.slice(i + marker.length)}`, { method: 'DELETE', headers: supaHeaders() }).catch(() => {});
+}
+async function pcMachineSupprimer(cle) {
+  const ph = _pcMachinePhotos[cle];
+  if (!ph || !confirm('Retirer cette photo ?')) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/client_machine_photos?id=eq.${ph.id}`, { method: 'DELETE', headers: supaHeaders() });
+    _pcSupprimerFichierPhoto(ph.url);
+    delete _pcMachinePhotos[cle];
+    setPage('programme-client');
+  } catch(err) { showToast('Erreur.', '#c0392b'); }
 }
 
 async function _pcChargerGifMap() {
@@ -896,7 +975,7 @@ function renderPcSeancePage() {
 
     _pcNotesCoach[idx] = { nom: ex.nom, note: ex.notes || '' };
 
-    const panelPrevu = `${setsHtml}
+    const panelPrevu = `${_pcMachineHtml(ex.exercice_id, ex.nom, 'e' + ex.id, isReadonly)}${setsHtml}
       <textarea class="bilan-input" rows="3" placeholder="Note…"
         ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaire(${ex.id},this.value)"`}
         style="margin-top:6px;font-size:16px;${isReadonly?'opacity:.55;':''}">${esc(commentaireLog.commentaire || '')}</textarea>
@@ -925,6 +1004,7 @@ function renderPcSeancePage() {
           <div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">${panelPrevu}</div>
           <div style="min-width:100%;scroll-snap-align:start;box-sizing:border-box;">
             <div style="font-size:11px;color:#a78bfa;font-weight:600;margin-bottom:8px;">≡ ${esc(equiv.nom)}</div>
+            ${_pcMachineHtml(equiv.exercice_id, equiv.nom, 'q' + equiv.id, isReadonly)}
             ${setsHtmlEquiv}
             <textarea class="bilan-input" rows="3" placeholder="Note…"
               ${isReadonly ? 'disabled' : `onchange="pcSauverCommentaireEquivalent(${equiv.id},this.value)"`}

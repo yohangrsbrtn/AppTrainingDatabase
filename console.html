@@ -9195,7 +9195,9 @@ function ouvrirLogsProgramme(progId){
   renderSidebar();
   renderMain();
   const exLoad = exercicesData === null ? chargerExercices().then(d=>{ exercicesData=d; }).catch(()=>{}) : Promise.resolve();
-  Promise.all([chargerProgrammeById(progId), exLoad]).then(([prog]) => {
+  const machLoad = fetch(`${SUPABASE_URL}/rest/v1/client_machine_photos?client_id=eq.${encodeURIComponent(state.selected)}&select=cle,url`, { headers: supaHeaders() })
+    .then(r => r.ok ? r.json() : []).catch(() => []).then(rows => { const m = {}; rows.forEach(r => { m[r.cle] = r.url; }); return m; });
+  Promise.all([chargerProgrammeById(progId), exLoad, machLoad]).then(([prog, , machine]) => {
     const blocs = prog ? prog.blocs : [];
     const logs = prog ? prog.logs : {};
     // Nb de semaines "réelles" par bloc pour capper la navigation ‹›: nombre_semaines
@@ -9208,7 +9210,7 @@ function ouvrirLogsProgramme(progId){
       const bi = exToBloc[exId];
       if (bi !== undefined && sem > (blocMaxSem[bi]||0)) blocMaxSem[bi] = sem;
     });
-    progLogsData = { loaded:true, programme:prog, blocs, logs, blocMaxSem, equivalents: (prog && prog.equivalents) || {}, equivLogs: (prog && prog.equivLogs) || {} };
+    progLogsData = { loaded:true, machine, programme:prog, blocs, logs, blocMaxSem, equivalents: (prog && prog.equivalents) || {}, equivLogs: (prog && prog.equivLogs) || {} };
     if (state.nav==='prog-logs' && state.progLogsId===progId) renderMain();
   }).catch(e => {
     progLogsData = { loaded:true, programme:null, blocs:[], logs:{}, error:e.message };
@@ -9305,6 +9307,13 @@ function renderProgLogsGrille(blocs, progByEx, progByExReps, progByExRir, blocOf
     </div>`;
   }).join('');
   return blocsHtml || `<div class="empty-panel"><strong>Pas encore de données</strong>Le client n'a pas encore loggé de charges.</div>`;
+}
+
+// Photo de la machine prise par le client (onglet Training de son app) — miniature cliquable.
+function _machinePhotoCoachHtml(ex){
+  const m = (progLogsData && progLogsData.machine) || {};
+  const url = m[ex.exercice_id != null ? String(ex.exercice_id) : 'n:' + String(ex.nom || '').trim().toLowerCase()];
+  return url ? `<img src="${esc(url)}" title="Photo de la machine du client" onclick="event.stopPropagation();ouvrirPhotoLightbox([{url:'${esc(url)}'}],0)" style="width:34px;height:34px;object-fit:cover;border-radius:6px;cursor:pointer;flex-shrink:0;margin-right:8px;" alt="">` : '';
 }
 
 function renderProgLogsPage(el){
@@ -9417,10 +9426,10 @@ function renderProgLogsPage(el){
         const deltaColor = delta>0?'#4caf50':delta<0?'var(--critical)':'var(--text-faint)';
         return `<div style="background:var(--surface);border-radius:var(--radius);margin-bottom:12px;padding:12px 14px;box-shadow:var(--shadow-sm);">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div>
+            <div style="display:flex;align-items:center;">${_machinePhotoCoachHtml(ex)}<div>
               <div style="font-size:12.5px;font-weight:700;">${esc(ex.nom)}</div>
               ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
-            </div>
+            </div></div>
             <div style="text-align:right;">
               <div style="font-size:13px;font-weight:700;">${last} kg</div>
               <div style="font-size:11px;color:${deltaColor};">${deltaStr}</div>
@@ -9504,10 +9513,10 @@ function renderProgLogsPage(el){
               }
               return `<div style="padding:10px 14px;border-top:1px solid var(--hairline);">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
-                  <div>
+                  <div style="display:flex;align-items:center;">${_machinePhotoCoachHtml(ex)}<div>
                     <div style="font-size:12.5px;font-weight:600;">${esc(ex.nom)}</div>
                     ${groupe?`<div style="font-size:10.5px;color:var(--text-faint);">${esc(groupe)}</div>`:''}
-                  </div>
+                  </div></div>
                   <div style="font-size:11px;color:var(--text-faint);">Cible: ${ex.series||'—'}×${esc(ex.reps||'—')}${ex.repos?' · '+esc(ex.repos):''}${ex.rir?' · RIR '+ex.rir:''}</div>
                 </div>
                 ${setsHtml}
