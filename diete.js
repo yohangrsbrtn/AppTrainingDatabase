@@ -685,7 +685,7 @@ function rendreCorpsRepas(r, ri, vi) {
     const canEdit = editable && a.kcalPG != null;
     const rapide = r.journalSlot != null; // carte du journal : un tap sur l'aliment ouvre la modification de quantité
     return `<div ${editable ? `id="dAlim_${ri}_${vi}_${ai}"` : ''}
-      style="padding:7px 0;border-bottom:1px solid var(--border);${canEdit || rapide ? 'cursor:pointer;' : ''}"
+      style="padding:7px 0;border-bottom:1px solid var(--border);${canEdit || rapide ? 'cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(167,139,250,.25);' : ''}"
       ${canEdit ? `onclick="ouvrirEditAliment(${ri},${vi},${ai})"` : rapide ? `onclick="event.stopPropagation();ouvrirQuantiteRapide(${r.journalSlot},${ai})"` : ''}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <div style="font-size:13px;flex:1;line-height:1.3;">${esc(a.nom)}${a.modifie ? `<span style="font-size:8px;font-weight:700;color:#f59e0b;background:#f59e0b18;border:1px solid #f59e0b44;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;">modifié</span>` : ''}</div>
@@ -696,7 +696,7 @@ function rendreCorpsRepas(r, ri, vi) {
         <span class="d-alim-prot" style="font-size:11px;font-weight:600;color:#378ADD;">${Number(prot.toFixed(1))}P</span>
         <span class="d-alim-glu"  style="font-size:11px;font-weight:600;color:var(--green);">${Number(glu.toFixed(1))}G</span>
         <span class="d-alim-lip"  style="font-size:11px;font-weight:600;color:#D85A30;">${Number(lip.toFixed(1))}L</span>
-        ${canEdit || rapide ? `<span style="font-size:10px;color:#a78bfa;margin-left:auto;">✎</span>` : ''}
+        ${canEdit ? `<span style="font-size:10px;color:#a78bfa;margin-left:auto;">✎</span>` : ''}
       </div>
     </div>`;
   }).join('');
