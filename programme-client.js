@@ -357,9 +357,11 @@ async function pcMachineAjouter(e, cle, nom) {
   const f = (e.target.files || [])[0];
   e.target.value = '';
   if (!f) return;
+  const recadre = await recadrerPhotoModal(f);
+  if (!recadre) return;
   showToast('Envoi de la photo…', '#378ADD');
   try {
-    const fichier = await compresserImagePourUpload(f);
+    const fichier = await compresserImagePourUpload(recadre);
     const ext = (fichier.name.split('.').pop() || 'jpg').toLowerCase();
     const path = `machines/${S.client}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
     const up = await fetch(`${SUPABASE_URL}/storage/v1/object/bilans-photos/${path}`, {

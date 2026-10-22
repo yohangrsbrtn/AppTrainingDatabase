@@ -746,3 +746,72 @@ function _carteHtml(carte) {
     </div>` : ''}
     ${best && best.d > 0 ? `<div style="background:#1e2230;border-radius:10px;padding:8px 12px;margin-top:10px;font-size:12px;display:flex;justify-content:space-between;"><span>Plus gros progrès</span><span style="color:#1D9E75;font-weight:600;">${best.a} +${best.d}</span></div>` : ''}`;
 }
+
+// Recadrage d'une photo avant import : cadre fixe (ratio 4:3 par défaut), l'utilisateur déplace et zoome la photo
+// dessous (glisser, pincer, curseur). Résout un File JPEG recadré, ou null si annulé. Les repères pointillés au
+// milieu montrent la bande qui sera visible dans le bandeau replié (voir _pcMachineHtml).
+function recadrerPhotoModal(file, ratio = 4 / 3) {
+  return new Promise(async resolve => {
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { resolve(file); return; }
+    const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
+    const src = document.createElement('canvas');
+    src.width = Math.round(bmp.width * k); src.height = Math.round(bmp.height * k);
+    src.getContext('2d').drawImage(bmp, 0, 0, src.width, src.height);
+    const FW = Math.min(window.innerWidth - 32, 480), FH = Math.round(FW / ratio);
+    const cover = Math.max(FW / src.width, FH / src.height);
+    let zoom = 1, ox = 0, oy = 0; // ox/oy = décalage du centre de l'image par rapport au centre du cadre
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(5,6,10,.97);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;touch-action:none;';
+    ov.innerHTML = `<div style="color:#e8eaf0;font-size:14px;font-weight:600;">Recadre ta photo</div>
+      <div id="rcFrame" style="position:relative;width:${FW}px;height:${FH}px;overflow:hidden;border-radius:10px;background:#000;cursor:grab;touch-action:none;">
+        <div id="rcGuide" style="position:absolute;left:0;right:0;top:33%;bottom:33%;border-top:1px dashed rgba(255,255,255,.7);border-bottom:1px dashed rgba(255,255,255,.7);pointer-events:none;z-index:2;"></div>
+      </div>
+      <div style="color:#8892a4;font-size:11.5px;text-align:center;max-width:${FW}px;">Glisse pour déplacer, pince ou utilise le curseur pour zoomer. Les pointillés montrent la partie visible dans le bandeau ; le reste s'affiche quand on l'agrandit.</div>
+      <input id="rcZoom" type="range" min="1" max="4" step="0.01" value="1" style="width:${Math.min(FW, 300)}px;">
+      <div style="display:flex;gap:10px;"><button id="rcAnnuler" style="padding:11px 22px;background:#2d3142;border:none;border-radius:10px;color:#e8eaf0;font-size:15px;cursor:pointer;">Annuler</button>
+      <button id="rcOk" style="padding:11px 26px;background:linear-gradient(135deg,#378ADD,#2260a8);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Valider</button></div>`;
+    document.body.appendChild(ov);
+    const frame = ov.querySelector('#rcFrame');
+    src.style.cssText = 'position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;';
+    frame.insertBefore(src, frame.firstChild);
+    const clamp = () => {
+      const w = src.width * cover * zoom, h = src.height * cover * zoom;
+      ox = Math.max(-(w - FW) / 2, Math.min((w - FW) / 2, ox));
+      oy = Math.max(-(h - FH) / 2, Math.min((h - FH) / 2, oy));
+    };
+    const draw = () => {
+      clamp();
+      const s = cover * zoom;
+      src.style.transform = `translate(${FW / 2 + ox - src.width * s / 2}px,${FH / 2 + oy - src.height * s / 2}px) scale(${s})`;
+    };
+    draw();
+    const ptrs = new Map(); let pinch0 = null;
+    frame.addEventListener('pointerdown', e => { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); frame.setPointerCapture(e.pointerId); frame.style.cursor = 'grabbing';
+      if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = { d: Math.hypot(a.x - b.x, a.y - b.y), z: zoom }; } });
+    frame.addEventListener('pointermove', e => {
+      if (!ptrs.has(e.pointerId)) return;
+      const p = ptrs.get(e.pointerId); const nx = e.clientX, ny = e.clientY;
+      if (ptrs.size === 2 && pinch0) {
+        ptrs.set(e.pointerId, { x: nx, y: ny });
+        const [a, b] = [...ptrs.values()]; zoom = Math.max(1, Math.min(4, pinch0.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch0.d));
+        ov.querySelector('#rcZoom').value = zoom;
+      } else { ox += nx - p.x; oy += ny - p.y; ptrs.set(e.pointerId, { x: nx, y: ny }); }
+      draw();
+    });
+    const fin = e => { ptrs.delete(e.pointerId); pinch0 = null; frame.style.cursor = 'grab'; };
+    frame.addEventListener('pointerup', fin); frame.addEventListener('pointercancel', fin);
+    ov.querySelector('#rcZoom').addEventListener('input', e => { zoom = parseFloat(e.target.value); draw(); });
+    frame.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(1, Math.min(4, zoom * (e.deltaY < 0 ? 1.1 : 0.9))); ov.querySelector('#rcZoom').value = zoom; draw(); }, { passive: false });
+    ov.querySelector('#rcAnnuler').onclick = () => { ov.remove(); resolve(null); };
+    ov.querySelector('#rcOk').onclick = () => {
+      const s = cover * zoom;
+      const sw = FW / s, sh = FH / s;
+      const sx = src.width / 2 - ox / s - sw / 2, sy = src.height / 2 - oy / s - sh / 2;
+      const out = document.createElement('canvas'); out.width = 1000; out.height = Math.round(1000 / ratio);
+      out.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      out.toBlob(b => { ov.remove(); resolve(b ? new File([b], 'machine.jpg', { type: 'image/jpeg' }) : file); }, 'image/jpeg', 0.8);
+    };
+  });
+}
