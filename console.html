@@ -384,6 +384,23 @@
   .alim-pick-row:last-child { border-bottom:none; }
   .alim-pick-nom { flex:1; font-weight:600; font-size:12.5px; }
   .alim-pick-macros { font-size:11px; color:var(--text-faint); font-family:var(--font-mono); }
+
+  /* ── Onglet Architecture (Programmes) : champs sombres cohérents avec la console, blocs d'emplacement colorés par famille ── */
+  .arch input[type=text], .arch input[type=number], .arch select {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+    padding: 8px 11px; font-family: inherit; outline: none; transition: border-color .15s, background .15s; }
+  .arch input[type=text]:hover, .arch input[type=number]:hover, .arch select:hover { border-color: rgba(255,255,255,.14); }
+  .arch input[type=text]:focus, .arch input[type=number]:focus, .arch select:focus { border-color: var(--accent); }
+  .arch ::placeholder { color: var(--text-faint); opacity: 1; }
+  .arch select { appearance: none; -webkit-appearance: none; padding-right: 28px; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a85' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; }
+  .arch input.arch-titre[type=text] { background: transparent; border-color: transparent; font-weight: 700; padding-left: 4px; }
+  .arch input.arch-titre[type=text]:hover { background: var(--surface-2); border-color: var(--hairline); }
+  .arch .arch-slot { background: rgba(255,255,255,.025); border: 1px solid var(--hairline); border-left: 3px solid var(--arch-c, #8892a4); border-radius: 10px; padding: 10px 11px; margin-bottom: 8px; }
+  .arch .arch-slot select.arch-famille { border-color: transparent; background-color: transparent; color: var(--arch-c, var(--text)); font-weight: 600; padding: 2px 22px 2px 0; background-position: right 4px center; }
+  .arch .arch-ligne { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; margin-bottom: 4px; background: rgba(255,255,255,.025); }
+  .arch .table-card { border: 1px solid var(--hairline); }
 </style>
 </head>
 <body>
@@ -4505,6 +4522,14 @@ function _archSeriesEst(){ // séries/semaine par famille (estimation étape 2 =
   _archSlots().forEach(sl => { tot[sl.g] = (tot[sl.g]||0) + (_arch.step >= 3 && _arch.series[sl.key] ? _arch.series[sl.key] : 3); });
   return tot;
 }
+function _archCouleur(f){
+  if (f.startsWith('Dos')) return '#378ADD';
+  if (f.startsWith('Epaules')) return '#a78bfa';
+  if (f === 'Pectoraux') return '#e05c5c';
+  if (f === 'Biceps' || f === 'Triceps') return '#d9a030';
+  if (['Quadriceps','Ischios','Fessiers','Adducteurs','Abducteurs'].includes(f)) return '#1D9E75';
+  return '#8892a4';
+}
 function _archZone(n){
   if (n < 8)  return { c:'#e05c5c', t:'sous le minimum' };
   if (n < 12) return { c:'#d9a030', t:'minimum efficace' };
@@ -4579,8 +4604,8 @@ function _archAccueil(){
 async function renderArchitectureSub(){
   const sub = document.getElementById('progrSub');
   if (!_arch) {
-    if (_archBrouillons === null) { sub.innerHTML = _archAccueil(); await _archChargerBrouillons(); }
-    sub.innerHTML = _archAccueil();
+    if (_archBrouillons === null) { sub.innerHTML = `<div class="arch">${_archAccueil()}</div>`; await _archChargerBrouillons(); }
+    sub.innerHTML = `<div class="arch">${_archAccueil()}</div>`;
     return;
   }
   const labels = ['Architecture','Répartition','Exercices','Programme final'];
@@ -4595,7 +4620,7 @@ async function renderArchitectureSub(){
   else if (_arch.step === 2) body = _archStep2();
   else if (_arch.step === 3) body = _archStep3();
   else body = _archStep4();
-  sub.innerHTML = entete + stepper + body;
+  sub.innerHTML = `<div class="arch">${entete}${stepper}${body}</div>`;
 }
 function archGo(n){ _arch.step = n; renderArchitectureSub(); }
 function archReset(){ if (confirm('Repartir de zéro ?')) { _archInit(); renderArchitectureSub(); } }
@@ -4626,8 +4651,8 @@ function _archStep2(){
       const nbEx = s.groupes.reduce((a, g) => a + g.n, 0);
       const dispo = ARCH_FAMILLES.filter(f => !s.groupes.some(g => g.g === f));
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" style="font-weight:700;font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
-        ${s.groupes.map((g, gi) => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
+        ${s.groupes.map((g, gi) => `<div class="arch-ligne" style="border-left:3px solid ${_archCouleur(g.g)};">
           <span style="flex:1;font-size:13px;">${esc(g.g)}</span>
           <button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},-1)" title="Monter">↑</button><button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},1)" title="Descendre">↓</button>
           <button class="btn" style="padding:2px 10px;" onclick="archNbExos(${si},${gi},-1)">−</button><b style="width:18px;text-align:center;">${g.n}</b><button class="btn" style="padding:2px 10px;" onclick="archNbExos(${si},${gi},1)">+</button>
@@ -4674,11 +4699,11 @@ function _archStep3(){
       const slots = _archSlots().filter(x => x.si === si);
       const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" style="font-weight:700;font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
-          return `<div style="margin-bottom:10px;">
+          return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};">
             <div style="font-size:11px;color:var(--text-faint);margin-bottom:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <select title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)" style="font-size:12px;padding:2px 4px;max-width:170px;">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
+              <select class="arch-famille" title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)" style="font-size:12px;max-width:190px;">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
               <span>exercice ${sl.k+1}</span>${dbl?' <span style="color:#d9a030;">· déjà utilisé ailleurs</span>':''}</div>
             <div style="display:flex;gap:6px;">
               <select style="flex:1;font-size:16px;min-width:0;" onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
@@ -4686,7 +4711,7 @@ function _archStep3(){
               <button class="icon-btn del" onclick="archRetirerSlot('${sl.key}')" title="Retirer cet exercice">${iTrash()}</button>
             </div>
             <div style="display:flex;gap:6px;margin-top:5px;">
-              <input type="text" value="${esc(_arch.tempo[sl.key]||'')}" placeholder="Tempo (ex: 3-0-1-0)" oninput="_arch.tempo['${sl.key}']=this.value" style="width:120px;font-size:16px;">
+              <input type="text" value="${esc(_arch.tempo[sl.key]||'')}" placeholder="Tempo" title="Tempo, ex : 3-0-1-0" oninput="_arch.tempo['${sl.key}']=this.value" style="width:92px;font-size:16px;">
               <input type="text" value="${esc(_arch.notes[sl.key]||'')}" placeholder="Commentaire" oninput="_arch.notes['${sl.key}']=this.value" style="flex:1;min-width:0;font-size:16px;">
             </div></div>`; }).join('')}
         <select onchange="archAjouterSlot(${si},this.value);this.value=''" style="font-size:16px;width:100%;margin-top:4px;"><option value="">+ Ajouter un exercice (choisir le groupe)…</option>${ARCH_FAMILLES.map(f => `<option>${esc(f)}</option>`).join('')}</select>
