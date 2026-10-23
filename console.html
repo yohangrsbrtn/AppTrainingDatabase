@@ -4442,7 +4442,7 @@ async function renderProgrammesPage(el){
 // 1) nombre de séances + structure  2) exercices par groupe musculaire et par séance
 // 3) choix des exercices (+ séries)  4) programme final → template / assignation.
 // Réutilise sauvegarderTemplateComplet, _appliquerTypeAuxExercicesDuBloc, ouvrirAssignerTemplate.
-const ARCH_FAMILLES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Epaules','Biceps','Triceps','Quadriceps','Ischios','Fessiers','Mollets','Adducteurs','Abducteurs','Abdos','Lombaires'];
+const ARCH_FAMILLES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Epaules','Epaules (anterieur)','Epaules (latéral)','Epaules (posterieur)','Biceps','Triceps','Quadriceps','Ischios','Fessiers','Mollets','Adducteurs','Abducteurs','Abdos','Lombaires'];
 const ARCH_PRESETS = {
   ppl3: { label:'Push / Pull / Legs', nb:3, seances:[
     ['Push',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs',{Quadriceps:3,Ischios:2,Mollets:1}]] },
@@ -4465,7 +4465,10 @@ const ARCH_PRESETS = {
 const ARCH_PREF = {
   'Pectoraux':['Développé incliné haltères','Développé couché machine','Ecarté poulie vis à vis','Développé incliné machine','Pec deck','Développé couché haltères'],
   'Dos (dorsaux)':['Tirage poitrine','Tirage horizontal prise serrée dorsaux','Pull over','Tirage vertical prise serrée','Rowing horizontal machine','Latéral pull down machine'],
-  'Dos (trapèzes)':['Tirage horizontal prise semi large pronation','Face pull','Rowing machine','Shrug'],
+  'Dos (trapèzes)':['Rowing machine','Tirage horizontal prise semi large pronation','Rowing T barre','Tirage horizontal prise large pronation','Shrug','Face pull'],
+  'Epaules (anterieur)':['Développé militaire machine','Développé militaire haltères','Développé militaire assis smith machine'],
+  'Epaules (latéral)':['Elévations latérales poulie','Elévations latérales haltères assis','Elévations latérales machine','Elévations latérales haltères'],
+  'Epaules (posterieur)':['Pec deck inversé','Oiseau assis','Rear delt unilatéral poulie','Oiseau assis buste penché'],
   'Epaules':['Développé militaire machine','Elévations latérales poulie','Pec deck inversé','Elévations latérales haltères','Développé militaire haltères'],
   'Biceps':['Curl biceps banc incliné','Curl marteau','Biceps curl poulie basse','Biceps curl pupitre machine'],
   'Triceps':['Extension triceps overhead','Pushdown cable corde','Triceps crossover poulie haute','Kick back poulie basse'],
