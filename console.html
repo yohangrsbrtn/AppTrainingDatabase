@@ -4487,7 +4487,7 @@ function _archPreset(cle){
   return p.seances.map(([titre, gr]) => ({ titre, groupes: Object.entries(gr).map(([g, n]) => ({ g, n })) }));
 }
 function _archInit(){
-  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, nom:'', categorie:'', blocType:'metabolique', nbSemaines:6 };
+  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, nom:'', clientId:'', draftId:null, categorie:'', blocType:'metabolique', nbSemaines:6 };
 }
 function _archExosFamille(fam){
   return (exercicesData||[]).filter(e => fam === 'Epaules' ? (e.groupe_musculaire||'').startsWith('Epaules') : e.groupe_musculaire === fam);
@@ -4510,17 +4510,89 @@ function _archZone(n){
   return { c:'#e05c5c', t:'trop élevé' };
 }
 
+let _archBrouillons = null; // null = pas chargé ; [] = aucun ; undefined = table absente
+async function _archChargerBrouillons(){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?order=updated_at.desc&select=id,nom,client_id,updated_at,etat`, { headers: supaHeaders() });
+    _archBrouillons = res.ok ? await res.json() : undefined;
+  } catch(e) { _archBrouillons = undefined; }
+}
+function archNouveau(){ _archInit(); renderArchitectureSub(); }
+async function archReprendre(id){
+  const b = (_archBrouillons || []).find(x => x.id === id);
+  if (!b) return;
+  _arch = Object.assign({}, b.etat, { draftId: b.id, nom: b.nom, clientId: b.client_id || '' });
+  if (exercicesData === null) exercicesData = await chargerExercices();
+  renderArchitectureSub();
+}
+async function archRenommerBrouillon(id){
+  const b = (_archBrouillons || []).find(x => x.id === id);
+  const nom = prompt('Nom du brouillon (ex: Claire Chapus — 4 séances)', b ? b.nom : '');
+  if (!nom || !nom.trim()) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${id}`, { method:'PATCH', headers: supaHeaders({ Prefer:'return=minimal' }), body: JSON.stringify({ nom: nom.trim(), updated_at: new Date().toISOString() }) });
+  await _archChargerBrouillons(); renderArchitectureSub();
+}
+async function archSupprimerBrouillon(id){
+  if (!confirm('Supprimer ce brouillon ?')) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${id}`, { method:'DELETE', headers: supaHeaders() });
+  await _archChargerBrouillons(); renderArchitectureSub();
+}
+async function archEnregistrerBrouillon(quitter){
+  if (!(_arch.nom || '').trim()) { const n = prompt('Donne un nom à ce brouillon (ex: Claire Chapus — 4 séances)'); if (!n || !n.trim()) return; _arch.nom = n.trim(); }
+  const { draftId, nom, clientId, ...etat } = _arch;
+  const corps = { nom: _arch.nom.trim(), client_id: _arch.clientId || null, etat, updated_at: new Date().toISOString() };
+  try {
+    const res = _arch.draftId
+      ? await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${_arch.draftId}`, { method:'PATCH', headers: supaHeaders({ Prefer:'return=representation' }), body: JSON.stringify(corps) })
+      : await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons`, { method:'POST', headers: supaHeaders({ Prefer:'return=representation' }), body: JSON.stringify(corps) });
+    if (!res.ok) throw new Error('Enregistrement impossible : exécute sql/2026-10-25_programme_brouillons.sql dans Supabase.');
+    _arch.draftId = (await res.json())[0].id;
+    if (quitter) { _arch = null; await _archChargerBrouillons(); renderArchitectureSub(); }
+    else { const t = document.createElement('div'); t.textContent = '✓ Brouillon enregistré'; t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1D9E75;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;'; document.body.appendChild(t); setTimeout(() => t.remove(), 2200); renderArchitectureSub(); }
+  } catch(e) { alert(e.message); }
+}
+function archQuitter(){
+  if (confirm('Enregistrer ce programme en brouillon avant de quitter ?\n\nOK = enregistrer · Annuler = continuer à travailler')) archEnregistrerBrouillon(true);
+}
+function _archAccueil(){
+  const liste = _archBrouillons;
+  const lib = n => n > 1 ? 's' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div style="font-weight:700;">Brouillons${Array.isArray(liste) ? ` (${liste.length})` : ''}</div>
+      <button class="btn primary" onclick="archNouveau()">+ Nouveau programme</button></div>
+    ${liste === undefined ? `<div class="empty-panel"><strong>Brouillons indisponibles</strong>Exécute <code>sql/2026-10-25_programme_brouillons.sql</code> dans Supabase pour pouvoir enregistrer des programmes en cours.</div>`
+      : !liste ? '<div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div>'
+      : !liste.length ? `<div style="color:var(--text-faint);font-size:13px;">Aucun brouillon. Commence un nouveau programme : tu pourras l'interrompre et l'enregistrer en brouillon à tout moment.</div>`
+      : liste.map(b => { const c = data.clients.find(x => x.id === b.client_id); const e = b.etat || {};
+        return `<div class="table-card" style="padding:12px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div style="font-weight:700;">${esc(b.nom)}</div>
+            <div style="font-size:12px;color:var(--text-faint);margin-top:2px;">${c ? 'Pour ' + esc(c.nom) + ' · ' : ''}${(e.seances||[]).length} séance${lib((e.seances||[]).length)} · étape ${e.step||1}/4 · modifié le ${new Date(b.updated_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})}</div></div>
+          <button class="btn primary" onclick="archReprendre(${b.id})">Reprendre</button>
+          <button class="btn" onclick="archRenommerBrouillon(${b.id})">✎ Renommer</button>
+          <button class="icon-btn del" onclick="archSupprimerBrouillon(${b.id})" title="Supprimer">${iTrash()}</button></div>`; }).join('')}`;
+}
+
 async function renderArchitectureSub(){
-  if (!_arch) _archInit();
   const sub = document.getElementById('progrSub');
+  if (!_arch) {
+    if (_archBrouillons === null) { sub.innerHTML = _archAccueil(); await _archChargerBrouillons(); }
+    sub.innerHTML = _archAccueil();
+    return;
+  }
   const labels = ['Architecture','Répartition','Exercices','Programme final'];
   const stepper = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">${labels.map((l,i) => `<button class="btn ${_arch.step===i+1?'primary':''}" ${i+1<_arch.step?`onclick="archGo(${i+1})"`:''} style="font-size:12px;${i+1>_arch.step?'opacity:.5;cursor:default;':''}">${i+1}. ${l}</button>`).join('')}</div>`;
+  const entete = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+    <input type="text" value="${esc(_arch.nom)}" placeholder="Nom du programme / du brouillon (ex: Claire Chapus — 4 séances)" oninput="_arch.nom=this.value" style="flex:1;min-width:220px;font-size:16px;">
+    <select onchange="_arch.clientId=this.value" style="font-size:16px;max-width:200px;"><option value="">Pour… (facultatif)</option>${data.clients.filter(c=>!c.estCoach).map(c => `<option value="${c.id}" ${_arch.clientId===c.id?'selected':''}>${esc(c.nom)}</option>`).join('')}</select>
+    <button class="btn" onclick="archEnregistrerBrouillon(false)">💾 Enregistrer en brouillon</button>
+    <button class="btn" onclick="archQuitter()">✕ Quitter</button></div>`;
   let body = '';
   if (_arch.step === 1) body = _archStep1();
   else if (_arch.step === 2) body = _archStep2();
   else if (_arch.step === 3) body = _archStep3();
   else body = _archStep4();
-  sub.innerHTML = stepper + body;
+  sub.innerHTML = entete + stepper + body;
 }
 function archGo(n){ _arch.step = n; renderArchitectureSub(); }
 function archReset(){ if (confirm('Repartir de zéro ?')) { _archInit(); renderArchitectureSub(); } }
@@ -4552,7 +4624,7 @@ function _archStep2(){
       const nbEx = s.groupes.reduce((a, g) => a + g.n, 0);
       const dispo = ARCH_FAMILLES.filter(f => !s.groupes.some(g => g.g === f));
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;"><b>${esc(s.titre)}</b><span style="font-size:12px;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" style="font-weight:700;font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
         ${s.groupes.map((g, gi) => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
           <span style="flex:1;font-size:13px;">${esc(g.g)}</span>
           <button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},-1)" title="Monter">↑</button><button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},1)" title="Descendre">↓</button>
@@ -4604,7 +4676,7 @@ function _archStep3(){
       const slots = _archSlots().filter(x => x.si === si);
       const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;"><b>${esc(s.titre)}</b><span style="font-size:12px;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" style="font-weight:700;font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
           return `<div style="margin-bottom:10px;">
             <div style="font-size:11px;color:var(--text-faint);margin-bottom:3px;">${esc(sl.g)} · exercice ${sl.k+1}${dbl?' <span style="color:#d9a030;">· déjà utilisé ailleurs</span>':''}</div>
@@ -4693,7 +4765,8 @@ async function archEnregistrer(assigner){
     const saved = await sauvegarderTemplateComplet(tpl);
     if (templatesData === null) templatesData = await chargerTemplates(); else templatesData.push(saved);
     if (assigner) { ouvrirAssignerTemplate(saved.id); return; }
-    _arch = null; progTab = 'templates'; renderProgrammesPage(document.getElementById('main'));
+    if (_arch.draftId) await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${_arch.draftId}`, { method:'DELETE', headers: supaHeaders() }).catch(() => {});
+    _arch = null; _archBrouillons = null; progTab = 'templates'; renderProgrammesPage(document.getElementById('main'));
   } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
 }
 
