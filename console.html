@@ -4653,19 +4653,22 @@ function archReset(){ if (confirm('Repartir de zéro ?')) { _archInit(); renderA
 function _archStep1(){
   const presets = Object.entries(ARCH_PRESETS);
   return `<div class="table-card" style="padding:18px;margin-bottom:14px;">
-    <div style="font-weight:700;margin-bottom:4px;">Structure de la semaine</div>
-    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Choisis un point de départ, puis renomme, ajoute ou retire des séances.</div>
+    <div style="font-weight:700;margin-bottom:4px;">Structure de la semaine ${_arch.preset === 'custom' ? '<span style="font-size:11px;font-weight:600;color:var(--accent);margin-left:6px;">· ta structure (personnalisée)</span>' : ''}</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Ta structure actuelle est affichée ci-dessous : renomme, ajoute ou retire des séances. Les modèles servent seulement de point de départ et remplacent la structure (une confirmation est demandée).</div>
     <div class="chip-filter" style="margin-bottom:14px;">${presets.map(([k,p]) => `<button class="${_arch.preset===k?'active':''}" onclick="archChoisirPreset('${k}')">${p.nb} séances · ${esc(p.label)}</button>`).join('')}</div>
-    ${_arch.seances.map((s, i) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+    ${_arch.seances.map((s, i) => `<div style="margin-bottom:8px;"><div style="display:flex;align-items:center;gap:8px;">
       <span style="width:70px;font-size:12px;color:var(--text-faint);">Séance ${i+1}</span>
-      <input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${i}].titre=this.value" style="flex:1;font-size:16px;">
-      <button class="icon-btn del" onclick="archSupprimerSeance(${i})" title="Retirer">${iTrash()}</button></div>`).join('')}
+      <input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${i}].titre=this.value" style="flex:1;">
+      <button class="icon-btn del" onclick="archSupprimerSeance(${i})" title="Retirer">${iTrash()}</button></div>
+      <div style="margin-left:78px;font-size:11.5px;color:var(--text-faint);margin-top:2px;">${s.groupes.length ? s.groupes.map(g => `<span style="color:${_archCouleur(g.g)};">${esc(g.g)}</span> ${g.n}`).join(' · ') : 'Aucun groupe — à définir à l\'étape suivante'}</div></div>`).join('')}
     <button class="btn" onclick="archAjouterSeance()">+ Ajouter une séance</button>
   </div>
   <div style="display:flex;justify-content:flex-end;"><button class="btn primary" onclick="${'archGo(2)'}">Suivant : répartition →</button></div>`;
 }
-function archChoisirPreset(k){ _arch.preset = k; _arch.seances = _archPreset(k); _archRaz(); renderArchitectureSub(); }
-function archAjouterSeance(){ _arch.seances.push({ titre:'Séance ' + (_arch.seances.length + 1), groupes:[] }); renderArchitectureSub(); }
+function archChoisirPreset(k){
+  if ((_arch.preset === 'custom' || Object.keys(_arch.choix).length) && !confirm('Remplacer la structure actuelle (' + _arch.seances.length + ' séances) par ce modèle ?\n\nLes exercices déjà choisis seront perdus. Pour garder ta structure, annule et modifie-la directement ici (séances) ou à l\'étape suivante (répartition).')) return;
+  _arch.preset = k; _arch.seances = _archPreset(k); _archRaz(); renderArchitectureSub(); }
+function archAjouterSeance(){ _arch.preset = 'custom'; _arch.seances.push({ titre:'Séance ' + (_arch.seances.length + 1), groupes:[] }); renderArchitectureSub(); }
 
 // Étape 2 — nombre d'exercices par groupe musculaire et par séance
 function _archStep2(){
@@ -4749,6 +4752,7 @@ function _archToNested(){
     return { choix: _arch.choix[kk], series: _arch.series[kk], tempo: _arch.tempo[kk], notes: _arch.notes[kk], reps: _arch.reps[kk], repos: _arch.repos[kk], rir: _arch.rir[kk], ss: _arch.ss[kk] }; }) })));
 }
 function _archFromNested(nested){
+  _arch.preset = 'custom';
   _archRaz();
   nested.forEach((groupes, si) => {
     const gs = groupes.filter(g => g.slots.length);
@@ -4891,6 +4895,7 @@ async function archImporterBloc(bi){
   if (_arch && !confirm('Un programme est déjà en cours dans Architecture : il sera remplacé (pense à l\'enregistrer en brouillon avant). Continuer ?')) return;
   _archInit();
   _arch.source = { clientId: cp.client_id, progId: cp.id, progNom: cp.nom, blocLabel: (BLOCS_TYPES.find(o => o.value === (bloc.type||'')) || {}).label || 'Bloc' };
+  _arch.preset = 'custom';
   _arch.nom = `${cp.nom} — nouvelle version`; _arch.clientId = cp.client_id;
   _arch.blocType = bloc.type || 'metabolique'; _arch.nbSemaines = bloc.nombre_semaines || 6;
   _arch.seances = bloc.seances.map(se => ({ titre: se.titre, groupes: [] }));
