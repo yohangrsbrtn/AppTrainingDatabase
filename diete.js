@@ -1824,7 +1824,9 @@ async function _demarrerScan() {
   // demande d'autofocus continu n'était qu'un bonus, la fiabilité prime.
   _dScanInstance.start(
     { facingMode: 'environment' },
-    { fps: 15, qrbox: { width: 280, height: 160 }, formatsToSupport: formats },
+    { fps: 20, qrbox: (w, h) => ({ width: Math.floor(w * 0.92), height: Math.max(110, Math.min(170, Math.floor(h * 0.5))) }), formatsToSupport: formats,
+      videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true } },
     onScanSuccess
   )
     .then(() => { _demarrerCompteurScan(); })
@@ -1861,11 +1863,13 @@ async function onScanSuccess(codeBarre) {
   // viser la caméra en pensant que rien ne se passe (vécu), le temps que la
   // recherche locale/Open Food Facts se termine derrière.
   if (navigator.vibrate) navigator.vibrate(80);
+  // La recherche Open Food Facts démarre tout de suite, en parallèle de l'animation de confirmation.
+  if (!_tousLesAliments().find(a => a.codeBarre === codeBarre)) _offFetch(codeBarre).catch(() => {});
   const viewport = document.getElementById('dScanViewport');
   if (viewport) {
     viewport.style.position = 'relative';
-    viewport.insertAdjacentHTML('beforeend', '<div style="position:absolute;inset:0;background:rgba(29,158,117,0.88);display:flex;align-items:center;justify-content:center;font-size:52px;color:#fff;">✓</div>');
-    await new Promise(r => setTimeout(r, 350));
+    viewport.insertAdjacentHTML('beforeend', '<div style="position:absolute;inset:0;background:rgba(29,158,117,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#fff;"><div style="font-size:52px;line-height:1;">✓</div><div style="font-size:13px;font-weight:600;">Code lu — tu peux baisser le téléphone</div></div>');
+    await new Promise(r => setTimeout(r, 250));
   }
   _arreterScan();
   await _traiterCodeBarre(codeBarre);
@@ -1888,13 +1892,40 @@ async function _rechercherCodeBarreManuel() {
 // Logique de recherche partagée (scan auto + saisie manuelle) : match local d'abord (base coach
 // ou communauté déjà indexée par code-barres), sinon Open Food Facts. Remet toujours
 // _dScanTraitementEnCours à false en sortie (verrou anti double-traitement).
+// Requête Open Food Facts : cache (mémoire + localStorage 30 jours — un produit déjà scanné est instantané), délai
+// maximum de 8 s par essai et un 2e essai automatique (le service répond souvent 503 aux heures de pointe).
+const _dOffMem = {};
+function _offFetch(code) {
+  if (_dOffMem[code]) return _dOffMem[code];
+  try {
+    const c = JSON.parse(localStorage.getItem('off_cache_' + code) || 'null');
+    if (c && Date.now() - c.t < 30 * 864e5) return (_dOffMem[code] = Promise.resolve(c.d));
+  } catch(e) {}
+  const essai = async () => {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments,last_modified_t,brands,quantity', { signal: ctl.signal });
+      if (!res.ok) throw new Error('off_' + res.status);
+      return await res.json();
+    } finally { clearTimeout(to); }
+  };
+  const p = (async () => {
+    let d;
+    try { d = await essai(); } catch(e) { await new Promise(r => setTimeout(r, 600)); d = await essai(); }
+    if (d && d.status === 1) { try { localStorage.setItem('off_cache_' + code, JSON.stringify({ t: Date.now(), d })); } catch(e) {} }
+    return d;
+  })();
+  _dOffMem[code] = p;
+  p.catch(() => { delete _dOffMem[code]; });
+  return p;
+}
+
 async function _traiterCodeBarre(codeBarre) {
   const local = _tousLesAliments().find(a => a.codeBarre === codeBarre);
   if (local) { _dScanTraitementEnCours = false; selectionnerAliment(local.nom, local.source); return; }
-  _afficherModalAjout(true);
+  _afficherModalAjout('produit');
   try {
-    const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(codeBarre) + '.json?fields=product_name,nutriments,last_modified_t,brands,quantity');
-    const data = await res.json();
+    const data = await _offFetch(codeBarre);
     if (data && data.status === 1 && data.product) {
       const n = data.product.nutriments || {};
       // kcal : valeur kcal de la fiche, sinon dérivée des kJ (1 kcal = 4,184 kJ) — ne jamais retomber sur 0 si les kJ existent.
@@ -1994,6 +2025,10 @@ async function confirmerCreationAliment() {
   if (!nom) { errEl.textContent = 'Entre un nom.'; errEl.style.display = 'block'; return; }
   if (kcal100 <= 0) { errEl.textContent = 'Entre au moins les calories.'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
+  const calcAtwater = Math.round(prot100 * 4 + Math.max(0, glu100 - fibres100) * 4 + fibres100 * 2 + lip100 * 9);
+  if (calcAtwater > 0 && Math.abs(kcal100 - calcAtwater) > Math.max(40, calcAtwater * 0.25)) {
+    if (!confirm(`Ces valeurs sont incohérentes : tes macros donnent environ ${calcAtwater} kcal pour 100 g, pas ${Math.round(kcal100)}.\n\nL'aliment sera ajouté à la base commune, utilisable par tous : vérifie bien l'étiquette.\n\nOK = enregistrer quand même · Annuler = corriger.`)) return;
+  }
   try {
     // Stockage désormais "pour 100g" tel quel — plus de division, la saisie
     // (et Open Food Facts) est déjà nativement pour 100g.
@@ -2037,7 +2072,9 @@ function _afficherModalAjout(loading) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:flex-end;';
   let contenu;
   if (loading) {
-    contenu = '<div style="display:flex;justify-content:center;padding:40px 0;"><div class="spin"></div></div>';
+    contenu = loading === 'produit'
+      ? '<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 0;"><div class="spin"></div><div style="font-size:13px;color:#8892a4;">Recherche du produit… tu peux baisser le téléphone</div></div>'
+      : '<div style="display:flex;justify-content:center;padding:40px 0;"><div class="spin"></div></div>';
   } else if (_dAjoutEtape === 'quantite') {
     contenu = renderModalAjoutQuantite();
   } else if (_dAjoutEtape === 'creation') {
