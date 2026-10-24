@@ -3888,14 +3888,227 @@ async function rechercherOpenFoodFacts(query){
 }
 
 // ── Page Protocole ─────────────────────────────────────────────────────
+// ═══ Calendrier de bilans sanguins (Protocole → Calendrier / Modèles / Règles) ═══════════════════
+// Modèles = « bilans types » (marqueurs + ajouts conditionnels selon les résultats précédents) ; Règles = quand les
+// faire dans un protocole (référence début/fin, décalage en semaines, fenêtre en jours) ; chaque client sous protocole
+// reçoit des échéances générées depuis les règles (ou ajoutées à la main). Statut calculé, jamais stocké.
+let _protoTab = 'clients';
+let _bsc = { charge: false, ok: true, modeles: [], regles: [], planning: [], protocoles: [], analyses: {} };
+const _bscJour = d => d.toISOString().slice(0, 10);
+const _bscAjouterJours = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return _bscJour(d); };
+const _bscFr = iso => new Date(iso + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+const _bscListe = txt => String(txt || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+
+async function _bscCharger(force){
+  if (_bsc.charge && !force) return;
+  const get = async (t) => { const r = await fetch(`${SUPABASE_URL}/rest/v1/${t}`, { headers: supaHeaders() }); if (!r.ok) throw new Error(t); return r.json(); };
+  try {
+    const [modeles, regles, planning, protocoles, analyses] = await Promise.all([
+      get('bilan_sanguin_modeles?order=id.asc&select=*'), get('bilan_sanguin_regles?order=ref.asc,decalage_semaines.asc,id.asc&select=*'),
+      get('client_bilans_sanguins?order=date_debut.asc&select=*'), get('client_protocoles?select=id,client_id,date_debut,duree_semaines,objectif'),
+      get('client_analyses_sante?select=client_id,date,nom,valeur,ref_min,ref_max&order=date.desc&limit=5000') ]);
+    const par = {}; analyses.forEach(a => { (par[a.client_id] = par[a.client_id] || []).push(a); });
+    _bsc = { charge: true, ok: true, modeles, regles, planning, protocoles, analyses: par };
+  } catch(e) { _bsc = { charge: true, ok: false, modeles: [], regles: [], planning: [], protocoles: [], analyses: {} }; }
+}
+// Dernière valeur connue d'un marqueur pour un client avant une date (comparaison sur le nom normalisé).
+function _bscDerniere(clientId, nomMarqueur, avantIso){
+  const n = _normaliserTexteAnalyse(nomMarqueur);
+  return (_bsc.analyses[clientId] || []).find(a => a.date <= (avantIso || '9999') && _normaliserTexteAnalyse(a.nom).includes(n));
+}
+// Marqueurs d'une échéance = ceux du modèle + extras manuels + ajouts déclenchés par les résultats précédents du client.
+function _bscMarqueurs(ech){
+  const m = _bsc.modeles.find(x => x.id === ech.modele_id);
+  const base = [...((m && m.marqueurs) || []), ...(ech.marqueurs_extra || [])];
+  const ajouts = [];
+  ((m && m.conditions) || []).forEach(c => {
+    const d = _bscDerniere(ech.client_id, c.marqueur, ech.date_debut);
+    if (!d) return;
+    const ok = c.op === '>' ? d.valeur > Number(c.valeur) : d.valeur < Number(c.valeur);
+    if (ok) (c.ajouter || []).forEach(x => { if (!base.includes(x) && !ajouts.some(a => a.nom === x)) ajouts.push({ nom: x, motif: `${c.marqueur} ${d.valeur} ${c.op} ${c.valeur}${c.motif ? ' — ' + c.motif : ''}` }); });
+  });
+  return { base: [...new Set(base)], ajouts };
+}
+function _bscStatut(ech){
+  if (ech.annule) return { code: 'annule', label: 'Annulé', c: '#8892a4' };
+  const today = _bscJour(new Date());
+  const fait = (_bsc.analyses[ech.client_id] || []).some(a => a.date >= ech.date_debut && a.date <= ech.date_fin);
+  if (fait) return { code: 'fait', label: 'Fait', c: '#1D9E75' };
+  if (today > ech.date_fin) return { code: 'retard', label: 'En retard', c: '#e05c5c' };
+  if (today >= ech.date_debut) return { code: 'encours', label: 'À faire cette semaine', c: '#d9a030' };
+  return { code: 'venir', label: 'À venir', c: '#378ADD' };
+}
+
+async function _bscRender(el){
+  await _bscCharger();
+  const corps = document.getElementById('bscCorps');
+  if (!corps) return;
+  if (!_bsc.ok) { corps.innerHTML = `<div class="empty-panel"><strong>Tables à créer</strong>Exécute <code>sql/2026-10-26_calendrier_bilans_sanguins.sql</code> dans Supabase pour activer le calendrier de bilans.</div>`; return; }
+  if (_protoTab === 'modeles') corps.innerHTML = _bscModelesHtml();
+  else if (_protoTab === 'regles') corps.innerHTML = _bscReglesHtml();
+  else corps.innerHTML = _bscCalendrierHtml();
+}
+
+// ── Calendrier ──
+function _bscClientsSousProto(){
+  return data.clients.filter(c => c.chimieActifSupa);
+}
+function _bscCalendrierHtml(){
+  const clients = _bscClientsSousProto();
+  if (!clients.length) return `<p style="color:var(--text-faint);">Aucun client avec le protocole activé.</p>`;
+  const nb = { retard: 0, encours: 0 };
+  _bsc.planning.forEach(e => { if (clients.some(c => c.id === e.client_id)) { const s = _bscStatut(e); if (nb[s.code] != null) nb[s.code]++; } });
+  const top = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+    <span style="font-size:12.5px;color:var(--text-faint);">${clients.length} client${clients.length>1?'s':''} sous protocole · <b style="color:#e05c5c;">${nb.retard} en retard</b> · <b style="color:#d9a030;">${nb.encours} à faire cette semaine</b></span>
+    <button class="btn primary" style="margin-left:auto;" onclick="bscGenererTous()" title="Crée les échéances manquantes pour tous les clients, d'après les règles">⚙ Générer pour tous depuis les règles</button></div>
+    ${!_bsc.regles.length ? `<div style="font-size:12.5px;color:var(--text-faint);background:var(--surface-2);border-radius:8px;padding:10px 12px;margin-bottom:12px;">Aucune règle pour l'instant : crée d'abord des <b>modèles</b> de bilan puis des <b>règles</b> (quand les faire), on les remplit ensemble.</div>` : ''}`;
+  return top + clients.map(c => {
+    const p = _bsc.protocoles.find(x => x.client_id === c.id);
+    const today = _bscJour(new Date());
+    let posLabel = 'protocole sans dates : crée-le dans sa fiche pour générer le calendrier';
+    if (p) {
+      const fin = _bscAjouterJours(p.date_debut, p.duree_semaines * 7);
+      const sem = Math.floor((new Date(today) - new Date(p.date_debut)) / 604800000) + 1;
+      posLabel = today < p.date_debut ? `démarre le ${_bscFr(p.date_debut)}` : today > fin ? `terminé le ${_bscFr(fin)}` : `semaine ${sem}/${p.duree_semaines}`;
+    }
+    const lignes = _bsc.planning.filter(e => e.client_id === c.id).sort((a, b) => a.date_debut.localeCompare(b.date_debut));
+    return `<div class="table-card" style="margin-bottom:10px;padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <b style="cursor:pointer;" onclick="openPanel('${c.id}').then(()=>setFicheTab('protocole'))">${esc(c.nom)}</b>
+        <span style="font-size:12px;color:var(--text-faint);">${p ? esc(p.objectif || 'Protocole') + ' · ' : ''}${posLabel}</span>
+        <div style="margin-left:auto;display:flex;gap:6px;">${p ? `<button class="btn" onclick="bscGenerer('${c.id}')">⚙ Générer</button>` : ''}<button class="btn" onclick="bscAjouterManuel('${c.id}')">+ Bilan</button></div></div>
+      ${lignes.length ? lignes.map(e => { const st = _bscStatut(e); const m = _bscMarqueurs(e);
+        return `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-left:3px solid ${st.c};background:rgba(255,255,255,.025);border-radius:8px;margin-bottom:4px;">
+          <div style="min-width:150px;"><div style="font-size:12.5px;font-weight:600;">${esc(e.libelle)}</div><div style="font-size:11.5px;color:var(--text-faint);">du ${_bscFr(e.date_debut)} au ${_bscFr(e.date_fin)}</div></div>
+          <div style="flex:1;font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px;">${m.base.map(x => `<span class="chip off">${esc(x)}</span>`).join('')}${m.ajouts.map(a => `<span class="chip" style="background:#6b5a2a;color:#fff;" title="Ajouté : ${esc(a.motif)}">+ ${esc(a.nom)}</span>`).join('')}${!m.base.length && !m.ajouts.length ? '<span style="color:var(--text-faint);">Aucun marqueur défini</span>' : ''}</div>
+          <span style="font-size:11.5px;font-weight:700;color:${st.c};white-space:nowrap;">${st.label}</span>
+          <button class="icon-btn" title="${e.annule ? 'Réactiver' : 'Annuler ce bilan'}" onclick="bscBasculerAnnule(${e.id},${!e.annule})">${e.annule ? '↺' : '⊘'}</button>
+          <button class="icon-btn del" onclick="bscSupprimerEch(${e.id})" title="Supprimer">${iTrash()}</button></div>`; }).join('')
+      : `<div style="font-size:12px;color:var(--text-faint);">Aucune échéance. « Générer » crée celles des règles.</div>`}
+    </div>`;
+  }).join('');
+}
+async function _bscMaj(){ await _bscCharger(true); renderProtocolePage(document.getElementById('main')); }
+async function bscGenerer(clientId, silencieux){
+  const p = _bsc.protocoles.find(x => x.client_id === clientId);
+  if (!p) return 0;
+  const existants = new Set(_bsc.planning.filter(e => e.client_id === clientId && e.regle_id).map(e => e.regle_id));
+  const lignes = _bsc.regles.filter(r => !existants.has(r.id)).map(r => {
+    const base = r.ref === 'fin' ? _bscAjouterJours(p.date_debut, p.duree_semaines * 7) : p.date_debut;
+    const debut = _bscAjouterJours(base, (r.decalage_semaines || 0) * 7);
+    return { client_id: clientId, regle_id: r.id, modele_id: r.modele_id, libelle: r.libelle, date_debut: debut, date_fin: _bscAjouterJours(debut, (r.duree_fenetre_jours || 7) - 1) };
+  });
+  if (lignes.length) await fetch(`${SUPABASE_URL}/rest/v1/client_bilans_sanguins`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(lignes) });
+  if (!silencieux) await _bscMaj();
+  return lignes.length;
+}
+async function bscGenererTous(){
+  if (!_bsc.regles.length) { alert("Crée d'abord au moins une règle."); return; }
+  let n = 0; for (const c of _bscClientsSousProto()) n += await bscGenerer(c.id, true);
+  await _bscMaj(); alert(n ? `${n} échéance${n>1?'s':''} créée${n>1?'s':''}.` : 'Rien à créer : tout est déjà généré.');
+}
+async function bscAjouterManuel(clientId){
+  const libelle = prompt('Nom du bilan (ex: Contrôle avant reprise)'); if (!libelle) return;
+  const debut = prompt('Début de la fenêtre (AAAA-MM-JJ)', _bscJour(new Date())); if (!debut || !/^\d{4}-\d{2}-\d{2}$/.test(debut)) return;
+  const jours = parseInt(prompt('Durée de la fenêtre en jours', '7')) || 7;
+  const choix = _bsc.modeles.length ? prompt('Modèle de bilan (numéro) — vide pour aucun :\n' + _bsc.modeles.map((m, i) => `${i + 1}. ${m.nom}`).join('\n')) : '';
+  const modele = choix ? _bsc.modeles[parseInt(choix) - 1] : null;
+  const extra = _bscListe(prompt('Marqueurs en plus (séparés par des virgules), facultatif') || '');
+  await fetch(`${SUPABASE_URL}/rest/v1/client_bilans_sanguins`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ client_id: clientId, libelle, date_debut: debut, date_fin: _bscAjouterJours(debut, jours - 1), modele_id: modele ? modele.id : null, marqueurs_extra: extra }) });
+  await _bscMaj();
+}
+async function bscBasculerAnnule(id, v){ await fetch(`${SUPABASE_URL}/rest/v1/client_bilans_sanguins?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ annule: v }) }); await _bscMaj(); }
+async function bscSupprimerEch(id){ if (!confirm('Supprimer cette échéance ?')) return; await fetch(`${SUPABASE_URL}/rest/v1/client_bilans_sanguins?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() }); await _bscMaj(); }
+
+// ── Modèles de bilan ──
+function _bscModelesHtml(){
+  const connus = [...new Set(Object.values(_bsc.analyses).flat().map(a => a.nom))].sort();
+  return `<datalist id="bscMarqueurs">${connus.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span style="font-size:12.5px;color:var(--text-faint);">Un modèle = une liste de marqueurs à doser, avec des ajouts automatiques si un résultat précédent dépasse un seuil.</span><button class="btn primary" onclick="bscEditerModele(null)">+ Nouveau modèle</button></div>
+    ${_bsc.modeles.map(m => `<div class="table-card" style="padding:12px 14px;margin-bottom:8px;">
+      <div style="display:flex;gap:8px;align-items:center;"><b>${esc(m.nom)}</b><span style="font-size:12px;color:var(--text-faint);flex:1;">${esc(m.description || '')}</span>
+        <button class="btn" onclick="bscEditerModele(${m.id})">✎ Modifier</button><button class="icon-btn del" onclick="bscSupprimerModele(${m.id})">${iTrash()}</button></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;">${(m.marqueurs||[]).map(x => `<span class="chip off">${esc(x)}</span>`).join('') || '<span style="color:var(--text-faint);font-size:12px;">Aucun marqueur</span>'}</div>
+      ${(m.conditions||[]).map(c => `<div style="font-size:12px;color:#d9a030;margin-top:6px;">Si ${esc(c.marqueur)} ${esc(c.op)} ${esc(String(c.valeur))} → ajouter ${esc((c.ajouter||[]).join(', '))}${c.motif ? ' · ' + esc(c.motif) : ''}</div>`).join('')}
+    </div>`).join('') || '<p style="color:var(--text-faint);">Aucun modèle pour l\'instant : on les crée ensemble.</p>'}`;
+}
+function bscEditerModele(id){
+  const m = id ? _bsc.modeles.find(x => x.id === id) : { nom: '', description: '', marqueurs: [], conditions: [] };
+  const ov = document.createElement('div'); ov.className = 'modal-overlay'; ov.id = 'modal-bsc';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  const lignesCond = (m.conditions || []).map(c => `${c.marqueur} ${c.op} ${c.valeur} => ${(c.ajouter||[]).join(', ')}${c.motif ? ' | ' + c.motif : ''}`).join('\n');
+  ov.innerHTML = `<div class="modal" style="max-width:560px;width:94%;"><h3 style="margin:0 0 12px;">${id ? 'Modifier' : 'Nouveau'} modèle de bilan</h3>
+    <div class="field-row"><label>Nom</label><input id="bscNom" type="text" value="${esc(m.nom)}" placeholder="ex: Contrôle avant reprise"></div>
+    <div class="field-row"><label>Description (facultatif)</label><input id="bscDesc" type="text" value="${esc(m.description || '')}"></div>
+    <div class="field-row"><label>Marqueurs à doser (un par ligne ou séparés par des virgules)</label><textarea id="bscMarq" rows="6" placeholder="Prolactine&#10;Hématocrite&#10;Gamma GT">${esc((m.marqueurs || []).join('\n'))}</textarea></div>
+    <div class="field-row"><label>Ajouts conditionnels — une ligne par règle : <code>marqueur &gt; seuil =&gt; marqueurs à ajouter | motif</code></label><textarea id="bscCond" rows="4" placeholder="Hématocrite > 50 => Ferritine, Tension | contrôle hématocrite">${esc(lignesCond)}</textarea></div>
+    <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px;">Le seuil est comparé à la dernière valeur connue du client avant l'échéance (opérateurs &gt; ou &lt;).</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn" onclick="document.getElementById('modal-bsc').remove()">Annuler</button><button class="btn primary" onclick="bscSauverModele(${id || 'null'})">Enregistrer</button></div></div>`;
+  document.body.appendChild(ov);
+}
+async function bscSauverModele(id){
+  const nom = document.getElementById('bscNom').value.trim(); if (!nom) { alert('Donne un nom au modèle.'); return; }
+  const conditions = [];
+  for (const l of document.getElementById('bscCond').value.split('\n').map(x => x.trim()).filter(Boolean)) {
+    const mm = l.match(/^(.+?)\s*([><])\s*([\d.,]+)\s*=>\s*([^|]+?)\s*(?:\|\s*(.*))?$/);
+    if (!mm) { alert(`Ligne non comprise : « ${l} »\nFormat : marqueur > seuil => marqueur1, marqueur2 | motif`); return; }
+    conditions.push({ marqueur: mm[1].trim(), op: mm[2], valeur: parseFloat(mm[3].replace(',', '.')), ajouter: _bscListe(mm[4]), motif: (mm[5] || '').trim() });
+  }
+  const corps = { nom, description: document.getElementById('bscDesc').value.trim() || null, marqueurs: _bscListe(document.getElementById('bscMarq').value), conditions };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/bilan_sanguin_modeles${id ? '?id=eq.' + id : ''}`, { method: id ? 'PATCH' : 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(corps) });
+  if (!r.ok) { alert('Enregistrement impossible.'); return; }
+  document.getElementById('modal-bsc').remove(); await _bscMaj();
+}
+async function bscSupprimerModele(id){ if (!confirm('Supprimer ce modèle ? (les règles et échéances liées perdent leur modèle)')) return; await fetch(`${SUPABASE_URL}/rest/v1/bilan_sanguin_modeles?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() }); await _bscMaj(); }
+
+// ── Règles ──
+function _bscReglesHtml(){
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span style="font-size:12.5px;color:var(--text-faint);">Une règle = « à quel moment du protocole, quelle fenêtre, quel bilan ». Les échéances des clients se créent à partir d'elles.</span><button class="btn primary" onclick="bscEditerRegle(null)">+ Nouvelle règle</button></div>
+    ${_bsc.regles.map(r => { const m = _bsc.modeles.find(x => x.id === r.modele_id);
+      const quand = `${r.decalage_semaines === 0 ? 'Au' : (r.decalage_semaines > 0 ? r.decalage_semaines + ' sem. après le' : Math.abs(r.decalage_semaines) + ' sem. avant le')} ${r.ref === 'fin' ? 'fin' : 'début'} du protocole`;
+      return `<div class="table-card" style="padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <b>${esc(r.libelle)}</b><span style="font-size:12px;color:var(--text-faint);flex:1;">${quand} · fenêtre de ${r.duree_fenetre_jours} jours · ${m ? 'modèle « ' + esc(m.nom) + ' »' : '<span style="color:#d9a030;">sans modèle</span>'}${r.note ? ' · ' + esc(r.note) : ''}</span>
+        <button class="btn" onclick="bscEditerRegle(${r.id})">✎ Modifier</button><button class="icon-btn del" onclick="bscSupprimerRegle(${r.id})">${iTrash()}</button></div>`; }).join('') || '<p style="color:var(--text-faint);">Aucune règle pour l\'instant : on les crée ensemble.</p>'}`;
+}
+function bscEditerRegle(id){
+  const r = id ? _bsc.regles.find(x => x.id === id) : { libelle: '', ref: 'debut', decalage_semaines: 0, duree_fenetre_jours: 7, modele_id: null, note: '' };
+  const ov = document.createElement('div'); ov.className = 'modal-overlay'; ov.id = 'modal-bsc';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="modal" style="max-width:520px;width:94%;"><h3 style="margin:0 0 12px;">${id ? 'Modifier' : 'Nouvelle'} règle</h3>
+    <div class="field-row"><label>Libellé</label><input id="bscLib" type="text" value="${esc(r.libelle)}" placeholder="ex: Contrôle à 6 semaines"></div>
+    <div class="field-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label style="margin:0;">Décalage</label><input id="bscDec" type="number" value="${r.decalage_semaines}" style="width:80px;"> semaines
+      <select id="bscRef"><option value="debut" ${r.ref==='debut'?'selected':''}>après le début du protocole</option><option value="fin" ${r.ref==='fin'?'selected':''}>après la fin du protocole</option></select></div>
+    <div style="font-size:11.5px;color:var(--text-faint);margin:-4px 0 10px;">Valeur négative = avant (ex : −1 avec « début » = la semaine qui précède le début).</div>
+    <div class="field-row"><label>Fenêtre pour faire la prise de sang (jours)</label><input id="bscFen" type="number" min="1" value="${r.duree_fenetre_jours}"></div>
+    <div class="field-row"><label>Modèle de bilan</label><select id="bscMod"><option value="">— aucun —</option>${_bsc.modeles.map(m => `<option value="${m.id}" ${m.id===r.modele_id?'selected':''}>${esc(m.nom)}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Note (facultatif)</label><input id="bscNote" type="text" value="${esc(r.note || '')}"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn" onclick="document.getElementById('modal-bsc').remove()">Annuler</button><button class="btn primary" onclick="bscSauverRegle(${id || 'null'})">Enregistrer</button></div></div>`;
+  document.body.appendChild(ov);
+}
+async function bscSauverRegle(id){
+  const libelle = document.getElementById('bscLib').value.trim(); if (!libelle) { alert('Donne un libellé.'); return; }
+  const corps = { libelle, ref: document.getElementById('bscRef').value, decalage_semaines: parseInt(document.getElementById('bscDec').value) || 0, duree_fenetre_jours: Math.max(1, parseInt(document.getElementById('bscFen').value) || 7), modele_id: parseInt(document.getElementById('bscMod').value) || null, note: document.getElementById('bscNote').value.trim() || null };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/bilan_sanguin_regles${id ? '?id=eq.' + id : ''}`, { method: id ? 'PATCH' : 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(corps) });
+  if (!r.ok) { alert('Enregistrement impossible.'); return; }
+  document.getElementById('modal-bsc').remove(); await _bscMaj();
+}
+async function bscSupprimerRegle(id){ if (!confirm('Supprimer cette règle ? (les échéances déjà générées restent)')) return; await fetch(`${SUPABASE_URL}/rest/v1/bilan_sanguin_regles?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() }); await _bscMaj(); }
+
 function renderProtocolePage(el){
   const actifs = data.clients.filter(c=>c.chimieActifSupa);
   const supaClients = data.clients;
+  const onglets = `<div class="chip-filter" style="margin-bottom:16px;">${[['clients','Clients'],['calendrier','Calendrier des bilans'],['modeles','Modèles de bilan'],['regles','Règles']].map(([k,l]) => `<button class="${_protoTab===k?'active':''}" onclick="_protoTab='${k}';renderProtocolePage(document.getElementById('main'))">${l}</button>`).join('')}</div>`;
+  if (_protoTab !== 'clients') {
+    el.innerHTML = `<div class="page-head"><div><div class="eyebrow">Console coach</div><h1>Protocole</h1></div><div class="meta">${actifs.length} actif${actifs.length>1?'s':''}</div></div>${onglets}<div id="bscCorps"><div style="padding:30px;text-align:center;color:var(--text-faint);">Chargement…</div></div>`;
+    _bscRender(el);
+    return;
+  }
   el.innerHTML = `
     <div class="page-head">
       <div><div class="eyebrow">Console coach</div><h1>Protocole</h1></div>
       <div class="meta">${actifs.length} actif${actifs.length>1?'s':''}</div>
     </div>
+    ${onglets}
     <div class="table-card">
       <div class="table-toolbar"><div class="title">Créer / gérer un protocole (tous clients)</div></div>
       <div class="table-scroll"><table class="clients">
