@@ -8828,6 +8828,7 @@ function renderFicheDieteTab(c){
         ${d.brouillon ? `<button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="publierDieteClient(${d.id},'${c.id}')" title="Rend cette diète visible pour le client">✅ Publier</button>` : ''}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="dupliquerDieteClient(${d.id},'${c.id}')" title="Créer une copie indépendante de cette diète pour ce client">Dupliquer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirCopierDieteVersClients(${d.id},'${c.id}')" title="Assigner une copie indépendante de cette diète à un ou plusieurs autres clients">→ Autres clients</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d\\'être mise à jour.')" title="Notifier">🔔</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
       </div>`).join('') : `
@@ -12563,6 +12564,58 @@ async function _dupliquerTemplateDiete(sourceTemplateId, nom){
 // (client_only, jamais partagée) assignée au même client, sous le nom
 // "X (copie)". Réutilise _dupliquerTemplateDiete (même mécanique que
 // l'assignation d'un template depuis la bibliothèque).
+
+// Copie la diète d'un client vers un ou plusieurs autres clients : une copie INDÉPENDANTE par client (nouveau template
+// dédié, même mécanique que « Dupliquer » et « Assigner »), créée en brouillon — jamais visible du client avant
+// ta publication, pour que tu l'adaptes (macros, aliments, grammages) avant.
+function ouvrirCopierDieteVersClients(clientDieteId, sourceClientId){
+  const d = (ficheData.tous_dietes || []).find(x => x.id === clientDieteId);
+  if (!d) return;
+  const autres = data.clients.filter(c => !c.estCoach && c.id !== sourceClientId).sort((a, b) => a.nom.localeCompare(b.nom));
+  const ov = document.createElement('div'); ov.className = 'modal-overlay'; ov.id = 'modal-copie-diete';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="modal-box" style="max-width:460px;">
+    <h3>Copier « ${esc(d.nom || 'Diète')} » vers…</h3>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:8px;">Chaque client reçoit une copie indépendante, en brouillon : tu l'adaptes puis tu la publies. L'original n'est pas touché.</div>
+    <input type="text" id="copieDieteFiltre" placeholder="Filtrer…" oninput="_filtrerCopieDiete(this.value)" style="width:100%;margin-bottom:8px;font-size:16px;">
+    <div id="copieDieteListe" style="max-height:300px;overflow:auto;border:1px solid var(--hairline);border-radius:8px;padding:6px;">
+      ${autres.map(c => `<label class="copie-diete-row" data-nom="${esc(c.nom.toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:6px;"><input type="checkbox" value="${c.id}" style="width:16px;height:16px;"> ${esc(c.nom)}${(c.statut && c.statut !== 'actif') ? ` <span style="font-size:11px;color:var(--text-faint);">(${esc(c.statut)})</span>` : ''}</label>`).join('')}
+    </div>
+    <div id="copieDieteErr" style="display:none;color:var(--critical);font-size:12px;margin-top:8px;"></div>
+    <div class="modal-actions"><button class="btn" onclick="document.getElementById('modal-copie-diete').remove()">Annuler</button>
+      <button class="btn primary" onclick="confirmerCopierDiete(${clientDieteId},'${sourceClientId}')">Copier</button></div></div>`;
+  document.body.appendChild(ov);
+}
+function _filtrerCopieDiete(q){
+  const n = (q || '').toLowerCase().trim();
+  document.querySelectorAll('#copieDieteListe .copie-diete-row').forEach(r => { r.style.display = !n || r.dataset.nom.includes(n) ? 'flex' : 'none'; });
+}
+async function confirmerCopierDiete(clientDieteId, sourceClientId){
+  const err = document.getElementById('copieDieteErr');
+  const cibles = [...document.querySelectorAll('#copieDieteListe input:checked')].map(i => i.value);
+  if (!cibles.length) { err.textContent = 'Coche au moins un client.'; err.style.display = 'block'; return; }
+  const d = (ficheData.tous_dietes || []).find(x => x.id === clientDieteId);
+  try {
+    let tplId = d.diete_template_id;
+    if (!tplId) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/diete_templates?nom=eq.${encodeURIComponent(d.nom)}&order=id.desc&limit=1&select=id`, { headers: supaHeaders() });
+      const tpls = res.ok ? await res.json() : [];
+      if (!tpls.length) throw new Error('Template introuvable pour cette diète.');
+      tplId = tpls[0].id;
+    }
+    for (const cid of cibles) {
+      const newTplId = await _dupliquerTemplateDiete(tplId, d.nom);
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }),
+        body: JSON.stringify({ client_id: cid, nom: d.nom, diete_template_id: newTplId, actif: true, brouillon: true }) });
+      if (!r.ok) throw new Error('Assignation impossible (' + r.status + ').');
+    }
+    document.getElementById('modal-copie-diete').remove();
+    const noms = cibles.map(id => (data.clients.find(c => c.id === id) || {}).nom || id);
+    if (cibles.length === 1) { await openPanel(cibles[0]); setFicheTab('diete'); }
+    alert(`Diète copiée en brouillon pour : ${noms.join(', ')}.\nAdapte-la dans leur fiche puis clique sur « Publier ».`);
+  } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
+}
+
 async function dupliquerDieteClient(clientDieteId, clientId){
   const d = (ficheData.tous_dietes||[]).find(x=>x.id===clientDieteId);
   if (!d) return;
