@@ -35,6 +35,7 @@ let _dAjoutSelection        = null;
 let _dModifIndex            = null; // index dans _dMenuDraft.aliments en cours de modification (null = ajout d'un nouvel aliment)
 let _dCreationNomPrerempli  = '';
 let _dCreationPrefill       = null; // {kcal100,prot100,glu100,sucres100,fibres100,lip100,ags100} posé par un scan avec match Open Food Facts
+let _dCreationOffInfo      = null; // {maj, marque, qte} de la fiche Open Food Facts scannée (affiché dans le formulaire)
 let _dCreationCodeBarre     = null; // code-barres scanné en attente de rattachement au prochain aliment créé
 let _dScanInstance          = null; // instance Html5Qrcode active (pour pouvoir l'arrêter proprement)
 let _dScanStopPromise       = null; // promesse du stop() en cours (voir _arreterScan) — pour que le démarrage suivant attende la libération réelle de la caméra
@@ -1637,7 +1638,7 @@ function renderResultatsAliments(query) {
   if (!q) return _renderAlimentsRecents();
   const results = _rechercherAlimentsLocal(q);
   const rowsHtml = results.map(_renderLigneAliment).join('');
-  const creerBtn = `<button onclick="_dCreationPrefill=null;_dCreationCodeBarre=null;ouvrirCreationAliment('${q.replace(/'/g,"\\'")}')" style="width:100%;margin-top:10px;padding:10px;background:#2d3142;border:none;border-radius:8px;color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;">+ Créer "${esc(q)}" comme nouvel aliment</button>`;
+  const creerBtn = `<button onclick="_dCreationPrefill=null;_dCreationOffInfo=null;_dCreationCodeBarre=null;ouvrirCreationAliment('${q.replace(/'/g,"\\'")}')" style="width:100%;margin-top:10px;padding:10px;background:#2d3142;border:none;border-radius:8px;color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;">+ Créer "${esc(q)}" comme nouvel aliment</button>`;
   if (results.length === 0) {
     return `<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Aucun résultat.</div>${creerBtn}`;
   }
@@ -1892,12 +1893,16 @@ async function _traiterCodeBarre(codeBarre) {
   if (local) { _dScanTraitementEnCours = false; selectionnerAliment(local.nom, local.source); return; }
   _afficherModalAjout(true);
   try {
-    const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(codeBarre) + '.json?fields=product_name,nutriments');
+    const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(codeBarre) + '.json?fields=product_name,nutriments,last_modified_t,brands,quantity');
     const data = await res.json();
     if (data && data.status === 1 && data.product) {
       const n = data.product.nutriments || {};
+      // kcal : valeur kcal de la fiche, sinon dérivée des kJ (1 kcal = 4,184 kJ) — ne jamais retomber sur 0 si les kJ existent.
+      const kj = n['energy-kj_100g'] != null ? n['energy-kj_100g'] : n['energy_100g'];
+      const kcalFiche = n['energy-kcal_100g'] != null ? n['energy-kcal_100g'] : (kj != null ? kj / 4.184 : 0);
+      _dCreationOffInfo = { maj: data.product.last_modified_t || null, marque: data.product.brands || '', qte: data.product.quantity || '' };
       _dCreationPrefill = {
-        kcal100:   Math.round((n['energy-kcal_100g'] || 0) * 10) / 10,
+        kcal100:   Math.round(kcalFiche * 10) / 10,
         prot100:   Math.round((n['proteins_100g'] || 0) * 10) / 10,
         glu100:    Math.round((n['carbohydrates_100g'] || 0) * 10) / 10,
         sucres100: Math.round((n['sugars_100g'] || 0) * 10) / 10,
@@ -1907,6 +1912,7 @@ async function _traiterCodeBarre(codeBarre) {
       };
       _dCreationCodeBarre = codeBarre;
       ouvrirCreationAliment(data.product.product_name || '');
+      setTimeout(_majCoherenceCrea, 0);
     } else {
       _dCreationPrefill = null;
       _dCreationCodeBarre = codeBarre;
@@ -1940,20 +1946,38 @@ function renderModalAjoutCreation() {
       <input id="dCreaNom" type="text" value="${esc(_dCreationNomPrerempli)}" placeholder="ex: Yaourt grec"
         style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
     </div>
+    ${_dCreationCodeBarre && _dCreationOffInfo ? `<div style="font-size:11.5px;color:#a8b0c8;background:#161b2e;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;">Fiche Open Food Facts${_dCreationOffInfo.marque ? ' · ' + esc(_dCreationOffInfo.marque) : ''}${_dCreationOffInfo.maj ? ' · modifiée le ' + new Date(_dCreationOffInfo.maj * 1000).toLocaleDateString('fr-FR') : ''}. Ces données sont saisies par des contributeurs et les recettes changent : <b>compare avec l'étiquette du produit</b> avant de valider.</div>` : ''}
     <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">POUR 100g</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Kcal</div><input id="dCreaKcal" type="text" inputmode="decimal" placeholder="0" value="${v('kcal100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
-      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Protéines (g)</div><input id="dCreaProt" type="text" inputmode="decimal" placeholder="0" value="${v('prot100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
-      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Glucides (g)</div><input id="dCreaGlu" type="text" inputmode="decimal" placeholder="0" value="${v('glu100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Kcal</div><input id="dCreaKcal" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('kcal100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Protéines (g)</div><input id="dCreaProt" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('prot100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Glucides (g)</div><input id="dCreaGlu" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('glu100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
       <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">dont Sucres (g)</div><input id="dCreaSucres" type="text" inputmode="decimal" placeholder="0" value="${v('sucres100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
-      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Lipides (g)</div><input id="dCreaLip" type="text" inputmode="decimal" placeholder="0" value="${v('lip100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Lipides (g)</div><input id="dCreaLip" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('lip100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
       <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">dont AGS (g)</div><input id="dCreaAgs" type="text" inputmode="decimal" placeholder="0" value="${v('ags100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
-      <div style="grid-column:1 / -1;"><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Fibres (g)</div><input id="dCreaFibres" type="text" inputmode="decimal" placeholder="0" value="${v('fibres100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div style="grid-column:1 / -1;"><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Fibres (g)</div><input id="dCreaFibres" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('fibres100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
     </div>
+    <div id="dCreaCoherence" style="display:none;font-size:12px;color:#e8a33d;background:#e8a33d1a;border:1px solid #e8a33d55;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;"></div>
     <div style="font-size:11px;color:#555e7a;margin-bottom:12px;">Sucres, AGS et fibres sont optionnels.</div>
     <div id="dCreaErr" style="display:none;font-size:12px;color:#e05252;margin-bottom:12px;"></div>
     <button onclick="_guardAction(confirmerCreationAliment, this)" style="width:100%;padding:14px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Créer et ajouter</button>
-    <button onclick="_dCreationPrefill=null;_dCreationCodeBarre=null;_dAjoutEtape='recherche';_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
+    <button onclick="_dCreationPrefill=null;_dCreationOffInfo=null;_dCreationCodeBarre=null;_dAjoutEtape='recherche';_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
+}
+
+// Contrôle de cohérence kcal ↔ macros (Atwater : 4×prot + 4×glucides + 9×lipides + 2×fibres) — détecte une fiche mal
+// saisie ou une valeur d'une autre recette avant qu'elle n'entre dans la base partagée.
+function _majCoherenceCrea() {
+  const box = document.getElementById('dCreaCoherence');
+  if (!box) return;
+  const v = id => parseFloat(((document.getElementById(id) || {}).value || '').replace(',', '.')) || 0;
+  const kcal = v('dCreaKcal'), prot = v('dCreaProt'), glu = v('dCreaGlu'), lip = v('dCreaLip'), fib = v('dCreaFibres');
+  const calc = Math.round(prot * 4 + Math.max(0, glu - fib) * 4 + fib * 2 + lip * 9);
+  const ecart = Math.abs(kcal - calc);
+  if (kcal > 0 && calc > 0 && ecart > Math.max(25, calc * 0.12)) {
+    box.style.display = 'block';
+    box.innerHTML = `⚠ Incohérence : tes macros donnent environ <b>${calc} kcal</b> pour 100 g, mais tu as <b>${Math.round(kcal)} kcal</b>. Vérifie les valeurs sur l'emballage.
+      <button onclick="document.getElementById('dCreaKcal').value='${calc}';_majCoherenceCrea()" style="display:block;margin-top:6px;background:#e8a33d;color:#1a1408;border:none;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">Utiliser ${calc} kcal</button>`;
+  } else box.style.display = 'none';
 }
 
 async function confirmerCreationAliment() {
