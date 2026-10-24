@@ -407,11 +407,17 @@
   .arch select { padding-right: 24px; }
   .arch .btn { font-size: 12px; padding: 5px 10px; }
   .arch .table-card { padding: 10px 12px !important; margin-bottom: 8px; }
-  .arch-grille3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(620px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .arch-grille3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(670px, 1fr)); gap: 10px; margin-bottom: 10px; }
   .arch-grille2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom: 10px; }
-  .arch .arch-slot { display: grid; grid-template-columns: 112px minmax(130px, 1.5fr) 44px 62px 64px minmax(80px, 1fr) 24px; gap: 5px; align-items: center; padding: 4px 6px; margin-bottom: 4px; border-radius: 8px; }
+  .arch .arch-slot { display: grid; grid-template-columns: 34px 112px minmax(130px, 1.5fr) 44px 62px 64px minmax(80px, 1fr) 24px; gap: 5px; align-items: center; padding: 4px 6px; margin-bottom: 4px; border-radius: 8px; }
   .arch .arch-slot select.arch-famille { font-size: 11.5px !important; padding: 2px 18px 2px 0; text-overflow: ellipsis; }
   .arch .arch-slot select.arch-dbl { border-color: #d9a030; }
+  .arch .arch-slot.drag-over { outline: 1px dashed var(--accent); background: rgba(242,186,62,.08); }
+  .arch .arch-poignee { display: flex; align-items: center; gap: 1px; }
+  .arch .arch-grip { cursor: grab; color: var(--text-faint); font-size: 13px; line-height: 1; padding: 2px 1px; user-select: none; }
+  .arch .arch-fleches { display: flex; flex-direction: column; }
+  .arch .arch-fleches button { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 10px; line-height: 1; padding: 0 3px; }
+  .arch .arch-fleches button:hover { color: var(--accent); }
   .arch .arch-ligne { padding: 3px 6px; margin-bottom: 3px; font-size: 12px; }
   .arch .arch-ligne .btn { padding: 1px 7px; }
   @media (max-width: 900px) {
@@ -4720,7 +4726,8 @@ function _archStep3(){
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
           const lib = sel ? exercicesData.find(e => e.id === sel) : null;
-          return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};">
+          return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};" ondragover="archDragOver(event)" ondragleave="archDragLeave(event)" ondrop="archDrop(event,'${sl.key}')">
+            <span class="arch-poignee"><span class="arch-grip" draggable="true" ondragstart="archDragStart(event,'${sl.key}')" title="Glisser pour déplacer (même séance ou autre séance)">⠿</span><span class="arch-fleches"><button onclick="archDeplacerSlot('${sl.key}',-1)" title="Monter">▴</button><button onclick="archDeplacerSlot('${sl.key}',1)" title="Descendre">▾</button></span></span>
             <select class="arch-famille" title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
             <select ${dbl ? 'class="arch-dbl" title="Déjà utilisé ailleurs dans la semaine"' : ''} onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
             <select title="Séries" onchange="archSeries('${sl.key}',this.value)">${[1,2,3,4].map(n => `<option ${(_arch.series[sl.key]||3)===n?'selected':''}>${n}</option>`).join('')}</select>
@@ -4787,6 +4794,42 @@ function archChangerGroupe(key, f){
   const slot = g.slots[k]; slot.choix = undefined;
   if (g.slots.length === 1) { g.g = f; }
   else { g.slots.splice(k, 1); n[si].splice(gi + 1, 0, { g: f, slots: [slot] }); }
+  _archFromNested(n); renderArchitectureSub();
+}
+
+// Réordonner les exercices : ↑/↓ ou glisser-déposer (poignée ⠿), au sein d'une séance ou vers une autre séance.
+// À plat, la séance est une liste d'emplacements ; on déplace dans cette liste puis on regroupe les emplacements
+// consécutifs de même groupe musculaire (les choix, séries, tempos… suivent chaque emplacement).
+function _archAplatir(n, si){ const out = []; n[si].forEach(g => g.slots.forEach(sl => out.push({ g: g.g, d: sl }))); return out; }
+function _archRegrouper(flat){
+  const groupes = [];
+  flat.forEach(it => { const last = groupes[groupes.length - 1]; if (last && last.g === it.g) last.slots.push(it.d); else groupes.push({ g: it.g, slots: [it.d] }); });
+  return groupes;
+}
+function _archIdxPlat(n, si, gi, k){ let i = 0; for (let a = 0; a < gi; a++) i += n[si][a].slots.length; return i + k; }
+function archDeplacerSlot(key, dir){
+  const [si, gi, k] = key.split('|').map(Number);
+  const n = _archToNested(); const flat = _archAplatir(n, si);
+  const i = _archIdxPlat(n, si, gi, k), j = i + dir;
+  if (j < 0 || j >= flat.length) return;
+  [flat[i], flat[j]] = [flat[j], flat[i]];
+  n[si] = _archRegrouper(flat); _archFromNested(n); renderArchitectureSub();
+}
+let _archDragKey = null;
+function archDragStart(e, key){ _archDragKey = key; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', key); } catch(_) {} }
+function archDragOver(e){ e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function archDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+function archDrop(e, dstKey){
+  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
+  const srcKey = _archDragKey; _archDragKey = null;
+  if (!srcKey || srcKey === dstKey) return;
+  const [ss, sg, sk] = srcKey.split('|').map(Number), [ds, dg, dk] = dstKey.split('|').map(Number);
+  const n = _archToNested();
+  const srcFlat = _archAplatir(n, ss); const iSrc = _archIdxPlat(n, ss, sg, sk);
+  const dstFlatOrig = _archAplatir(n, ds); let iDst = _archIdxPlat(n, ds, dg, dk);
+  const [item] = srcFlat.splice(iSrc, 1);
+  if (ss === ds) { if (iSrc < iDst) iDst--; iDst += (iSrc < _archIdxPlat(n, ds, dg, dk)) ? 1 : 0; srcFlat.splice(iDst, 0, item); n[ss] = _archRegrouper(srcFlat); }
+  else { n[ss] = _archRegrouper(srcFlat); const dstFlat = _archAplatir(n, ds); dstFlat.splice(iDst, 0, item); n[ds] = _archRegrouper(dstFlat); }
   _archFromNested(n); renderArchitectureSub();
 }
 function archChoisirExo(key, id){ if (id) _arch.choix[key] = parseInt(id); else delete _arch.choix[key]; renderArchitectureSub(); }
