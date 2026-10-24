@@ -407,9 +407,9 @@
   .arch select { padding-right: 24px; }
   .arch .btn { font-size: 12px; padding: 5px 10px; }
   .arch .table-card { padding: 10px 12px !important; margin-bottom: 8px; }
-  .arch-grille3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(670px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .arch-grille3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(700px, 1fr)); gap: 10px; margin-bottom: 10px; }
   .arch-grille2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom: 10px; }
-  .arch .arch-slot { display: grid; grid-template-columns: 34px 112px minmax(130px, 1.5fr) 44px 62px 64px minmax(80px, 1fr) 24px; gap: 5px; align-items: center; padding: 4px 6px; margin-bottom: 4px; border-radius: 8px; }
+  .arch .arch-slot { display: grid; grid-template-columns: 62px 112px minmax(130px, 1.5fr) 44px 62px 64px minmax(80px, 1fr) 24px; gap: 5px; align-items: center; padding: 4px 6px; margin-bottom: 4px; border-radius: 8px; }
   .arch .arch-slot select.arch-famille { font-size: 11.5px !important; padding: 2px 18px 2px 0; text-overflow: ellipsis; }
   .arch .arch-slot select.arch-dbl { border-color: #d9a030; }
   .arch .arch-slot.drag-over { outline: 1px dashed var(--accent); background: rgba(242,186,62,.08); }
@@ -425,6 +425,10 @@
     .arch .arch-slot { grid-template-columns: 1fr 1fr; }
     .arch-grille3 { grid-template-columns: 1fr; }
   }
+  .arch .arch-bloc-tab { background: rgba(255,255,255,.03); border: 1px solid var(--hairline); border-bottom: 3px solid var(--bc, #8892a4); color: var(--text-muted, #aaa); border-radius: 8px 8px 0 0; padding: 6px 12px; cursor: pointer; font-size: 12.5px; font-family: inherit; }
+  .arch .arch-bloc-tab.active { color: var(--text); background: var(--surface-2); font-weight: 700; }
+  .arch .arch-ss { background: transparent; border: 1px solid transparent; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; padding: 1px 4px; line-height: 1.2; margin-left: 2px; }
+  .arch .arch-ss:hover { border-color: var(--hairline); }
 </style>
 </head>
 <body>
@@ -4525,14 +4529,15 @@ function _archTriSuggestion(fam, cands){
 }
 let _arch = null;
 
-function _archRaz(){ _arch.choix = {}; _arch.series = {}; _arch.tempo = {}; _arch.notes = {}; _arch.reps = {}; _arch.repos = {}; _arch.rir = {}; _arch.ss = {}; }
+function _archRaz(){ _arch.choix = {}; _arch.series = {}; _arch.tempo = {}; _arch.notes = {}; _arch.reps = {}; _arch.repos = {}; _arch.rir = {}; _arch.ss = {}; _arch.ids = {}; }
 function _archPreset(cle){
   const p = ARCH_PRESETS[cle];
   return p.seances.map(([titre, gr]) => ({ titre, groupes: Object.entries(gr).map(([g, n]) => ({ g, n })) }));
 }
-function _archInit(){
-  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, reps:{}, repos:{}, rir:{}, ss:{}, source:null, nom:'', clientId:'', draftId:null, categorie:'', blocType:'metabolique', nbSemaines:6 };
+function _archNouvelEtat(){
+  return { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, reps:{}, repos:{}, rir:{}, ss:{}, ids:{}, source:null, nom:'', clientId:'', draftId:null, categorie:'', blocType:'metabolique', nbSemaines:6, blocId:null, edition:false };
 }
+function _archInit(){ _arch = _archNouvelEtat(); }
 function _archExosFamille(fam){
   return (exercicesData||[]).filter(e => fam === 'Epaules' ? (e.groupe_musculaire||'').startsWith('Epaules') : e.groupe_musculaire === fam);
 }
@@ -4573,7 +4578,8 @@ function archNouveau(){ _archInit(); renderArchitectureSub(); }
 async function archReprendre(id){
   const b = (_archBrouillons || []).find(x => x.id === id);
   if (!b) return;
-  _arch = Object.assign({ reps:{}, repos:{}, rir:{}, ss:{}, source:null }, b.etat, { draftId: b.id, nom: b.nom, clientId: b.client_id || '' });
+  _arch = Object.assign({ reps:{}, repos:{}, rir:{}, ss:{}, ids:{}, source:null, blocId:null, edition:false }, b.etat, { draftId: b.id, nom: b.nom, clientId: b.client_id || '', edition:false, blocId:null, ids:{} });
+  _arch.seances.forEach(se => { delete se.id; se.extras = []; });
   if (exercicesData === null) exercicesData = await chargerExercices();
   renderArchitectureSub();
 }
@@ -4627,14 +4633,14 @@ function _archAccueil(){
 
 async function renderArchitectureSub(){
   const sub = document.getElementById('progrSub');
-  if (!_arch) {
+  if (!_arch && !_archEd) {
     if (_archBrouillons === null) { sub.innerHTML = `<div class="arch">${_archAccueil()}</div>`; await _archChargerBrouillons(); }
     sub.innerHTML = `<div class="arch">${_archAccueil()}</div>`;
     return;
   }
-  const labels = ['Architecture','Répartition','Exercices','Programme final'];
+  const labels = ['Architecture','Répartition','Exercices', _archEd ? 'Enregistrer' : 'Programme final'];
   const stepper = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">${labels.map((l,i) => `<button class="btn ${_arch.step===i+1?'primary':''}" ${i+1<_arch.step?`onclick="archGo(${i+1})"`:''} style="font-size:12px;${i+1>_arch.step?'opacity:.5;cursor:default;':''}">${i+1}. ${l}</button>`).join('')}</div>`;
-  const entete = `${_arch.source ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:6px;">🧩 Base : ${esc(_arch.source.progNom)} · ${esc(_arch.source.blocLabel)} — le programme d'origine n'est pas modifié tant que tu ne crées pas la nouvelle version.</div>` : ''}<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+  const entete = _archEd ? _archEdEntete() : `${_arch.source ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:6px;">🧩 Base : ${esc(_arch.source.progNom)} · ${esc(_arch.source.blocLabel)} — le programme d'origine n'est pas modifié tant que tu ne crées pas la nouvelle version.</div>` : ''}<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
     <input type="text" value="${esc(_arch.nom)}" placeholder="Nom du programme / du brouillon (ex: Claire Chapus — 4 séances)" oninput="_arch.nom=this.value" style="flex:1;min-width:220px;font-size:16px;">
     <select onchange="_arch.clientId=this.value" style="font-size:16px;max-width:200px;"><option value="">Pour… (facultatif)</option>${data.clients.filter(c=>!c.estCoach).map(c => `<option value="${c.id}" ${_arch.clientId===c.id?'selected':''}>${esc(c.nom)}</option>`).join('')}</select>
     <button class="btn" onclick="archEnregistrerBrouillon(false)">💾 Enregistrer en brouillon</button>
@@ -4655,7 +4661,7 @@ function _archStep1(){
   return `<div class="table-card" style="padding:18px;margin-bottom:14px;">
     <div style="font-weight:700;margin-bottom:4px;">Structure de la semaine ${_arch.preset === 'custom' ? '<span style="font-size:11px;font-weight:600;color:var(--accent);margin-left:6px;">· ta structure (personnalisée)</span>' : ''}</div>
     <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;">Ta structure actuelle est affichée ci-dessous : renomme, ajoute ou retire des séances. Les modèles servent seulement de point de départ et remplacent la structure (une confirmation est demandée).</div>
-    <div class="chip-filter" style="margin-bottom:14px;">${presets.map(([k,p]) => `<button class="${_arch.preset===k?'active':''}" onclick="archChoisirPreset('${k}')">${p.nb} séances · ${esc(p.label)}</button>`).join('')}</div>
+    ${_arch.edition ? '' : `<div class="chip-filter" style="margin-bottom:14px;">${presets.map(([k,p]) => `<button class="${_arch.preset===k?'active':''}" onclick="archChoisirPreset('${k}')">${p.nb} séances · ${esc(p.label)}</button>`).join('')}</div>`}
     ${_arch.seances.map((s, i) => `<div style="margin-bottom:8px;"><div style="display:flex;align-items:center;gap:8px;">
       <span style="width:70px;font-size:12px;color:var(--text-faint);">Séance ${i+1}</span>
       <input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${i}].titre=this.value" style="flex:1;">
@@ -4720,17 +4726,20 @@ function _archStep3(){
   Object.values(_arch.choix).forEach(id => { utiliseCount[id] = (utiliseCount[id]||0) + 1; });
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-faint);">Chaque exercice doit apporter un angle ou un profil de résistance différent. Les doublons sur la semaine sont signalés.</div>
-      <button class="btn" onclick="archPrerempli()">✨ Pré-remplir automatiquement</button></div>
+      ${_arch.edition ? '' : `<button class="btn" onclick="archPrerempli()">✨ Pré-remplir automatiquement</button>`}</div>
+    ${_arch.edition ? _archVolumeHtml() : ''}
     <div class="arch-grille3">
     ${_arch.seances.map((s, si) => {
       const slots = _archSlots().filter(x => x.si === si);
+      const ssInfos = _archSsInfos(si);
       const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
       return `<div class="table-card" style="padding:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
           const lib = sel ? exercicesData.find(e => e.id === sel) : null;
           return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};" ondragover="archDragOver(event)" ondragleave="archDragLeave(event)" ondrop="archDrop(event,'${sl.key}')">
-            <span class="arch-poignee"><span class="arch-grip" draggable="true" ondragstart="archDragStart(event,'${sl.key}')" title="Glisser pour déplacer (même séance ou autre séance)">⠿</span><span class="arch-fleches"><button onclick="archDeplacerSlot('${sl.key}',-1)" title="Monter">▴</button><button onclick="archDeplacerSlot('${sl.key}',1)" title="Descendre">▾</button></span></span>
+            <span class="arch-poignee"><span class="arch-grip" draggable="true" ondragstart="archDragStart(event,'${sl.key}')" title="Glisser pour déplacer (même séance ou autre séance)">⠿</span><span class="arch-fleches"><button onclick="archDeplacerSlot('${sl.key}',-1)" title="Monter">▴</button><button onclick="archDeplacerSlot('${sl.key}',1)" title="Descendre">▾</button></span>
+              <button class="arch-ss" style="${ssInfos[sl.key] ? `background:${ssInfos[sl.key].couleur};color:#fff;` : (_archSsPending===sl.key ? 'background:var(--accent);color:#000;' : '')}" title="${ssInfos[sl.key] ? 'Superset ' + ssInfos[sl.key].label + ' — cliquer pour délier' : (_archSsPending ? 'Cliquer pour lier à l\'exercice sélectionné' : 'Lier en superset à un autre exercice de la séance')}" onclick="archToggleSuperset('${sl.key}')">${ssInfos[sl.key] ? ssInfos[sl.key].label : '🔗'}</button></span>
             <select class="arch-famille" title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
             <select ${dbl ? 'class="arch-dbl" title="Déjà utilisé ailleurs dans la semaine"' : ''} onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
             <select title="Séries" onchange="archSeries('${sl.key}',this.value)">${[1,2,3,4].map(n => `<option ${(_arch.series[sl.key]||3)===n?'selected':''}>${n}</option>`).join('')}</select>
@@ -4739,6 +4748,7 @@ function _archStep3(){
             <input type="text" value="${esc(_arch.notes[sl.key]||'')}" placeholder="Commentaire" oninput="_arch.notes['${sl.key}']=this.value">
             <button class="icon-btn del" onclick="archRetirerSlot('${sl.key}')" title="Retirer cet exercice">${iTrash()}</button>
           </div>`; }).join('')}
+        ${(s.extras && s.extras.length) ? `<div style="font-size:11.5px;color:var(--text-faint);padding:3px 6px;" title="Ces exercices ne sont pas dans la bibliothèque : ils sont conservés tels quels dans le programme mais ne sont pas modifiables ici">📌 ${s.extras.length} exercice${s.extras.length>1?'s':''} hors bibliothèque conservé${s.extras.length>1?'s':''} : ${s.extras.map(x => esc(x.nom||'?')).join(', ')}</div>` : ''}
         <select onchange="archAjouterSlot(${si},this.value);this.value=''" style="width:100%;margin-top:2px;"><option value="">+ Ajouter un exercice (choisir le groupe)…</option>${ARCH_FAMILLES.map(f => `<option>${esc(f)}</option>`).join('')}</select>
       </div>`; }).join('')}
     </div>
@@ -4749,7 +4759,7 @@ function _archStep3(){
 // _archToNested() puis _archFromNested(), qui réécrit les clés et CONSERVE les exercices déjà choisis.
 function _archToNested(){
   return _arch.seances.map((s, si) => s.groupes.map((g, gi) => ({ g: g.g, slots: Array.from({ length: g.n }, (_, k) => { const kk = `${si}|${gi}|${k}`;
-    return { choix: _arch.choix[kk], series: _arch.series[kk], tempo: _arch.tempo[kk], notes: _arch.notes[kk], reps: _arch.reps[kk], repos: _arch.repos[kk], rir: _arch.rir[kk], ss: _arch.ss[kk] }; }) })));
+    return { choix: _arch.choix[kk], series: _arch.series[kk], tempo: _arch.tempo[kk], notes: _arch.notes[kk], reps: _arch.reps[kk], repos: _arch.repos[kk], rir: _arch.rir[kk], ss: _arch.ss[kk], id: (_arch.ids||{})[kk] }; }) })));
 }
 function _archFromNested(nested){
   _arch.preset = 'custom';
@@ -4760,10 +4770,10 @@ function _archFromNested(nested){
     gs.forEach((g, gi) => g.slots.forEach((d, k) => { const kk = `${si}|${gi}|${k}`;
       if (d.choix != null) _arch.choix[kk] = d.choix; if (d.series != null) _arch.series[kk] = d.series;
       if (d.tempo) _arch.tempo[kk] = d.tempo; if (d.notes) _arch.notes[kk] = d.notes;
-      if (d.reps) _arch.reps[kk] = d.reps; if (d.repos) _arch.repos[kk] = d.repos; if (d.rir) _arch.rir[kk] = d.rir; if (d.ss != null) _arch.ss[kk] = d.ss; }));
+      if (d.reps) _arch.reps[kk] = d.reps; if (d.repos) _arch.repos[kk] = d.repos; if (d.rir) _arch.rir[kk] = d.rir; if (d.ss != null) _arch.ss[kk] = d.ss; if (d.id) _arch.ids[kk] = d.id; }));
   });
 }
-const _archSlotVide = () => ({ choix: undefined, series: 3, tempo: '', notes: '' });
+const _archSlotVide = () => ({ choix: undefined, series: 3, tempo: '', notes: '', id: undefined });
 function archNbExos(si, gi, d){
   const n = _archToNested(); const sl = n[si][gi].slots;
   if (d > 0 && sl.length < 6) sl.push(_archSlotVide()); else if (d < 0 && sl.length > 1) sl.pop();
@@ -4840,15 +4850,17 @@ function archChoisirExo(key, id){ if (id) _arch.choix[key] = parseInt(id); else 
 function archSeries(key, v){ _arch.series[key] = parseInt(v); renderArchitectureSub(); }
 
 // Étape 4 — programme final
-function _archBuildTpl(){
-  const bloc = { type:_arch.blocType, nombre_semaines:_arch.nbSemaines, seances: _arch.seances.map((s, si) => ({
-    titre: `Séance ${si+1} - ${s.titre}`,
+function _archBuildTpl(modeEdition){
+  const bloc = { id:_arch.blocId||null, type:_arch.blocType, nombre_semaines:_arch.nbSemaines, seances: _arch.seances.map((s, si) => ({
+    id: modeEdition ? s.id : undefined,
+    titre: modeEdition ? s.titre : `Séance ${si+1} - ${s.titre}`,
     exercices: _archSlots().filter(x => x.si === si && _arch.choix[x.key]).map(sl => {
       const e = exercicesData.find(x => x.id === _arch.choix[sl.key]);
-      return { exercice_id:e.id, nom:e.nom, groupe_musculaire:e.groupe_musculaire||null, series:_arch.series[sl.key]||3, reps:'', repos:'', tempo:'', rir:'', notes:'', superset_groupe:null, _key:sl.key };
-    }) })) };
-  _appliquerTypeAuxExercicesDuBloc(bloc, exercicesData);
+      return { id: modeEdition ? (_arch.ids||{})[sl.key] : undefined, exercice_id:e.id, nom:e.nom, groupe_musculaire:e.groupe_musculaire||null, series:_arch.series[sl.key]||3, reps:'', repos:'', tempo:'', rir:'', notes:'', superset_groupe:null, _key:sl.key };
+    }).concat(modeEdition ? (s.extras || []) : []) })) };
+  _appliquerTypeAuxExercicesDuBloc({ type: bloc.type, seances: bloc.seances.map(se => ({ exercices: se.exercices.filter(x => x._key !== undefined) })) }, exercicesData);
   bloc.seances.forEach(se => se.exercices.forEach(ex => { // tempo/commentaire saisis par le coach : priment sur les valeurs par défaut
+    if (ex._key === undefined) return; // exercice hors bibliothèque conservé tel quel
     if (_arch.tempo[ex._key]) ex.tempo = _arch.tempo[ex._key];
     if (_arch.notes[ex._key]) ex.notes = _arch.notes[ex._key];
     if (_arch.reps[ex._key]) ex.reps = _arch.reps[ex._key];
@@ -4858,7 +4870,21 @@ function _archBuildTpl(){
     delete ex._key; }));
   return { id:null, nom:(_arch.nom||'').trim(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
 }
+function _archStep4Edition(){
+  const tpl = _archBuildTpl(true);
+  return `${_archVolumeHtml()}${tpl.blocs[0].seances.map(se => `<div class="table-card"><b>${esc(se.titre)}</b>
+    ${se.exercices.map(e => `<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;border-bottom:1px solid var(--hairline);"><span>${esc(e.nom)} <span style="color:var(--text-faint);font-size:11px;">${esc(e.groupe_musculaire||'hors bibliothèque')}</span></span><span style="color:var(--text-faint);">${e.series} × ${esc(e.reps||'')} · ${esc(e.repos||'')} · RIR ${esc(e.rir||'')}${e.tempo?' · tempo '+esc(e.tempo):''}</span></div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;">Aucun exercice.</div>'}</div>`).join('')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;margin-top:12px;">
+      <button class="btn" onclick="archGo(3)">← Retour</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" onclick="archEnregistrerBrouillon(false)" title="Enregistre CE BLOC comme brouillon de nouvelle version">💾 Ce bloc en brouillon</button>
+        <button class="btn" onclick="archValiderPourClient()" title="Crée un nouveau programme pour ce client à partir de ce bloc (l'actuel est désactivé)">✅ Créer comme nouvelle version</button>
+        <button class="btn primary" onclick="archEdEnregistrer()">💾 Enregistrer sur le programme (conserve les logs)</button>
+      </div></div>
+    <div id="archErr" style="display:none;color:var(--critical);font-size:12px;margin-top:10px;"></div>`;
+}
 function _archStep4(){
+  if (_archEd) return _archStep4Edition();
   if (!_arch.nom) _arch.nom = `Programme ${_arch.seances.length} séances`;
   const tpl = _archBuildTpl();
   const tot = _archSeriesEst();
@@ -4933,10 +4959,165 @@ async function archValiderPourClient(){
     if (templatesData === null) templatesData = await chargerTemplates(); else templatesData.push(saved);
     await assignerTemplateAuClient(saved.id, client.id);
     if (_arch.draftId) await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${_arch.draftId}`, { method:'DELETE', headers: supaHeaders() }).catch(() => {});
-    _arch = null; _archBrouillons = null;
+    _arch = null; _archEd = null; _archBrouillons = null;
     openPanel(client.id).then(() => setFicheTab('programmes'));
   } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
 }
+
+// ═══ Édition en place d'un programme client dans Architecture ═══════════════════════════════════
+// Même vue d'ensemble que la construction guidée, mais sur le programme réel du client : tous les blocs en
+// onglets, enregistrement via sauvegarderProgrammeClient (met à jour les exercices existants par id, ajoute les
+// nouveaux, supprime les retirés → les logs du client sont conservés). Un exercice sans équivalent dans la
+// bibliothèque est conservé tel quel (affiché en grisé, non modifiable ici).
+let _archEd = null; // { cp, cur, states:[_arch…] }
+const _ARCH_BLOC_LABEL = { metabolique:'Métabolique', mecanique:'Mécanique', force:'Force' };
+
+function _archEdEtatBloc(bloc, cp){
+  const e = _archNouvelEtat();
+  e.edition = true; e.preset = 'custom'; e.step = 3;
+  e.blocId = bloc.id || null; e.blocType = bloc.type || ''; e.nbSemaines = bloc.nombre_semaines || 6;
+  e.clientId = cp.client_id; e.source = { clientId: cp.client_id, progId: cp.id, progNom: cp.nom, blocLabel: _ARCH_BLOC_LABEL[bloc.type] || 'Bloc' };
+  const prev = _arch; _arch = e;
+  e.seances = bloc.seances.map(se => ({ titre: se.titre, id: se.id, extras: [], groupes: [] }));
+  const nested = bloc.seances.map((se, si) => {
+    const groupes = [];
+    se.exercices.forEach(ex => {
+      const lib = exercicesData.find(l => l.id === ex.exercice_id) || exercicesData.find(l => l.nom.toLowerCase() === (ex.nom||'').toLowerCase());
+      if (!lib || !lib.groupe_musculaire) { e.seances[si].extras.push(ex); return; }
+      const f = lib.groupe_musculaire;
+      let g = groupes[groupes.length - 1];
+      if (!g || g.g !== f) { g = { g: f, slots: [] }; groupes.push(g); }
+      g.slots.push({ choix: lib.id, series: parseInt(ex.series) || 3, tempo: ex.tempo || '', notes: ex.notes || '', reps: ex.reps || '', repos: ex.repos || '', rir: ex.rir || '', ss: ex.superset_groupe ?? undefined, id: ex.id });
+    });
+    return groupes;
+  });
+  _archFromNested(nested);
+  e.preset = 'custom';
+  _arch = prev;
+  return e;
+}
+async function ouvrirEditionArchitecture(progId){
+  if (_archEd && !confirm('Une édition de programme est déjà ouverte : elle sera remplacée (les modifications non enregistrées seront perdues). Continuer ?')) return;
+  if (!(await _cpCharger(progId))) return;
+  const cp = clientProgEnEdition;
+  _archEd = { cp, cur: 0, states: cp.blocs.map(b => _archEdEtatBloc(b, cp)) };
+  if (!_archEd.states.length) _archEd.states.push(_archEdEtatBloc({ id: null, type: '', nombre_semaines: null, seances: [{ id: null, titre: 'Séance 1', exercices: [] }] }, cp));
+  const actif = cp.blocs.findIndex(b => b.id && b.id === cp.bloc_actif_id);
+  _archEd.cur = actif >= 0 ? actif : 0;
+  _arch = _archEd.states[_archEd.cur];
+  progTab = 'architecture';
+  state.selected = cp.client_id;
+  setNav('programmes');
+}
+function archEdSelectionner(i){ _archEd.states[_archEd.cur] = _arch; _archEd.cur = i; _arch = _archEd.states[i]; renderArchitectureSub(); }
+function archEdAjouterBloc(mode){ // 'copie' = duplique le bloc courant (sans ids) ; 'vide' = mêmes séances, sans exercices
+  const copie = JSON.parse(JSON.stringify(_arch));
+  copie.blocId = null; copie.ids = {}; copie.draftId = null;
+  copie.seances.forEach(se => { se.id = undefined; se.extras = (se.extras || []).map(x => Object.assign({}, x, { id: undefined })); });
+  if (mode === 'vide') { copie.choix = {}; copie.series = {}; copie.tempo = {}; copie.notes = {}; copie.reps = {}; copie.repos = {}; copie.rir = {}; copie.ss = {}; copie.seances.forEach(se => { se.extras = []; }); }
+  const suite = { metabolique: 'mecanique', mecanique: 'force', force: 'metabolique' };
+  copie.blocType = suite[_arch.blocType] || 'metabolique'; copie.nbSemaines = _arch.nbSemaines || 6;
+  _archEd.states[_archEd.cur] = _arch;
+  _archEd.states.push(copie); _archEd.cur = _archEd.states.length - 1; _arch = copie;
+  renderArchitectureSub();
+}
+function archEdRetirerBloc(){
+  if (_archEd.states.length <= 1) { alert('Il faut garder au moins un bloc.'); return; }
+  if (!confirm('Retirer ce bloc du programme ? (appliqué quand tu enregistres)')) return;
+  _archEd.states.splice(_archEd.cur, 1); _archEd.cur = Math.max(0, _archEd.cur - 1); _arch = _archEd.states[_archEd.cur];
+  renderArchitectureSub();
+}
+function _archEdAppliquer(){
+  _archEd.states[_archEd.cur] = _arch;
+  const sauve = _arch;
+  _archEd.cp.blocs = _archEd.states.map(st => { _arch = st; const b = _archBuildTpl(true).blocs[0]; return b; });
+  _arch = sauve;
+}
+async function archEdEnregistrer(){
+  const err = document.getElementById('archErr');
+  _archEdAppliquer();
+  const cp = _archEd.cp;
+  if (!(cp.nom || '').trim()) { alert('Donne un nom au programme.'); return; }
+  await sauvegarderProgrammeClient();
+  if (state.nav === 'fiche-client') { _archEd = null; _arch = null; }
+}
+async function archEdBlocActif(){
+  _archEdAppliquer();
+  const b = _archEd.cp.blocs[_archEd.cur];
+  if (!b || !b.id) { alert("Enregistre d'abord le programme : ce bloc n'existe pas encore."); return; }
+  _archEd.cp.bloc_actif_id = b.id;
+  await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${_archEd.cp.id}`, { method:'PATCH', headers: supaHeaders(), body: JSON.stringify({ bloc_actif_id: b.id }) });
+  renderArchitectureSub();
+}
+async function archEdCharges(){
+  _archEdAppliquer();
+  await cpCalculerCharges(_archEd.cur);
+}
+function archEdQuitter(){
+  if (!confirm('Quitter sans enregistrer ? Les modifications faites ici seront perdues.')) return;
+  const cid = _archEd.cp.client_id; _archEd = null; _arch = null;
+  state.nav = 'fiche-client'; state.selected = cid; ficheTab = 'programmes'; renderSidebar(); renderMain();
+}
+function archEdAncienEditeur(){
+  if (!confirm("Ouvrir l'ancien éditeur ? Les modifications faites ici (non enregistrées) seront perdues.")) return;
+  const id = _archEd.cp.id; _archEd = null; _arch = null; ouvrirEditeurProgrammeClient(id);
+}
+function _archEdEntete(){
+  const cp = _archEd.cp;
+  const blocs = _archEd.states.map((st, i) => {
+    const c = (BLOC_COLOR[st.blocType] || '#8892a4'); const actif = st.blocId && st.blocId === cp.bloc_actif_id;
+    return `<button class="arch-bloc-tab ${i===_archEd.cur?'active':''}" style="--bc:${c};" onclick="archEdSelectionner(${i})">${actif?'⭐ ':''}Bloc ${i+1} · ${esc(_ARCH_BLOC_LABEL[st.blocType] || 'Sans type')}${st.nbSemaines ? ' · ' + st.nbSemaines + ' sem' : ''}</button>`;
+  }).join('');
+  const c = data.clients.find(x => x.id === cp.client_id);
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+      <span style="font-size:12px;color:var(--text-faint);">✏️ Édition en place${c ? ' · ' + esc(c.nom) : ''}</span>
+      <input type="text" value="${esc(cp.nom)}" oninput="_archEd.cp.nom=this.value" placeholder="Nom du programme" style="flex:1;min-width:200px;font-weight:700;">
+      <button class="btn primary" onclick="archEdEnregistrer()">💾 Enregistrer</button>
+      <button class="btn" onclick="archEdQuitter()">✕ Quitter</button>
+      <button class="btn" onclick="archEdAncienEditeur()" title="Revenir à l'ancien éditeur (modifs non enregistrées perdues)" style="opacity:.7;">Ancien éditeur</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">${blocs}
+      <button class="btn" onclick="archEdAjouterBloc('copie')" title="Nouveau bloc = copie du bloc courant">+ Bloc (copie)</button>
+      <button class="btn" onclick="archEdAjouterBloc('vide')" title="Nouveau bloc avec les mêmes séances, sans exercices">+ Bloc vide</button></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <span style="font-size:12px;color:var(--text-faint);">Ce bloc :</span>
+      <select onchange="_arch.blocType=this.value;renderArchitectureSub()"><option value="" ${!_arch.blocType?'selected':''}>Sans type</option>${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${_ARCH_BLOC_LABEL[t]}</option>`).join('')}</select>
+      <input type="number" min="1" max="12" value="${_arch.nbSemaines || ''}" placeholder="Sem." style="width:64px;" oninput="_arch.nbSemaines=parseInt(this.value)||null" title="Nombre de semaines">
+      <button class="btn" onclick="archEdBlocActif()">⭐ Définir actif</button>
+      ${_archEd.cur > 0 ? `<button class="btn" onclick="archEdCharges()" title="Estime les charges de départ (S1) depuis la dernière semaine loggée du bloc précédent (Brzycki)">🧮 Calculer les charges</button>` : ''}
+      <button class="btn" onclick="archEdRetirerBloc()" style="color:var(--critical);">Retirer ce bloc</button></div>`;
+}
+// Supersets (🔗) : clic sur un exercice puis sur un second de la même séance ; reclic sur un exercice lié pour délier.
+let _archSsPending = null;
+const _ARCH_SS_COULEURS = ['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#06b6d4'];
+function _archSsInfos(si){
+  const slots = _archSlots().filter(x => x.si === si); const cnt = {};
+  slots.forEach(sl => { const g = _arch.ss[sl.key]; if (g != null) cnt[g] = (cnt[g]||0) + 1; });
+  const ordre = []; slots.forEach(sl => { const g = _arch.ss[sl.key]; if (g != null && cnt[g] > 1 && !ordre.includes(g)) ordre.push(g); });
+  const out = {}; slots.forEach(sl => { const g = _arch.ss[sl.key]; if (g != null && ordre.includes(g)) { const i = ordre.indexOf(g); out[sl.key] = { label: String.fromCharCode(65 + i), couleur: _ARCH_SS_COULEURS[i % _ARCH_SS_COULEURS.length] }; } });
+  return out;
+}
+function archToggleSuperset(key){
+  const si = key.split('|')[0];
+  if (_arch.ss[key] != null) {
+    const g = _arch.ss[key]; delete _arch.ss[key];
+    const reste = _archSlots().filter(x => x.si === +si && _arch.ss[x.key] === g);
+    if (reste.length === 1) delete _arch.ss[reste[0].key];
+    _archSsPending = null;
+  } else if (_archSsPending && _archSsPending !== key && _archSsPending.split('|')[0] === si) {
+    let g = _arch.ss[_archSsPending];
+    if (g == null) { g = _supersetIdCounter++; _arch.ss[_archSsPending] = g; }
+    _arch.ss[key] = g; _archSsPending = null;
+  } else _archSsPending = (_archSsPending === key) ? null : key;
+  renderArchitectureSub();
+}
+function _archVolumeHtml(){
+  const tot = {};
+  _archSlots().forEach(sl => { if (_arch.choix[sl.key]) tot[sl.g] = (tot[sl.g]||0) + (parseInt(_arch.series[sl.key]) || 0); });
+  const chips = Object.entries(tot).map(([g, n]) => { const z = _archZone(n); return `<span style="display:inline-flex;gap:5px;align-items:center;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid var(--hairline);border-left:3px solid ${_archCouleur(g)};font-size:11.5px;">${esc(g)} <b style="color:${z.c};">${n}</b></span>`; }).join(' ');
+  return chips ? `<div class="table-card" style="margin-bottom:8px;"><div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px;">Séries par groupe sur ce bloc (par semaine) — rouge/jaune : hors zone 12-18</div><div style="display:flex;gap:5px;flex-wrap:wrap;">${chips}</div></div>` : '';
+}
+
 function archOuvrirEditeur(){
   tplEnEdition = _archBuildTpl();
   if (!tplEnEdition.nom) tplEnEdition.nom = 'Nouveau programme';
@@ -8327,7 +8508,7 @@ function _ficheProgRow(p, c, archived){
         ${archived
           ? `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();desarchiverProgrammeClient(${p.id},'${c.id}')">↩ Désarchiver</button>`
           : `${p.brouillon ? `<button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();publierProgrammeClient(${p.id},'${c.id}')" title="Rend ce programme visible pour le client">✅ Publier</button>` : ''}
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditeurProgrammeClient(${p.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditionArchitecture(${p.id})">Éditer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ton nouveau programme est disponible !','Ton programme « ${esc(p.nom).replace(/'/g, "\\'")} » vient d\\'être mis à jour, va y jeter un œil.')" title="Notifier">🔔</button>
         <button class="icon-btn del" onclick="event.stopPropagation();archiverProgrammeClient(${p.id},'${c.id}')" title="Archiver">${iTrash()}</button>`}
@@ -9667,7 +9848,7 @@ function renderProgLogsPage(el){
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         ${prog.actif ? '<span class="chip ok"><span class="dot"></span>Actif</span>' : '<span class="chip off">Inactif</span>'}
-        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="ouvrirEditeurProgrammeClient(${prog.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="ouvrirEditionArchitecture(${prog.id})">Éditer</button>
       </div>
     </div>
 
@@ -9818,10 +9999,10 @@ function retourFicheClient(){
 
 // ── Éditeur programme client ──────────────────────────────────────────
 
-async function ouvrirEditeurProgrammeClient(progId){
+async function _cpCharger(progId){
   if (exercicesData === null) { try { exercicesData = await chargerExercices(); } catch(e) { exercicesData = []; } }
   const prog = await chargerProgrammeById(progId);
-  if (!prog) { alert('Programme introuvable'); return; }
+  if (!prog) { alert('Programme introuvable'); return false; }
   clientProgEnEdition = {
     id: prog.id, client_id: prog.client_id, nom: prog.nom, objectif: prog.objectif || '', actif: prog.actif, bloc_actif_id: prog.bloc_actif_id || null,
     blocs: (prog.blocs||[]).map(b => ({
@@ -9839,6 +10020,10 @@ async function ouvrirEditeurProgrammeClient(progId){
   _origClientProgBlocIds = clientProgEnEdition.blocs.map(b=>b.id).filter(Boolean);
   _origClientProgSeanceIds = clientProgEnEdition.blocs.flatMap(b=>b.seances.map(s=>s.id)).filter(Boolean);
   _origClientProgExoIds = clientProgEnEdition.blocs.flatMap(b=>b.seances.flatMap(s=>s.exercices.map(ex=>ex.id))).filter(Boolean);
+  return true;
+}
+async function ouvrirEditeurProgrammeClient(progId){
+  if (!(await _cpCharger(progId))) return;
   state.nav = 'editeur-client-prog';
   renderSidebar();
   renderMain();
@@ -10210,7 +10395,7 @@ async function sauvegarderProgrammeClient(){
         for(let ei=0;ei<s.exercices.length;ei++){
           const ex=s.exercices[ei];
           if(ex.id){
-            await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})}), `Exercice "${ex.nom}" (${s.titre})`);
+            await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices?id=eq.${ex.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})}), `Exercice "${ex.nom}" (${s.titre})`);
           } else {
             const r=await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`,{method:'POST',headers:supaHeaders({Prefer:'return=representation'}),body:JSON.stringify({seance_id:s.id,exercice_id:ex.exercice_id,nom:ex.nom,ordre:ei,series:parseInt(ex.series)||null,reps:ex.reps||null,repos:ex.repos||null,tempo:ex.tempo||null,rir:ex.rir||null,notes:ex.notes||null,superset_groupe:ex.superset_groupe??null})}), `Exercice "${ex.nom}" (${s.titre})`);
             ex.id=(await r.json())[0].id;
@@ -10232,6 +10417,7 @@ async function sauvegarderProgrammeClient(){
   } catch(e){
     if(btn){btn.disabled=false;btn.textContent='Enregistrer';}
     if(errEl){errEl.textContent='Erreur : '+e.message;errEl.style.display='block';}
+    else alert('Enregistrement impossible : '+e.message);
   }
 }
 
