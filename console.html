@@ -401,6 +401,24 @@
   .arch .arch-slot select.arch-famille { border-color: transparent; background-color: transparent; color: var(--arch-c, var(--text)); font-weight: 600; padding: 2px 22px 2px 0; background-position: right 4px center; }
   .arch .arch-ligne { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; margin-bottom: 4px; background: rgba(255,255,255,.025); }
   .arch .table-card { border: 1px solid var(--hairline); }
+
+  .arch { font-size: 12.5px; }
+  .arch input[type=text], .arch input[type=number], .arch select { font-size: 12.5px !important; padding: 5px 9px; }
+  .arch select { padding-right: 24px; }
+  .arch .btn { font-size: 12px; padding: 5px 10px; }
+  .arch .table-card { padding: 10px 12px !important; margin-bottom: 8px; }
+  .arch-grille3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(620px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .arch-grille2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .arch .arch-slot { display: grid; grid-template-columns: 112px minmax(130px, 1.5fr) 44px 62px 64px minmax(80px, 1fr) 24px; gap: 5px; align-items: center; padding: 4px 6px; margin-bottom: 4px; border-radius: 8px; }
+  .arch .arch-slot select.arch-famille { font-size: 11.5px !important; padding: 2px 18px 2px 0; text-overflow: ellipsis; }
+  .arch .arch-slot select.arch-dbl { border-color: #d9a030; }
+  .arch .arch-ligne { padding: 3px 6px; margin-bottom: 3px; font-size: 12px; }
+  .arch .arch-ligne .btn { padding: 1px 7px; }
+  @media (max-width: 900px) {
+    .arch input[type=text], .arch input[type=number], .arch select { font-size: 16px !important; }
+    .arch .arch-slot { grid-template-columns: 1fr 1fr; }
+    .arch-grille3 { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -4459,7 +4477,7 @@ async function renderProgrammesPage(el){
 // 1) nombre de séances + structure  2) exercices par groupe musculaire et par séance
 // 3) choix des exercices (+ séries)  4) programme final → template / assignation.
 // Réutilise sauvegarderTemplateComplet, _appliquerTypeAuxExercicesDuBloc, ouvrirAssignerTemplate.
-const ARCH_FAMILLES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Epaules','Epaules (anterieur)','Epaules (latéral)','Epaules (posterieur)','Biceps','Triceps','Quadriceps','Ischios','Fessiers','Mollets','Adducteurs','Abducteurs','Abdos','Lombaires'];
+const ARCH_FAMILLES = ['Pectoraux','Dos (dorsaux)','Dos (trapèzes)','Epaules','Epaules (anterieur)','Epaules (latéral)','Epaules (posterieur)','Biceps','Triceps','Quadriceps','Ischios','Fessiers','Mollets','Adducteurs','Abducteurs','Abdos','Lombaires','Dos (global)','Cardio'];
 const ARCH_PRESETS = {
   ppl3: { label:'Push / Pull / Legs', nb:3, seances:[
     ['Push',{Pectoraux:3,Epaules:2,Triceps:2}],['Pull',{'Dos (dorsaux)':3,'Dos (trapèzes)':2,Biceps:2}],['Legs',{Quadriceps:3,Ischios:2,Mollets:1}]] },
@@ -4501,13 +4519,13 @@ function _archTriSuggestion(fam, cands){
 }
 let _arch = null;
 
-function _archRaz(){ _arch.choix = {}; _arch.series = {}; _arch.tempo = {}; _arch.notes = {}; }
+function _archRaz(){ _arch.choix = {}; _arch.series = {}; _arch.tempo = {}; _arch.notes = {}; _arch.reps = {}; _arch.repos = {}; _arch.rir = {}; _arch.ss = {}; }
 function _archPreset(cle){
   const p = ARCH_PRESETS[cle];
   return p.seances.map(([titre, gr]) => ({ titre, groupes: Object.entries(gr).map(([g, n]) => ({ g, n })) }));
 }
 function _archInit(){
-  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, nom:'', clientId:'', draftId:null, categorie:'', blocType:'metabolique', nbSemaines:6 };
+  _arch = { step:1, preset:'ppl5', seances:_archPreset('ppl5'), choix:{}, series:{}, tempo:{}, notes:{}, reps:{}, repos:{}, rir:{}, ss:{}, source:null, nom:'', clientId:'', draftId:null, categorie:'', blocType:'metabolique', nbSemaines:6 };
 }
 function _archExosFamille(fam){
   return (exercicesData||[]).filter(e => fam === 'Epaules' ? (e.groupe_musculaire||'').startsWith('Epaules') : e.groupe_musculaire === fam);
@@ -4549,7 +4567,7 @@ function archNouveau(){ _archInit(); renderArchitectureSub(); }
 async function archReprendre(id){
   const b = (_archBrouillons || []).find(x => x.id === id);
   if (!b) return;
-  _arch = Object.assign({}, b.etat, { draftId: b.id, nom: b.nom, clientId: b.client_id || '' });
+  _arch = Object.assign({ reps:{}, repos:{}, rir:{}, ss:{}, source:null }, b.etat, { draftId: b.id, nom: b.nom, clientId: b.client_id || '' });
   if (exercicesData === null) exercicesData = await chargerExercices();
   renderArchitectureSub();
 }
@@ -4610,7 +4628,7 @@ async function renderArchitectureSub(){
   }
   const labels = ['Architecture','Répartition','Exercices','Programme final'];
   const stepper = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">${labels.map((l,i) => `<button class="btn ${_arch.step===i+1?'primary':''}" ${i+1<_arch.step?`onclick="archGo(${i+1})"`:''} style="font-size:12px;${i+1>_arch.step?'opacity:.5;cursor:default;':''}">${i+1}. ${l}</button>`).join('')}</div>`;
-  const entete = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+  const entete = `${_arch.source ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:6px;">🧩 Base : ${esc(_arch.source.progNom)} · ${esc(_arch.source.blocLabel)} — le programme d'origine n'est pas modifié tant que tu ne crées pas la nouvelle version.</div>` : ''}<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
     <input type="text" value="${esc(_arch.nom)}" placeholder="Nom du programme / du brouillon (ex: Claire Chapus — 4 séances)" oninput="_arch.nom=this.value" style="flex:1;min-width:220px;font-size:16px;">
     <select onchange="_arch.clientId=this.value" style="font-size:16px;max-width:200px;"><option value="">Pour… (facultatif)</option>${data.clients.filter(c=>!c.estCoach).map(c => `<option value="${c.id}" ${_arch.clientId===c.id?'selected':''}>${esc(c.nom)}</option>`).join('')}</select>
     <button class="btn" onclick="archEnregistrerBrouillon(false)">💾 Enregistrer en brouillon</button>
@@ -4646,7 +4664,7 @@ function archAjouterSeance(){ _arch.seances.push({ titre:'Séance ' + (_arch.sea
 // Étape 2 — nombre d'exercices par groupe musculaire et par séance
 function _archStep2(){
   const tot = _archSeriesEst();
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px;">
+  return `<div class="arch-grille2">
     ${_arch.seances.map((s, si) => {
       const nbEx = s.groupes.reduce((a, g) => a + g.n, 0);
       const dispo = ARCH_FAMILLES.filter(f => !s.groupes.some(g => g.g === f));
@@ -4694,27 +4712,24 @@ function _archStep3(){
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
       <div style="font-size:12.5px;color:var(--text-faint);">Chaque exercice doit apporter un angle ou un profil de résistance différent. Les doublons sur la semaine sont signalés.</div>
       <button class="btn" onclick="archPrerempli()">✨ Pré-remplir automatiquement</button></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-bottom:14px;">
+    <div class="arch-grille3">
     ${_arch.seances.map((s, si) => {
       const slots = _archSlots().filter(x => x.si === si);
       const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
       return `<div class="table-card" style="padding:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
+          const lib = sel ? exercicesData.find(e => e.id === sel) : null;
           return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};">
-            <div style="font-size:11px;color:var(--text-faint);margin-bottom:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <select class="arch-famille" title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)" style="font-size:12px;max-width:190px;">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
-              <span>exercice ${sl.k+1}</span>${dbl?' <span style="color:#d9a030;">· déjà utilisé ailleurs</span>':''}</div>
-            <div style="display:flex;gap:6px;">
-              <select style="flex:1;font-size:16px;min-width:0;" onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
-              <select style="width:64px;font-size:16px;" onchange="archSeries('${sl.key}',this.value)">${[1,2,3].map(n => `<option ${(_arch.series[sl.key]||3)===n?'selected':''}>${n}</option>`).join('')}</select>
-              <button class="icon-btn del" onclick="archRetirerSlot('${sl.key}')" title="Retirer cet exercice">${iTrash()}</button>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:5px;">
-              <input type="text" value="${esc(_arch.tempo[sl.key]||'')}" placeholder="Tempo" title="Tempo, ex : 3-0-1-0" oninput="_arch.tempo['${sl.key}']=this.value" style="width:92px;font-size:16px;">
-              <input type="text" value="${esc(_arch.notes[sl.key]||'')}" placeholder="Commentaire" oninput="_arch.notes['${sl.key}']=this.value" style="flex:1;min-width:0;font-size:16px;">
-            </div></div>`; }).join('')}
-        <select onchange="archAjouterSlot(${si},this.value);this.value=''" style="font-size:16px;width:100%;margin-top:4px;"><option value="">+ Ajouter un exercice (choisir le groupe)…</option>${ARCH_FAMILLES.map(f => `<option>${esc(f)}</option>`).join('')}</select>
+            <select class="arch-famille" title="Changer le groupe musculaire de cet emplacement" onchange="archChangerGroupe('${sl.key}',this.value)">${ARCH_FAMILLES.map(f => `<option ${f===sl.g?'selected':''}>${esc(f)}</option>`).join('')}</select>
+            <select ${dbl ? 'class="arch-dbl" title="Déjà utilisé ailleurs dans la semaine"' : ''} onchange="archChoisirExo('${sl.key}',this.value)"><option value="">— choisir —</option>${cands.map(e => `<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(e.nom)}${e.groupe_musculaire!==sl.g?' ('+esc(e.groupe_musculaire)+')':''}</option>`).join('')}</select>
+            <select title="Séries" onchange="archSeries('${sl.key}',this.value)">${[1,2,3,4].map(n => `<option ${(_arch.series[sl.key]||3)===n?'selected':''}>${n}</option>`).join('')}</select>
+            <input type="text" value="${esc(_arch.reps[sl.key]||'')}" placeholder="${esc((lib && lib['reps_'+_arch.blocType]) || 'Reps')}" title="Reps (vide = valeur de la fiche exercice)" oninput="_arch.reps['${sl.key}']=this.value">
+            <input type="text" value="${esc(_arch.tempo[sl.key]||'')}" placeholder="Tempo" title="Tempo, ex : 3-0-1-0" oninput="_arch.tempo['${sl.key}']=this.value">
+            <input type="text" value="${esc(_arch.notes[sl.key]||'')}" placeholder="Commentaire" oninput="_arch.notes['${sl.key}']=this.value">
+            <button class="icon-btn del" onclick="archRetirerSlot('${sl.key}')" title="Retirer cet exercice">${iTrash()}</button>
+          </div>`; }).join('')}
+        <select onchange="archAjouterSlot(${si},this.value);this.value=''" style="width:100%;margin-top:2px;"><option value="">+ Ajouter un exercice (choisir le groupe)…</option>${ARCH_FAMILLES.map(f => `<option>${esc(f)}</option>`).join('')}</select>
       </div>`; }).join('')}
     </div>
     <div style="display:flex;justify-content:space-between;"><button class="btn" onclick="archGo(2)">← Retour</button><button class="btn primary" onclick="archGo(4)">Suivant : programme final →</button></div>`;
@@ -4724,7 +4739,7 @@ function _archStep3(){
 // _archToNested() puis _archFromNested(), qui réécrit les clés et CONSERVE les exercices déjà choisis.
 function _archToNested(){
   return _arch.seances.map((s, si) => s.groupes.map((g, gi) => ({ g: g.g, slots: Array.from({ length: g.n }, (_, k) => { const kk = `${si}|${gi}|${k}`;
-    return { choix: _arch.choix[kk], series: _arch.series[kk], tempo: _arch.tempo[kk], notes: _arch.notes[kk] }; }) })));
+    return { choix: _arch.choix[kk], series: _arch.series[kk], tempo: _arch.tempo[kk], notes: _arch.notes[kk], reps: _arch.reps[kk], repos: _arch.repos[kk], rir: _arch.rir[kk], ss: _arch.ss[kk] }; }) })));
 }
 function _archFromNested(nested){
   _archRaz();
@@ -4733,7 +4748,8 @@ function _archFromNested(nested){
     _arch.seances[si].groupes = gs.map(g => ({ g: g.g, n: g.slots.length }));
     gs.forEach((g, gi) => g.slots.forEach((d, k) => { const kk = `${si}|${gi}|${k}`;
       if (d.choix != null) _arch.choix[kk] = d.choix; if (d.series != null) _arch.series[kk] = d.series;
-      if (d.tempo) _arch.tempo[kk] = d.tempo; if (d.notes) _arch.notes[kk] = d.notes; }));
+      if (d.tempo) _arch.tempo[kk] = d.tempo; if (d.notes) _arch.notes[kk] = d.notes;
+      if (d.reps) _arch.reps[kk] = d.reps; if (d.repos) _arch.repos[kk] = d.repos; if (d.rir) _arch.rir[kk] = d.rir; if (d.ss != null) _arch.ss[kk] = d.ss; }));
   });
 }
 const _archSlotVide = () => ({ choix: undefined, series: 3, tempo: '', notes: '' });
@@ -4788,6 +4804,10 @@ function _archBuildTpl(){
   bloc.seances.forEach(se => se.exercices.forEach(ex => { // tempo/commentaire saisis par le coach : priment sur les valeurs par défaut
     if (_arch.tempo[ex._key]) ex.tempo = _arch.tempo[ex._key];
     if (_arch.notes[ex._key]) ex.notes = _arch.notes[ex._key];
+    if (_arch.reps[ex._key]) ex.reps = _arch.reps[ex._key];
+    if (_arch.repos[ex._key]) ex.repos = _arch.repos[ex._key];
+    if (_arch.rir[ex._key]) ex.rir = _arch.rir[ex._key];
+    if (_arch.ss[ex._key] != null) ex.superset_groupe = _arch.ss[ex._key];
     delete ex._key; }));
   return { id:null, nom:(_arch.nom||'').trim(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
 }
@@ -4813,9 +4833,61 @@ function _archStep4(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn" onclick="archOuvrirEditeur()">✎ Affiner dans l'éditeur</button>
       <button class="btn" onclick="archEnregistrer(false)">💾 Enregistrer comme template</button>
-      <button class="btn primary" onclick="archEnregistrer(true)">👤 Enregistrer et assigner à un client</button>
+      ${(_arch.clientId || _arch.source) ? `<button class="btn primary" onclick="archValiderPourClient()">✅ Créer le nouveau programme pour ${esc(((data.clients.find(c => c.id === (_arch.clientId || _arch.source.clientId)))||{}).nom || 'ce client')}</button>` : ''}
+      <button class="btn ${(_arch.clientId || _arch.source) ? '' : 'primary'}" onclick="archEnregistrer(true)">👤 Enregistrer et assigner à un client</button>
     </div></div>
   <div id="archErr" style="display:none;color:var(--critical);font-size:12px;margin-top:10px;"></div>`;
+}
+// Ouvre un bloc d'un programme client (état courant de l'éditeur, modifications non enregistrées comprises) dans
+// le mode Architecture, pour le retravailler avec la vue d'ensemble. Les exercices absents de la bibliothèque
+// ne peuvent pas être repris (aucun groupe musculaire connu) et sont comptés dans l'avertissement.
+async function archImporterBloc(bi){
+  const cp = clientProgEnEdition; const bloc = cp && cp.blocs[bi];
+  if (!bloc) return;
+  if (exercicesData === null) exercicesData = await chargerExercices();
+  if (_arch && !confirm('Un programme est déjà en cours dans Architecture : il sera remplacé (pense à l\'enregistrer en brouillon avant). Continuer ?')) return;
+  _archInit();
+  _arch.source = { clientId: cp.client_id, progId: cp.id, progNom: cp.nom, blocLabel: (BLOCS_TYPES.find(o => o.value === (bloc.type||'')) || {}).label || 'Bloc' };
+  _arch.nom = `${cp.nom} — nouvelle version`; _arch.clientId = cp.client_id;
+  _arch.blocType = bloc.type || 'metabolique'; _arch.nbSemaines = bloc.nombre_semaines || 6;
+  _arch.seances = bloc.seances.map(se => ({ titre: se.titre, groupes: [] }));
+  let ignores = 0;
+  const nested = bloc.seances.map(se => {
+    const groupes = [];
+    se.exercices.forEach(ex => {
+      const lib = exercicesData.find(e => e.id === ex.exercice_id) || exercicesData.find(e => e.nom.toLowerCase() === (ex.nom||'').toLowerCase());
+      if (!lib || !lib.groupe_musculaire) { ignores++; return; }
+      const f = lib.groupe_musculaire;
+      let g = groupes[groupes.length - 1];
+      if (!g || g.g !== f) { g = { g: f, slots: [] }; groupes.push(g); }
+      g.slots.push({ choix: lib.id, series: parseInt(ex.series) || 3, tempo: ex.tempo || '', notes: ex.notes || '', reps: ex.reps || '', repos: ex.repos || '', rir: ex.rir || '', ss: ex.superset_groupe ?? undefined });
+    });
+    return groupes;
+  });
+  _archFromNested(nested);
+  _arch.step = 3;
+  progTab = 'architecture';
+  setNav('programmes');
+  if (ignores) setTimeout(() => alert(`${ignores} exercice${ignores>1?'s':''} sans équivalent dans la bibliothèque n'${ignores>1?'ont':'a'} pas été repris dans cette vue.`), 400);
+}
+// Crée un NOUVEAU programme pour le client à partir de ce qui est dans Architecture (l'ancien est désactivé, ses logs restent).
+async function archValiderPourClient(){
+  const err = document.getElementById('archErr');
+  const tpl = _archBuildTpl();
+  const client = data.clients.find(c => c.id === (_arch.clientId || (_arch.source && _arch.source.clientId)));
+  if (!client) { err.textContent = 'Choisis le client (menu « Pour… » en haut).'; err.style.display = 'block'; return; }
+  if (!tpl.nom) { err.textContent = 'Donne un nom au programme.'; err.style.display = 'block'; return; }
+  if (!tpl.blocs[0].seances.some(s => s.exercices.length)) { err.textContent = 'Choisis au moins un exercice.'; err.style.display = 'block'; return; }
+  if (!confirm(`Créer « ${tpl.nom} » pour ${client.nom} ?\n\nSon programme actif actuel sera désactivé (ses logs sont conservés) et le nouveau sera créé en brouillon dans sa fiche.`)) return;
+  try {
+    tpl.description = `Programme créé via Architecture pour ${client.nom}.`;
+    const saved = await sauvegarderTemplateComplet(tpl);
+    if (templatesData === null) templatesData = await chargerTemplates(); else templatesData.push(saved);
+    await assignerTemplateAuClient(saved.id, client.id);
+    if (_arch.draftId) await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${_arch.draftId}`, { method:'DELETE', headers: supaHeaders() }).catch(() => {});
+    _arch = null; _archBrouillons = null;
+    openPanel(client.id).then(() => setFicheTab('programmes'));
+  } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
 }
 function archOuvrirEditeur(){
   tplEnEdition = _archBuildTpl();
@@ -9785,7 +9857,7 @@ function renderBlocsClientProg(){
     const color = BLOC_COLOR[bloc.type] || 'var(--hairline)';
     return `
     <div class="day-block" style="margin-bottom:18px;border-left:3px solid ${color};">
-      ${simple ? '' : `
+      ${simple ? `<div style="display:flex;justify-content:flex-end;padding:8px 12px 0;"><button class="btn" style="font-size:11px;padding:4px 10px;" onclick="archImporterBloc(${bi})" title="Retravailler ce programme avec la vue d'ensemble du mode Architecture">🧩 Mode Architecture</button></div>` : `
       <div class="day-head" style="flex-wrap:wrap;border-bottom:2px solid ${color}20;">
         <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
         <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(clientProgEnEdition.blocs[${bi}],exercicesData);renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
@@ -9797,6 +9869,7 @@ function renderBlocsClientProg(){
           <button class="icon-btn" onclick="cpDescendreBloc(${bi})" style="padding:2px 6px;font-size:13px;${bi===cp.blocs.length-1?'opacity:.3;pointer-events:none;':''}">↓</button>
         </div>`:''}
         <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="cpDupliquerBloc(${bi})">Dupliquer</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="archImporterBloc(${bi})" title="Retravailler ce bloc avec la vue d'ensemble du mode Architecture">🧩 Mode Architecture</button>
         ${bi>0?`<button class="btn" style="font-size:11px;padding:4px 10px;" onclick="cpCalculerCharges(${bi})" title="Estime la charge de départ (S1) depuis la dernière semaine loggée du bloc précédent, formule de Brzycki">🧮 Calculer les charges</button>`:''}
         ${cp.blocs.length>1?(bloc.id && bloc.id===cp.bloc_actif_id
           ? `<span style="font-size:11px;font-weight:700;color:${color};padding:4px 8px;background:${color}18;border-radius:var(--radius-sm);flex-shrink:0;">⭐ Actif</span>`
