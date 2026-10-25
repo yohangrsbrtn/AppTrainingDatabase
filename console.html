@@ -4397,7 +4397,28 @@ let _recensementMetaOuvert = new Set(); // groupes musculaires (dossiers) dépli
 let _recensementMetaLigneOuverte = new Set(); // signatures des programmes dont la répartition détaillée est dépliée
 let recensementMetaNoms = {};   // signature de contenu -> nom de template proposé/édité par le coach
 let _recensementMetaCrees = new Set(); // signatures pour lesquelles un template a déjà été créé cette session (évite les doublons sur double-clic)
-let tplCategorieFiltre = 'all';
+let tplCategorieFiltre = 'all'; // sous-catégorie
+// Catégories de templates : « Public › Sous-catégorie » (ex. « Femme › Prise de masse »), stockées dans programme_templates.categorie
+// (pas de colonne en plus). Les anciennes catégories sans public (« Métabolique »…) restent valides : elles tombent dans « Non classé ».
+const TPL_GENRES = ['Homme', 'Femme', 'Mixte'];
+const TPL_SEP = ' › ';
+function _tplCatParse(cat){
+  if (!cat) return { genre: '', sous: '' };
+  const i = cat.indexOf(TPL_SEP);
+  const premier = i >= 0 ? cat.slice(0, i) : cat;
+  if (TPL_GENRES.includes(premier)) return { genre: premier, sous: i >= 0 ? cat.slice(i + TPL_SEP.length) : '' };
+  return { genre: '', sous: cat };
+}
+function _tplCatCompose(genre, sous){ sous = (sous || '').trim(); return !genre ? sous : (sous ? genre + TPL_SEP + sous : genre); }
+let tplGenreFiltre = 'all'; // 'all' | 'Homme' | 'Femme' | 'Mixte' | 'none'
+async function tplDefinirGenre(id, genre){
+  const t = templatesData.find(x => x.id === id); if (!t) return;
+  const nouvelle = _tplCatCompose(genre, _tplCatParse(t.categorie).sous) || null;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/programme_templates?id=eq.${id}`, { method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ categorie: nouvelle }) });
+  if (!r.ok) { alert('Modification impossible.'); return; }
+  t.categorie = nouvelle; renderTemplatesSub();
+}
+
 
 async function chargerExercices(){
   const res = await fetch(`${SUPABASE_URL}/rest/v1/exercices?order=nom.asc`, { headers: supaHeaders() });
@@ -5101,7 +5122,7 @@ function _archBuildTpl(modeEdition){
     if (_arch.rir[ex._key]) ex.rir = _arch.rir[ex._key];
     if (_arch.ss[ex._key] != null) ex.superset_groupe = _arch.ss[ex._key];
     delete ex._key; }));
-  return { id:null, nom:_archNomCourant(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
+  return { id:null, nom:_archNomCourant(), categorie:_tplCatCompose(_arch.genre||'', _arch.categorie||''), description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
 }
 function _archStep4Edition(){
   const tpl = _archBuildTpl(true);
@@ -5124,7 +5145,9 @@ function _archStep4(){
   return `<div class="table-card" style="padding:18px;margin-bottom:14px;">
     <div class="field-grid" style="grid-template-columns:2fr 1fr;">
       <div class="field-row" style="margin-bottom:0;"><label>Nom du programme</label><input type="text" value="${esc(_arch.nom)}" oninput="_arch.nom=this.value"></div>
-      <div class="field-row" style="margin-bottom:0;"><label>Catégorie</label><input type="text" value="${esc(_arch.categorie)}" placeholder="ex: Prise de masse" oninput="_arch.categorie=this.value"></div>
+      <div class="field-row" style="margin-bottom:0;"><label>Public · catégorie</label>
+        <div style="display:flex;gap:6px;"><select onchange="_arch.genre=this.value"><option value="">—</option>${TPL_GENRES.map(g => `<option ${(_arch.genre||'')===g?'selected':''}>${g}</option>`).join('')}</select>
+        <input type="text" value="${esc(_arch.categorie)}" placeholder="ex: Prise de masse" style="flex:1;" oninput="_arch.categorie=this.value"></div></div>
     </div>
     <div style="display:flex;gap:12px;margin-top:12px;align-items:center;flex-wrap:wrap;">
       <label style="font-size:12px;color:var(--text-faint);">Type de bloc</label>
@@ -5784,16 +5807,25 @@ async function retirerExercice(id){
 // ── Sous-onglet Templates ──────────────────────────────────────────────
 function renderTemplatesSub(){
   const sub = document.getElementById('progrSub');
-  const categories = [...new Set((templatesData||[]).map(t=>t.categorie).filter(Boolean))];
-  const list = (templatesData || []).filter(t => tplCategorieFiltre === 'all' || t.categorie === tplCategorieFiltre);
+  const tous = templatesData || [];
+  const info = t => _tplCatParse(t.categorie);
+  const nbGenre = g => tous.filter(t => g === 'none' ? !info(t).genre : info(t).genre === g).length;
+  const dansGenre = tous.filter(t => tplGenreFiltre === 'all' || (tplGenreFiltre === 'none' ? !info(t).genre : info(t).genre === tplGenreFiltre));
+  const sousCats = [...new Set(dansGenre.map(t => info(t).sous).filter(Boolean))];
+  if (tplCategorieFiltre !== 'all' && !sousCats.includes(tplCategorieFiltre)) tplCategorieFiltre = 'all';
+  const list = dansGenre.filter(t => tplCategorieFiltre === 'all' || info(t).sous === tplCategorieFiltre);
+  const genreBtn = (k, label, n) => `<button class="${tplGenreFiltre===k?'active':''}" onclick="tplGenreFiltre='${k}';tplCategorieFiltre='all';renderTemplatesSub()">${label} <span style="opacity:.6;">${n}</span></button>`;
   sub.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <div class="chip-filter">
-        <button class="${tplCategorieFiltre==='all'?'active':''}" onclick="tplCategorieFiltre='all';renderTemplatesSub()">Tous</button>
-        ${categories.map(c => `<button class="${tplCategorieFiltre===c?'active':''}" onclick="tplCategorieFiltre='${esc(c)}';renderTemplatesSub()">${esc(c)}</button>`).join('')}
+        ${genreBtn('all', 'Tous', tous.length)}${TPL_GENRES.map(g => genreBtn(g, g, nbGenre(g))).join('')}${nbGenre('none') ? genreBtn('none', 'Non classé', nbGenre('none')) : ''}
       </div>
       <button class="btn primary" style="margin-left:auto;" onclick="ouvrirEditeurTemplate(null)">+ Nouveau template</button>
     </div>
+    ${sousCats.length ? `<div class="chip-filter" style="margin-bottom:14px;">
+      <button class="${tplCategorieFiltre==='all'?'active':''}" onclick="tplCategorieFiltre='all';renderTemplatesSub()">Toutes les catégories</button>
+      ${sousCats.map(c => `<button class="${tplCategorieFiltre===c?'active':''}" onclick="tplCategorieFiltre=this.dataset.c;renderTemplatesSub()" data-c="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>` : '<div style="height:6px;"></div>'}
     <div class="tpl-grid">
       ${list.map(t => {
         const blocs = t.programme_blocs || [];
@@ -5809,7 +5841,11 @@ function renderTemplatesSub(){
               <button class="icon-btn" style="width:24px;height:24px;" onclick="event.stopPropagation();supprimerTemplateAction(${t.id})">${iTrash()}</button>
             </div>
           </div>
-          ${t.categorie ? `<span class="chip off">${esc(t.categorie)}</span>` : ''}
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px;" onclick="event.stopPropagation()">
+            <select onchange="tplDefinirGenre(${t.id},this.value)" title="Public visé" style="font-size:12px;padding:3px 22px 3px 8px;background:var(--surface-2);color:var(--text);border:1px solid var(--hairline);border-radius:6px;">
+              <option value="" ${!info(t).genre?'selected':''}>Public : —</option>${TPL_GENRES.map(g => `<option ${info(t).genre===g?'selected':''}>${g}</option>`).join('')}</select>
+            ${info(t).sous ? `<span class="chip off">${esc(info(t).sous)}</span>` : ''}
+          </div>
           <div class="meta" style="margin-top:8px;">${blocs.length>1 ? blocs.length+' blocs · ' : ''}${nbSeances} séance${nbSeances>1?'s':''} · ${nbExercices} exercice${nbExercices>1?'s':''}</div>
         </div>`;}).join('') || `<div class="empty-panel">Aucun template. Crée le premier avec "+ Nouveau template".</div>`}
     </div>`;
@@ -5906,7 +5942,9 @@ function renderEditeurTemplate(){
     <div class="table-card" style="padding:18px;margin-bottom:16px;">
       <div class="field-grid" style="grid-template-columns:2fr 1fr;">
         <div class="field-row" style="margin-bottom:0;"><label>Nom</label><input id="fTplNom" type="text" value="${esc(t.nom)}" placeholder="ex: Prise de masse — Bloc 1" oninput="tplEnEdition.nom=this.value"></div>
-        <div class="field-row" style="margin-bottom:0;"><label>Catégorie</label><input id="fTplCat" type="text" value="${esc(t.categorie)}" placeholder="ex: Prise de masse" oninput="tplEnEdition.categorie=this.value"></div>
+        <div class="field-row" style="margin-bottom:0;"><label>Public · catégorie</label>
+          <div style="display:flex;gap:6px;"><select id="fTplGenre" style="font-size:16px;" onchange="tplEnEdition.categorie=_tplCatCompose(this.value,document.getElementById('fTplCat').value)"><option value="">—</option>${TPL_GENRES.map(g => `<option ${_tplCatParse(t.categorie).genre===g?'selected':''}>${g}</option>`).join('')}</select>
+          <input id="fTplCat" type="text" value="${esc(_tplCatParse(t.categorie).sous)}" placeholder="ex: Prise de masse" style="flex:1;" oninput="tplEnEdition.categorie=_tplCatCompose(document.getElementById('fTplGenre').value,this.value)"></div></div>
       </div>
       <div class="field-row" style="margin-top:12px;margin-bottom:0;"><label>Description</label><textarea id="fTplDesc" rows="2" oninput="tplEnEdition.description=this.value">${esc(t.description)}</textarea></div>
     </div>
