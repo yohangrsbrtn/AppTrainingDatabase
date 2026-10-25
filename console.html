@@ -4809,6 +4809,7 @@ async function archSupprimerBrouillon(id){
   await _archChargerBrouillons(); renderArchitectureSub();
 }
 async function archEnregistrerBrouillon(quitter){
+  if (_archEd && !(_arch.nom || '').trim()) _arch.nom = _archNomCourant();
   if (!(_arch.nom || '').trim()) { const n = prompt('Donne un nom à ce brouillon (ex: Claire Chapus — 4 séances)'); if (!n || !n.trim()) return; _arch.nom = n.trim(); }
   const { draftId, nom, clientId, ...etat } = _arch;
   const corps = { nom: _arch.nom.trim(), client_id: _arch.clientId || null, etat, updated_at: new Date().toISOString() };
@@ -5081,6 +5082,7 @@ function archChoisirExo(key, id){ if (id) _arch.choix[key] = parseInt(id); else 
 function archSeries(key, v){ _arch.series[key] = parseInt(v); renderArchitectureSub(); }
 
 // Étape 4 — programme final
+const _archNomCourant = () => ((_archEd ? _archEd.cp.nom : _arch.nom) || '').trim();
 function _archBuildTpl(modeEdition){
   const bloc = { id:_arch.blocId||null, type:_arch.blocType, nombre_semaines:_arch.nbSemaines, seances: _arch.seances.map((s, si) => ({
     id: modeEdition ? s.id : undefined,
@@ -5099,7 +5101,7 @@ function _archBuildTpl(modeEdition){
     if (_arch.rir[ex._key]) ex.rir = _arch.rir[ex._key];
     if (_arch.ss[ex._key] != null) ex.superset_groupe = _arch.ss[ex._key];
     delete ex._key; }));
-  return { id:null, nom:(_arch.nom||'').trim(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
+  return { id:null, nom:_archNomCourant(), categorie:_arch.categorie||'', description:`Programme construit via Architecture (${_arch.seances.length} séances/semaine).`, blocs:[bloc] };
 }
 function _archStep4Edition(){
   const tpl = _archBuildTpl(true);
@@ -5109,8 +5111,8 @@ function _archStep4Edition(){
       <button class="btn" onclick="archGo(3)">← Retour</button>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" onclick="archEnregistrerBrouillon(false)" title="Enregistre CE BLOC comme brouillon de nouvelle version">💾 Ce bloc en brouillon</button>
-        <button class="btn" onclick="archValiderPourClient()" title="Crée un nouveau programme pour ce client à partir de ce bloc (l'actuel est désactivé)">✅ Créer comme nouvelle version</button>
-        <button class="btn primary" onclick="archEdEnregistrer()">💾 Enregistrer sur le programme (conserve les logs)</button>
+        <button class="btn" onclick="archValiderPourClient()" title="Crée un NOUVEAU programme pour ce client à partir de ce bloc : l'ancien est conservé (désactivé) avec ses logs">✅ Créer une nouvelle version (garde l'ancien)</button>
+        <button class="btn" onclick="archEdEnregistrer()" title="Modifie le programme actuel (nom + contenu), logs conservés">💾 Modifier le programme actuel (logs conservés)</button>
       </div></div>
     <div id="archErr" style="display:none;color:var(--critical);font-size:12px;margin-top:10px;"></div>`;
 }
@@ -5178,12 +5180,15 @@ async function archImporterBloc(bi){
 // Crée un NOUVEAU programme pour le client à partir de ce qui est dans Architecture (l'ancien est désactivé, ses logs restent).
 async function archValiderPourClient(){
   const err = document.getElementById('archErr');
+  const montrer = m => { if (err) { err.textContent = m; err.style.display = 'block'; } alert(m); };
   const tpl = _archBuildTpl();
   const client = data.clients.find(c => c.id === (_arch.clientId || (_arch.source && _arch.source.clientId)));
-  if (!client) { err.textContent = 'Choisis le client (menu « Pour… » en haut).'; err.style.display = 'block'; return; }
-  if (!tpl.nom) { err.textContent = 'Donne un nom au programme.'; err.style.display = 'block'; return; }
-  if (!tpl.blocs[0].seances.some(s => s.exercices.length)) { err.textContent = 'Choisis au moins un exercice.'; err.style.display = 'block'; return; }
-  if (!confirm(`Créer « ${tpl.nom} » pour ${client.nom} ?\n\nSon programme actif actuel sera désactivé (ses logs sont conservés) et le nouveau sera créé en brouillon dans sa fiche.`)) return;
+  if (!client) { montrer('Choisis le client (menu « Pour… » en haut).'); return; }
+  // Nouvelle version : le nom doit différer de l'ancien programme pour les distinguer dans la fiche du client.
+  if (_archEd && _arch.source && tpl.nom === (_arch.source.progNom || '').trim()) tpl.nom = tpl.nom + ' — nouvelle version';
+  if (!tpl.nom) { montrer('Donne un nom au programme (champ en haut de la page).'); return; }
+  if (!tpl.blocs[0].seances.some(s => s.exercices.length)) { montrer('Choisis au moins un exercice.'); return; }
+  if (!confirm(`Créer « ${tpl.nom} » pour ${client.nom} ?\n\nSon programme actif actuel sera désactivé (il est conservé avec tous ses logs) et le nouveau sera créé en brouillon dans sa fiche.`)) return;
   try {
     tpl.description = `Programme créé via Architecture pour ${client.nom}.`;
     const saved = await sauvegarderTemplateComplet(tpl);
@@ -5191,10 +5196,10 @@ async function archValiderPourClient(){
     await assignerTemplateAuClient(saved.id, client.id);
     if (_arch.draftId) await fetch(`${SUPABASE_URL}/rest/v1/programme_brouillons?id=eq.${_arch.draftId}`, { method:'DELETE', headers: supaHeaders() }).catch(() => {});
     _arch = null; _archEd = null; _archBrouillons = null;
-    openPanel(client.id).then(() => setFicheTab('programmes'));
-  } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
+    await openPanel(client.id); setFicheTab('programmes');
+    alert(`✅ « ${tpl.nom} » créé pour ${client.nom}, en brouillon. L'ancien programme est désactivé mais conservé (logs inclus).\nVérifie-le puis publie-le depuis sa fiche.`);
+  } catch(e) { montrer('Erreur : ' + e.message); }
 }
-
 // ═══ Édition en place d'un programme client dans Architecture ═══════════════════════════════════
 // Même vue d'ensemble que la construction guidée, mais sur le programme réel du client : tous les blocs en
 // onglets, enregistrement via sauvegarderProgrammeClient (met à jour les exercices existants par id, ajoute les
@@ -5265,10 +5270,10 @@ function _archEdAppliquer(){
   _arch = sauve;
 }
 async function archEdEnregistrer(){
-  const err = document.getElementById('archErr');
-  _archEdAppliquer();
   const cp = _archEd.cp;
-  if (!(cp.nom || '').trim()) { alert('Donne un nom au programme.'); return; }
+  if (!(cp.nom || '').trim()) { alert('Donne un nom au programme (champ en haut de la page).'); return; }
+  if (!confirm(`Enregistrer sur le programme actuel ?\n\n« ${cp.nom} » sera MODIFIÉ (nom et contenu) ; les logs du client sont conservés.\nPour garder l'ancien programme tel quel, annule et utilise « Créer une nouvelle version ».`)) return;
+  _archEdAppliquer();
   await sauvegarderProgrammeClient();
   if (state.nav === 'fiche-client') { _archEd = null; _arch = null; }
 }
@@ -5303,7 +5308,7 @@ function _archEdEntete(){
   return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
       <span style="font-size:12px;color:var(--text-faint);">✏️ Édition en place${c ? ' · ' + esc(c.nom) : ''}</span>
       <input type="text" value="${esc(cp.nom)}" oninput="_archEd.cp.nom=this.value" placeholder="Nom du programme" style="flex:1;min-width:200px;font-weight:700;">
-      <button class="btn primary" onclick="archEdEnregistrer()">💾 Enregistrer</button>
+      <button class="btn primary" onclick="archEdEnregistrer()" title="Modifie le programme actuel (nom + contenu), logs conservés">💾 Enregistrer (modifie l'actuel)</button>
       <button class="btn" onclick="archEdQuitter()">✕ Quitter</button>
       <button class="btn" onclick="archEdAncienEditeur()" title="Revenir à l'ancien éditeur (modifs non enregistrées perdues)" style="opacity:.7;">Ancien éditeur</button>
     </div>
