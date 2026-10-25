@@ -4878,6 +4878,7 @@ function _archStep1(){
     ${_arch.seances.map((s, i) => `<div style="margin-bottom:8px;"><div style="display:flex;align-items:center;gap:8px;">
       <span style="width:70px;font-size:12px;color:var(--text-faint);">Séance ${i+1}</span>
       <input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${i}].titre=this.value" style="flex:1;">
+      ${_archFlechesSeance(i, _arch.seances.length)}
       <button class="icon-btn del" onclick="archSupprimerSeance(${i})" title="Retirer">${iTrash()}</button></div>
       <div style="margin-left:78px;font-size:11.5px;color:var(--text-faint);margin-top:2px;">${s.groupes.length ? s.groupes.map(g => `<span style="color:${_archCouleur(g.g)};">${esc(g.g)}</span> ${g.n}`).join(' · ') : 'Aucun groupe — à définir à l\'étape suivante'}</div></div>`).join('')}
     <button class="btn" onclick="archAjouterSeance()">+ Ajouter une séance</button>
@@ -4897,7 +4898,7 @@ function _archStep2(){
       const nbEx = s.groupes.reduce((a, g) => a + g.n, 0);
       const dispo = ARCH_FAMILLES.filter(f => !s.groupes.some(g => g.g === f));
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;">${_archFlechesSeance(si, _arch.seances.length)}<span style="font-size:12px;white-space:nowrap;color:${nbEx*3>20?'#e05c5c':'var(--text-faint)'};">${nbEx} exos · ≈ ${nbEx*3} séries</span></div>
         ${s.groupes.map((g, gi) => `<div class="arch-ligne" style="border-left:3px solid ${_archCouleur(g.g)};">
           <span style="flex:1;font-size:13px;">${esc(g.g)}</span>
           <button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},-1)" title="Monter">↑</button><button class="btn" style="padding:2px 9px;" onclick="archMoveGroupe(${si},${gi},1)" title="Descendre">↓</button>
@@ -4947,7 +4948,7 @@ function _archStep3(){
       const ssInfos = _archSsInfos(si);
       const totSeries = slots.reduce((a, sl) => a + (_arch.series[sl.key]||0), 0);
       return `<div class="table-card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;"><span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><input type="text" value="${esc(s.titre)}" oninput="_arch.seances[${si}].titre=this.value" title="Renommer la séance" class="arch-titre" style="font-size:16px;flex:1;min-width:0;">${_archFlechesSeance(si, _arch.seances.length)}<span style="font-size:12px;white-space:nowrap;color:${totSeries>20?'#e05c5c':totSeries>18?'#d9a030':'var(--text-faint)'};">${totSeries} séries</span></div>
         ${slots.map(sl => { const cands = _archExosFamille(sl.g); const sel = _arch.choix[sl.key]; const dbl = sel && utiliseCount[sel] > 1;
           const lib = sel ? exercicesData.find(e => e.id === sel) : null;
           return `<div class="arch-slot" style="--arch-c:${_archCouleur(sl.g)};" ondragover="archDragOver(event)" ondragleave="archDragLeave(event)" ondrop="archDrop(event,'${sl.key}')">
@@ -5059,6 +5060,23 @@ function archDrop(e, dstKey){
   else { n[ss] = _archRegrouper(srcFlat); const dstFlat = _archAplatir(n, ds); dstFlat.splice(iDst, 0, item); n[ds] = _archRegrouper(dstFlat); }
   _archFromNested(n); renderArchitectureSub();
 }
+
+// Réordonner les séances (↑/↓ aux étapes 1, 2 et 3) : les exercices, séries, tempos… suivent leur séance. Un titre du type
+// « SÉANCE 2 — … » est renuméroté à sa nouvelle position pour que l'ordre reste lisible.
+function archDeplacerSeance(i, dir){
+  const j = i + dir;
+  if (j < 0 || j >= _arch.seances.length) return;
+  const n = _archToNested();
+  [n[i], n[j]] = [n[j], n[i]];
+  [_arch.seances[i], _arch.seances[j]] = [_arch.seances[j], _arch.seances[i]];
+  [[i, j], [j, i]].forEach(([ancien, nouveau]) => { // séance qui était en `ancien` et se retrouve en `nouveau`
+    const se = _arch.seances[nouveau];
+    const m = (se.titre || '').match(/^(\s*s[ée]ance\s*)(\d+)(.*)$/i);
+    if (m && parseInt(m[2]) === ancien + 1) se.titre = m[1] + (nouveau + 1) + m[3];
+  });
+  _archFromNested(n); renderArchitectureSub();
+}
+const _archFlechesSeance = (i, total) => `<span style="display:inline-flex;gap:2px;flex-shrink:0;"><button class="btn" style="padding:1px 7px;${i===0?'opacity:.3;pointer-events:none;':''}" onclick="archDeplacerSeance(${i},-1)" title="Monter la séance">↑</button><button class="btn" style="padding:1px 7px;${i===total-1?'opacity:.3;pointer-events:none;':''}" onclick="archDeplacerSeance(${i},1)" title="Descendre la séance">↓</button></span>`;
 function archChoisirExo(key, id){ if (id) _arch.choix[key] = parseInt(id); else delete _arch.choix[key]; renderArchitectureSub(); }
 function archSeries(key, v){ _arch.series[key] = parseInt(v); renderArchitectureSub(); }
 
