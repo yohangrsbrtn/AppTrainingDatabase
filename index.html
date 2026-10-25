@@ -620,7 +620,21 @@ async function doCreerMotDePasseSupabase() {
   if (mdp1 !== mdp2) { err.textContent = 'Les mots de passe ne correspondent pas.'; return; }
   btn.disabled = true; btn.textContent = '…';
   try {
-    const { data, error } = await sbAuth.auth.signUp({ email: emailSaisi, password: mdp1 });
+    let { data, error } = await sbAuth.auth.signUp({ email: emailSaisi, password: mdp1 });
+    if (error && /already|registered|exist/i.test(error.message || '')) {
+      // Le compte existe déjà (cas : réinstallation de l'app alors que le profil n'avait pas gardé « mot de passe défini »).
+      // Si le mot de passe saisi est le bon, on se connecte et on répare le profil ; sinon on renvoie vers l'écran de
+      // connexion avec cet e-mail, où « Mot de passe oublié » fonctionne.
+      const essai = await sbAuth.auth.signInWithPassword({ email: emailSaisi, password: mdp1 });
+      if (!essai.error) { data = essai.data; error = null; }
+      else {
+        _loginAuthEmail = emailSaisi; _loginEmailConfirme = true; _loginStep = 'password';
+        setPage('login');
+        const e2 = document.getElementById('l-err');
+        if (e2) e2.textContent = 'Un compte existe déjà avec cet e-mail : entre ton mot de passe habituel, ou clique sur « Mot de passe oublié ».';
+        return;
+      }
+    }
     if (error) throw new Error(error.message);
     let session = data.session;
     if (!session) {
@@ -628,11 +642,14 @@ async function doCreerMotDePasseSupabase() {
       if (retry.error) throw new Error(retry.error.message);
       session = retry.data.session;
     }
-    await fetch(`${SUPABASE_URL}/rest/v1/client_profils?on_conflict=client_id`, {
-      method: 'POST',
-      headers: supaHeaders({ Prefer: 'return=minimal,resolution=merge-duplicates' }),
-      body: JSON.stringify({ client_id: _loginClient, mdp_defini: true, email: emailSaisi, email_confirme: true })
-    }).catch(() => {});
+    // Les indicateurs du profil conditionnent tous les futurs écrans de connexion : on vérifie que l'écriture a réussi
+    // (avant, un échec silencieux laissait « mot de passe non défini » alors que le compte existait → boucle de création).
+    const maj = () => fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(_loginClient)}`, {
+      method: 'PATCH', headers: supaHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ mdp_defini: true, email: emailSaisi, email_confirme: true })
+    });
+    let r = await maj().catch(() => null);
+    if (!r || !r.ok) r = await maj().catch(() => null);
     await _completerConnexionSupabase(session);
   } catch(e) {
     err.textContent = e.message || 'Erreur serveur.';
