@@ -3453,6 +3453,86 @@ function _labAvatarSvg(){
     <svg viewBox="0 0 200 410" width="46%" role="img" aria-label="Avatar de dos">${dos}</svg></div>`;
 }
 
+// Avatar 3D (three.js chargé à la demande depuis un CDN) : mannequin simple fait de formes, zones colorées par niveau,
+// rotation lente automatique ; on peut l'attraper au doigt/souris pour le tourner, il reprend seul après 2 s. Un clic sur
+// une zone affiche son nom et son niveau. Si le chargement échoue (hors-ligne), on retombe sur l'avatar SVG face/dos.
+let _lab3d = null;
+async function _labMonter3d(){
+  const cont = document.getElementById('labAvatar3d');
+  if (!cont || !_lab.res) return;
+  if (_lab3d) { _lab3d.stop = true; _lab3d = null; }
+  let THREE;
+  try { THREE = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js'); }
+  catch(e) { cont.outerHTML = `<div id="labAvatar3d">${_labAvatarSvg()}</div>`; return; }
+  const l = cont.clientWidth || 360, h = Math.round(l * 1.15);
+  cont.style.height = h + 'px';
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(l, h);
+  cont.innerHTML = ''; cont.appendChild(renderer.domElement); renderer.domElement.style.touchAction = 'pan-y'; renderer.domElement.style.cursor = 'grab';
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(30, l / h, 0.1, 50); cam.position.set(0, 0.92, 3.55); cam.lookAt(0, 0.9, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.1); d1.position.set(2, 3, 3); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0x8899ff, 0.5); d2.position.set(-3, 1, -2); scene.add(d2);
+  const corps = new THREE.Group(); scene.add(corps);
+  const sol = new THREE.Mesh(new THREE.CircleGeometry(0.55, 40), new THREE.MeshBasicMaterial({ color: 0x1b2030 })); sol.rotation.x = -Math.PI / 2; sol.position.y = -0.005; scene.add(sol);
+  const matNeutre = new THREE.MeshStandardMaterial({ color: 0x2a3042, roughness: 0.7 });
+  const zonesMeshes = [];
+  const matZone = id => { const d = _lab.res.zones[id]; return new THREE.MeshStandardMaterial({ color: d ? new THREE.Color(_labCouleur(d.niv)) : new THREE.Color(0x303650), roughness: 0.45, metalness: 0.1, emissive: d ? new THREE.Color(_labCouleur(d.niv)) : new THREE.Color(0x000000), emissiveIntensity: d ? 0.18 : 0 }); };
+  const ell = (zone, x, y, z, sx, sy, sz, rx = 0, rz = 0) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), zone ? matZone(zone) : matNeutre);
+    m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.rotation.x = rx; m.rotation.z = rz; if (zone) { m.userData.zone = zone; zonesMeshes.push(m); } corps.add(m); return m; };
+  const capsule = (x, y, z, r, len, rz = 0) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 14), matNeutre); m.position.set(x, y, z); m.rotation.z = rz; corps.add(m); return m; };
+  const boite = (zone, x, y, z, w, hh, p) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, p), matZone(zone)); m.position.set(x, y, z); m.userData.zone = zone; zonesMeshes.push(m); corps.add(m); return m; };
+  // tête, cou, tronc, bassin
+  ell(null, 0, 1.72, 0.005, 0.105, 0.125, 0.115); capsule(0, 1.57, 0, 0.045, 0.06);
+  ell(null, 0, 1.24, 0, 0.19, 0.31, 0.105); ell(null, 0, 0.98, 0, 0.17, 0.12, 0.1);
+  // haut du corps
+  [-1, 1].forEach(c => {
+    ell('pecs', c * 0.085, 1.37, 0.075, 0.095, 0.075, 0.05);
+    ell('epaules', c * 0.215, 1.44, 0.005, 0.07, 0.075, 0.07);
+    ell('delt_ar', c * 0.205, 1.43, -0.05, 0.055, 0.06, 0.04);
+    ell('lats', c * 0.115, 1.26, -0.085, 0.085, 0.17, 0.045);
+    capsule(c * 0.265, 1.24, 0, 0.043, 0.2, c * 0.06);
+    ell('biceps', c * 0.265, 1.27, 0.03, 0.04, 0.095, 0.035);
+    ell('triceps', c * 0.265, 1.27, -0.035, 0.042, 0.1, 0.035);
+    capsule(c * 0.292, 0.98, 0.01, 0.034, 0.2, c * 0.04); ell(null, c * 0.3, 0.8, 0.015, 0.04, 0.05, 0.035);
+    // bas du corps
+    ell('fessiers', c * 0.082, 0.92, -0.075, 0.09, 0.095, 0.085);
+    capsule(c * 0.09, 0.72, 0, 0.062, 0.3);
+    ell('quadris', c * 0.09, 0.73, 0.03, 0.075, 0.2, 0.065);
+    ell('ischios', c * 0.09, 0.73, -0.045, 0.07, 0.18, 0.058);
+    capsule(c * 0.09, 0.27, 0, 0.045, 0.26);
+    ell('mollets', c * 0.09, 0.28, -0.025, 0.058, 0.15, 0.06);
+    ell(null, c * 0.09, 0.03, 0.04, 0.05, 0.03, 0.095);
+  });
+  ell('traps', 0, 1.45, -0.06, 0.15, 0.1, 0.05);
+  ell('lombaires', 0, 1.04, -0.085, 0.075, 0.085, 0.035);
+  [0, 1, 2].forEach(r => [-1, 1].forEach(c => boite('abdos', c * 0.032, 1.2 - r * 0.062, 0.1, 0.05, 0.05, 0.035)));
+  corps.rotation.y = 0.5;
+  const rc = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  let drag = null, dernierGeste = 0, deplace = false;
+  const dom = renderer.domElement;
+  dom.addEventListener('pointerdown', e => { drag = { x: e.clientX, ry: corps.rotation.y }; deplace = false; dom.setPointerCapture(e.pointerId); dom.style.cursor = 'grabbing'; });
+  dom.addEventListener('pointermove', e => { if (!drag) return; const dx = e.clientX - drag.x; if (Math.abs(dx) > 4) deplace = true; corps.rotation.y = drag.ry + dx * 0.012; dernierGeste = performance.now(); });
+  dom.addEventListener('pointerup', e => {
+    dom.style.cursor = 'grab'; drag = null; dernierGeste = performance.now();
+    if (deplace) return;
+    const r = dom.getBoundingClientRect(); ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    rc.setFromCamera(ptr, cam); const hit = rc.intersectObjects(zonesMeshes)[0];
+    const info = document.getElementById('labZoneInfo'); if (!info) return;
+    if (!hit) { info.textContent = 'Touche une zone du corps pour voir son niveau.'; return; }
+    const z = hit.object.userData.zone, d = _lab.res.zones[z];
+    info.innerHTML = d ? `<b>${LAB_ZONE_NOM[z] || z}</b> — ${d.etalon ? _labRang(d.niv) + ' · étalon ' + esc(d.src.nom) : '+' + Math.round(d.src.prog) + ' % · ' + esc(d.src.nom)}` : `<b>${LAB_ZONE_NOM[z] || z}</b> — pas encore de données`;
+  });
+  const etat = { stop: false }; _lab3d = etat;
+  (function boucle(){
+    if (etat.stop || !cont.isConnected) { renderer.dispose(); return; }
+    if (!drag && performance.now() - dernierGeste > 2000) corps.rotation.y += 0.006;
+    renderer.render(scene, cam); requestAnimationFrame(boucle);
+  })();
+}
+
 function renderLaboNiveauxPage(el){
   const clients = data.clients.filter(c => !c.estCoach || c.id === 'yohanp');
   const defaut = _lab.clientId || 'yohanp';
@@ -3471,7 +3551,7 @@ function renderLaboNiveauxPage(el){
   const etalons = exos.filter(e => e.etalon).sort((a, b) => b.niv - a.niv);
   const autres = exos.filter(e => !e.etalon && e.niv != null).sort((a, b) => b.prog - a.prog);
   el.innerHTML = entete + `<div style="display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:18px;align-items:start;" class="lab-grille">
-    <div class="table-card" style="padding:14px;">${_labAvatarSvg()}<div style="margin-top:8px;text-align:center;">${legende}<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="width:10px;height:10px;border-radius:3px;background:#2a2f3f;"></span>pas de données</span></div></div>
+    <div class="table-card" style="padding:14px;"><div id="labAvatar3d" style="width:100%;min-height:280px;display:flex;align-items:center;justify-content:center;color:var(--text-faint);font-size:12px;">Chargement de l'avatar 3D…</div><div id="labZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:var(--text-faint);">Touche une zone du corps pour voir son niveau.</div><div style="margin-top:8px;text-align:center;">${legende}<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="width:10px;height:10px;border-radius:3px;background:#2a2f3f;"></span>pas de données</span></div></div>
     <div>
       <div class="table-card" style="padding:12px 14px;margin-bottom:12px;"><b>Niveau par muscle</b>
         ${zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;">
@@ -3485,6 +3565,7 @@ function renderLaboNiveauxPage(el){
         ${autres.slice(0, 25).map(e => `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;"><span style="flex:1;">${esc(e.nom)} <span style="color:var(--text-faint);font-size:11px;">${esc(e.groupe || '')}</span></span><span style="color:var(--text-faint);">${Math.round(e.base)} → ${Math.round(e.best)} kg</span><b style="width:70px;text-align:right;color:${e.prog > 0 ? '#1D9E75' : 'var(--text-faint)'};">${e.prog >= 0 ? '+' : ''}${e.prog.toFixed(0)} %</b></div>`).join('')}</div>
     </div></div>
     <style>@media(max-width:900px){.lab-grille{grid-template-columns:1fr !important;}}</style>`;
+  setTimeout(_labMonter3d, 0);
 }
 
 function renderClassementPage(el){
