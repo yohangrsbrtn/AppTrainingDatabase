@@ -6391,6 +6391,76 @@ async function confirmerAssignerTemplate(templateId){
     alert('Programme assigné.');
   } catch(e) { errEl.textContent = 'Erreur : ' + e.message; errEl.style.display = 'block'; }
 }
+
+// Copie le programme d'un client vers d'autres clients : une copie INDÉPENDANTE par client (blocs, séances, exercices,
+// reps/repos/RIR/tempos/commentaires/supersets) — jamais les charges ni les logs du client d'origine. Même règle que
+// toute assignation : le programme actif du client cible est désactivé (conservé avec ses logs) et la copie est créée
+// en brouillon, que tu ouvres ensuite dans sa fiche pour l'adapter avant de la publier.
+async function _copierProgrammeVersClient(prog, clientId){
+  await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&actif=eq.true`, { method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ actif: false }) });
+  const resCp = await fetch(`${SUPABASE_URL}/rest/v1/client_programmes`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify({ client_id: clientId, nom: prog.nom, actif: true, brouillon: true, source_template_id: prog.source_template_id || null }) });
+  if (!resCp.ok) throw new Error('programme_' + resCp.status);
+  const cp = (await resCp.json())[0];
+  const blocs = prog.blocs || [];
+  const resBlocs = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_blocs`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify(blocs.map((b, bi) => ({ client_programme_id: cp.id, type: b.type || null, nombre_semaines: b.nombre_semaines || null, ordre: bi }))) });
+  if (!resBlocs.ok) throw new Error('blocs_' + resBlocs.status);
+  const blocsSaved = await resBlocs.json(); const blocIdByOrdre = {}; blocsSaved.forEach(b => { blocIdByOrdre[b.ordre] = b.id; });
+  const seancesPayload = [];
+  blocs.forEach((b, bi) => (b.client_programme_seances || []).forEach((se, si) => seancesPayload.push({ bloc_id: blocIdByOrdre[bi], titre: se.titre, ordre: si })));
+  let seancesSaved = [];
+  if (seancesPayload.length) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_seances`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }), body: JSON.stringify(seancesPayload) });
+    if (!r.ok) throw new Error('seances_' + r.status);
+    seancesSaved = await r.json();
+  }
+  const seanceId = {}; seancesSaved.forEach(se => { seanceId[se.bloc_id + '|' + se.ordre] = se.id; });
+  const exos = [];
+  blocs.forEach((b, bi) => (b.client_programme_seances || []).forEach((se, si) => (se.client_programme_exercices || []).forEach((ex, ei) => exos.push({
+    seance_id: seanceId[blocIdByOrdre[bi] + '|' + si], exercice_id: ex.exercice_id, nom: ex.nom, ordre: ei, series: ex.series, reps: ex.reps, repos: ex.repos,
+    tempo: ex.tempo, rir: ex.rir, notes: ex.notes || null, superset_groupe: ex.superset_groupe ?? null }))));
+  if (exos.length) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_exercices`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(exos) });
+    if (!r.ok) throw new Error('exercices_' + r.status);
+  }
+  const iActif = blocs.findIndex(b => b.id && b.id === prog.bloc_actif_id);
+  if (iActif >= 0 && blocIdByOrdre[iActif]) await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`, { method: 'PATCH', headers: supaHeaders(), body: JSON.stringify({ bloc_actif_id: blocIdByOrdre[iActif] }) });
+  return cp;
+}
+function ouvrirCopierProgrammeVersClients(progId, sourceClientId){
+  const prog = (ficheData.tous_programmes || []).find(x => x.id === progId);
+  const autres = data.clients.filter(c => !c.estCoach && c.id !== sourceClientId).sort((a, b) => a.nom.localeCompare(b.nom));
+  const ov = document.createElement('div'); ov.className = 'modal-overlay'; ov.id = 'modal-copie-prog';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="modal-box" style="max-width:460px;">
+    <h3>Copier « ${esc((prog && prog.nom) || 'Programme')} » vers…</h3>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:8px;">Chaque client reçoit une copie indépendante (sans charges ni logs), en brouillon. <b>Son programme actif actuel sera désactivé</b> (conservé avec ses logs). Tu adaptes ensuite la copie dans sa fiche.</div>
+    <input type="text" placeholder="Filtrer…" oninput="document.querySelectorAll('#copieProgListe .copie-prog-row').forEach(r => { r.style.display = !this.value.trim() || r.dataset.nom.includes(this.value.toLowerCase().trim()) ? 'flex' : 'none'; })" style="width:100%;margin-bottom:8px;font-size:16px;">
+    <div id="copieProgListe" style="max-height:300px;overflow:auto;border:1px solid var(--hairline);border-radius:8px;padding:6px;">
+      ${autres.map(c => `<label class="copie-prog-row" data-nom="${esc(c.nom.toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:6px;"><input type="checkbox" value="${c.id}" style="width:16px;height:16px;"> ${esc(c.nom)}${(c.statut && c.statut !== 'actif') ? ` <span style="font-size:11px;color:var(--text-faint);">(${esc(c.statut)})</span>` : ''}</label>`).join('')}
+    </div>
+    <div id="copieProgErr" style="display:none;color:var(--critical);font-size:12px;margin-top:8px;"></div>
+    <div class="modal-actions"><button class="btn" onclick="document.getElementById('modal-copie-prog').remove()">Annuler</button>
+      <button class="btn primary" onclick="confirmerCopierProgramme(${progId})">Copier</button></div></div>`;
+  document.body.appendChild(ov);
+}
+async function confirmerCopierProgramme(progId){
+  const err = document.getElementById('copieProgErr');
+  const cibles = [...document.querySelectorAll('#copieProgListe input:checked')].map(i => i.value);
+  if (!cibles.length) { err.textContent = 'Coche au moins un client.'; err.style.display = 'block'; return; }
+  const noms = cibles.map(id => (data.clients.find(c => c.id === id) || {}).nom || id);
+  if (!confirm(`Copier ce programme pour : ${noms.join(', ')} ?\n\nLeur programme actif actuel sera désactivé (conservé avec ses logs) et la copie sera créée en brouillon.`)) return;
+  try {
+    const prog = await chargerProgrammeById(progId);
+    if (!prog) throw new Error('Programme introuvable.');
+    for (const cid of cibles) await _copierProgrammeVersClient(prog, cid);
+    document.getElementById('modal-copie-prog').remove();
+    if (cibles.length === 1) { await openPanel(cibles[0]); setFicheTab('programmes'); }
+    alert(`✅ Programme copié en brouillon pour : ${noms.join(', ')}.\nOuvre-le dans leur fiche pour l'adapter, puis publie-le.`);
+  } catch(e) { err.textContent = 'Erreur : ' + e.message; err.style.display = 'block'; }
+}
+
 async function assignerTemplateAuClient(templateId, clientId){
   if (exercicesData === null) exercicesData = await chargerExercices();
   if (templatesData === null) templatesData = await chargerTemplates();
@@ -8791,6 +8861,7 @@ function _ficheProgRow(p, c, archived){
           ? `<button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();desarchiverProgrammeClient(${p.id},'${c.id}')">↩ Désarchiver</button>`
           : `${p.brouillon ? `<button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();publierProgrammeClient(${p.id},'${c.id}')" title="Rend ce programme visible pour le client">✅ Publier</button>` : ''}
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirEditionArchitecture(${p.id})">Éditer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirCopierProgrammeVersClients(${p.id},'${c.id}')" title="Donner une copie de ce programme à un ou plusieurs autres clients">→ Autres clients</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();toggleProgrammeActif(${p.id},${p.actif},'${c.id}')">${p.actif?'Désactiver':'Activer'}</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="event.stopPropagation();ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ton nouveau programme est disponible !','Ton programme « ${esc(p.nom).replace(/'/g, "\\'")} » vient d\\'être mis à jour, va y jeter un œil.')" title="Notifier">🔔</button>
         <button class="icon-btn del" onclick="event.stopPropagation();archiverProgrammeClient(${p.id},'${c.id}')" title="Archiver">${iTrash()}</button>`}
