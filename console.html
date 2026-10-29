@@ -3381,14 +3381,17 @@ async function _labCharger(clientId){
   } catch(e) { _lab.erreur = e.message; _lab.charge = true; }
   renderMain();
 }
-function _labCalculer(){
+// Résultat à une date donnée (cutoff en ms) : on ne retient que les séries loggées jusque-là → permet de comparer
+// « maintenant » et « il y a X jours » (progression).
+function _labResultat(cutoff){
   const poids = parseFloat(_lab.poids) || 0;
-  const parEx = {}; // clé = nom bibliothèque → { nom, groupe, sets:[{ordre,e1rm}] }
+  const parEx = {};
   (_lab.progs || []).forEach((prog, pi) => (prog.blocs || []).forEach((b, bi) => (b.client_programme_seances || []).forEach(se => (se.client_programme_exercices || []).forEach(ex => {
     const lib = exercicesData.find(l => l.id === ex.exercice_id) || exercicesData.find(l => l.nom.toLowerCase() === (ex.nom || '').toLowerCase());
     if (!lib) return;
     Object.values(prog.logs || {}).forEach(l => {
       if (l.client_programme_exercice_id !== ex.id) return;
+      if (cutoff && l.updated_at && new Date(l.updated_at).getTime() > cutoff) return;
       const charge = parseFloat(l.charge), reps = parseFloat(l.reps);
       if (!(charge > 0) || !(reps > 0)) return;
       const eff = Math.min(30, reps + (parseFloat(l.rir) || 0));
@@ -3417,7 +3420,42 @@ function _labCalculer(){
       // un étalon (absolu) prime sur une progression relative ; à source égale on garde le plus haut
       if ((e.etalon && !cur.etalon) || (e.etalon === cur.etalon && e.niv > cur.niv)) { cur.niv = e.niv; cur.src = e; cur.etalon = e.etalon; } });
   });
-  _lab.res = { exos, zones, poids };
+  return { exos, zones, poids };
+}
+function _labCalculer(){
+  const jours = _lab.periode || 30;
+  _lab.res = _labResultat(0);
+  _lab.avant = _labResultat(Date.now() - jours * 864e5);
+}
+// Régions du radar (mêmes axes que l'écran de référence) : moyenne du niveau de leurs zones, une zone sans donnée comptant pour 0.
+const LAB_REGIONS = [
+  { nom: 'Dos', zones: ['lats', 'traps', 'lombaires'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Tronc', zones: ['abdos'] },
+  { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules', 'delt_ar'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers', 'mollets'] },
+];
+function _labValeurRegion(res, reg){
+  const n = reg.zones.map(z => { const d = res.zones[z]; return d ? Math.max(0, Math.min(1, (d.niv - 1) / 5)) : 0; }); // 1 = niveau « Diamant »
+  return n.reduce((a, b) => a + b, 0) / n.length;
+}
+function _labRadarSvg(){
+  const cx = 150, cy = 140, R = 92;
+  const pt = (i, v) => { const a = (-120 + i * 60) * Math.PI / 180; return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v]; };
+  const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ');
+  const now = LAB_REGIONS.map(r => _labValeurRegion(_lab.res, r)), avant = LAB_REGIONS.map(r => _labValeurRegion(_lab.avant, r));
+  let s = '';
+  [0.2, 0.4, 0.6, 0.8, 1].forEach(r => { s += `<polygon points="${poly(Array(6).fill(r))}" fill="none" stroke="#2c3a58" stroke-width="1"/>`; });
+  LAB_REGIONS.forEach((r, i) => {
+    const [x, y] = pt(i, 1); s += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2c3a58"/>`;
+    const [lx, ly] = pt(i, 1.2); const anc = lx < cx - 8 ? 'end' : lx > cx + 8 ? 'start' : 'middle';
+    s += `<text x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${anc}" font-size="12" fill="#c9d1e6">${r.nom}</text>`;
+  });
+  s += `<polygon points="${poly(avant)}" fill="#8892a433" stroke="#8892a4" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  s += `<polygon points="${poly(now)}" fill="#4fc3f733" stroke="#4fc3f7" stroke-width="2"/>`;
+  now.forEach((v, i) => { const [x, y] = pt(i, v); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#4fc3f7"/>`; });
+  return `<svg viewBox="-24 0 348 285" width="100%" role="img" aria-label="Radar des régions du corps">${s}</svg>
+    <div style="display:flex;gap:16px;justify-content:center;font-size:11.5px;color:var(--text-faint);margin-top:-6px;">
+      <span><span style="display:inline-block;width:10px;height:10px;background:#4fc3f7;border-radius:2px;margin-right:5px;"></span>Maintenant</span>
+      <span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Il y a ${_lab.periode || 30} jours</span>
+      <span>bord = niveau Diamant</span></div>`;
 }
 
 // Avatar : vue de face + de dos, zones SVG colorées selon le niveau.
@@ -3453,9 +3491,9 @@ function _labAvatarSvg(){
     <svg viewBox="0 0 200 410" width="46%" role="img" aria-label="Avatar de dos">${dos}</svg></div>`;
 }
 
-// Avatar 3D (three.js chargé à la demande depuis un CDN) : mannequin simple fait de formes, zones colorées par niveau,
-// rotation lente automatique ; on peut l'attraper au doigt/souris pour le tourner, il reprend seul après 2 s. Un clic sur
-// une zone affiche son nom et son niveau. Si le chargement échoue (hors-ligne), on retombe sur l'avatar SVG face/dos.
+// Avatar 3D (three.js chargé à la demande depuis un CDN) : mannequin musclé fait de formes, une zone par groupe, colorée selon le
+// niveau ; les zones qui ont PROGRESSÉ sur la période pulsent doucement. Rotation lente automatique, orientable au doigt/souris
+// (reprise seule après 2 s), clic sur une zone = son nom et son niveau. Hors-ligne : repli sur l'avatar SVG face/dos.
 let _lab3d = null;
 async function _labMonter3d(){
   const cont = document.getElementById('labAvatar3d');
@@ -3471,44 +3509,54 @@ async function _labMonter3d(){
   cont.innerHTML = ''; cont.appendChild(renderer.domElement); renderer.domElement.style.touchAction = 'pan-y'; renderer.domElement.style.cursor = 'grab';
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(30, l / h, 0.1, 50); cam.position.set(0, 0.92, 3.55); cam.lookAt(0, 0.9, 0);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-  const d1 = new THREE.DirectionalLight(0xffffff, 1.1); d1.position.set(2, 3, 3); scene.add(d1);
-  const d2 = new THREE.DirectionalLight(0x8899ff, 0.5); d2.position.set(-3, 1, -2); scene.add(d2);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.15); d1.position.set(2, 3, 3); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0x8899ff, 0.55); d2.position.set(-3, 1, -2); scene.add(d2);
   const corps = new THREE.Group(); scene.add(corps);
   const sol = new THREE.Mesh(new THREE.CircleGeometry(0.55, 40), new THREE.MeshBasicMaterial({ color: 0x1b2030 })); sol.rotation.x = -Math.PI / 2; sol.position.y = -0.005; scene.add(sol);
   const matNeutre = new THREE.MeshStandardMaterial({ color: 0x2a3042, roughness: 0.7 });
-  const zonesMeshes = [];
-  const matZone = id => { const d = _lab.res.zones[id]; return new THREE.MeshStandardMaterial({ color: d ? new THREE.Color(_labCouleur(d.niv)) : new THREE.Color(0x303650), roughness: 0.45, metalness: 0.1, emissive: d ? new THREE.Color(_labCouleur(d.niv)) : new THREE.Color(0x000000), emissiveIntensity: d ? 0.18 : 0 }); };
-  const ell = (zone, x, y, z, sx, sy, sz, rx = 0, rz = 0) => {
+  const zonesMeshes = [], pulses = [], matCache = {};
+  const progresse = id => { const a = _lab.avant && _lab.avant.zones[id], n = _lab.res.zones[id]; return !!(n && (!a || n.niv > a.niv + 0.05)); };
+  const matZone = id => {
+    if (matCache[id]) return matCache[id];
+    const d = _lab.res.zones[id], col = d ? new THREE.Color(_labCouleur(d.niv)) : new THREE.Color(0x303650);
+    const m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.42, metalness: 0.12, emissive: d ? col : new THREE.Color(0x000000), emissiveIntensity: d ? 0.16 : 0 });
+    if (progresse(id)) pulses.push(m);
+    return (matCache[id] = m);
+  };
+  const ell = (zone, x, y, z, sx, sy, sz, rz = 0, rx = 0) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), zone ? matZone(zone) : matNeutre);
-    m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.rotation.x = rx; m.rotation.z = rz; if (zone) { m.userData.zone = zone; zonesMeshes.push(m); } corps.add(m); return m; };
+    m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.rotation.z = rz; m.rotation.x = rx; if (zone) { m.userData.zone = zone; zonesMeshes.push(m); } corps.add(m); return m; };
   const capsule = (x, y, z, r, len, rz = 0) => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 14), matNeutre); m.position.set(x, y, z); m.rotation.z = rz; corps.add(m); return m; };
-  const boite = (zone, x, y, z, w, hh, p) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, p), matZone(zone)); m.position.set(x, y, z); m.userData.zone = zone; zonesMeshes.push(m); corps.add(m); return m; };
-  // tête, cou, tronc, bassin
-  ell(null, 0, 1.72, 0.005, 0.105, 0.125, 0.115); capsule(0, 1.57, 0, 0.045, 0.06);
-  ell(null, 0, 1.24, 0, 0.19, 0.31, 0.105); ell(null, 0, 0.98, 0, 0.17, 0.12, 0.1);
-  // haut du corps
+  // tête, cou, tronc (poitrine large, taille fine), bassin
+  ell(null, 0, 1.73, 0.005, 0.1, 0.12, 0.11); capsule(0, 1.58, 0, 0.048, 0.06);
+  ell(null, 0, 1.34, 0, 0.21, 0.2, 0.108); ell(null, 0, 1.12, 0, 0.155, 0.14, 0.092); ell(null, 0, 0.97, 0, 0.17, 0.1, 0.1);
   [-1, 1].forEach(c => {
-    ell('pecs', c * 0.085, 1.37, 0.075, 0.095, 0.075, 0.05);
-    ell('epaules', c * 0.215, 1.44, 0.005, 0.07, 0.075, 0.07);
-    ell('delt_ar', c * 0.205, 1.43, -0.05, 0.055, 0.06, 0.04);
-    ell('lats', c * 0.115, 1.26, -0.085, 0.085, 0.17, 0.045);
-    capsule(c * 0.265, 1.24, 0, 0.043, 0.2, c * 0.06);
-    ell('biceps', c * 0.265, 1.27, 0.03, 0.04, 0.095, 0.035);
-    ell('triceps', c * 0.265, 1.27, -0.035, 0.042, 0.1, 0.035);
-    capsule(c * 0.292, 0.98, 0.01, 0.034, 0.2, c * 0.04); ell(null, c * 0.3, 0.8, 0.015, 0.04, 0.05, 0.035);
-    // bas du corps
-    ell('fessiers', c * 0.082, 0.92, -0.075, 0.09, 0.095, 0.085);
-    capsule(c * 0.09, 0.72, 0, 0.062, 0.3);
-    ell('quadris', c * 0.09, 0.73, 0.03, 0.075, 0.2, 0.065);
-    ell('ischios', c * 0.09, 0.73, -0.045, 0.07, 0.18, 0.058);
-    capsule(c * 0.09, 0.27, 0, 0.045, 0.26);
-    ell('mollets', c * 0.09, 0.28, -0.025, 0.058, 0.15, 0.06);
-    ell(null, c * 0.09, 0.03, 0.04, 0.05, 0.03, 0.095);
+    // poitrine, abdos latéraux
+    ell('pecs', c * 0.1, 1.38, 0.085, 0.108, 0.08, 0.052, c * -0.12);
+    ell('abdos', c * 0.125, 1.13, 0.045, 0.032, 0.095, 0.045);
+    // épaules : 3 faisceaux (avant/côté = « épaules », arrière = « deltoïdes postérieurs »)
+    ell('epaules', c * 0.225, 1.45, 0.03, 0.058, 0.07, 0.058); ell('epaules', c * 0.245, 1.44, -0.005, 0.06, 0.07, 0.058);
+    ell('delt_ar', c * 0.225, 1.445, -0.05, 0.056, 0.065, 0.05);
+    // dos
+    ell('lats', c * 0.135, 1.26, -0.088, 0.085, 0.17, 0.05, c * 0.25);
+    ell('lombaires', c * 0.042, 1.03, -0.09, 0.036, 0.1, 0.04);
+    // bras
+    capsule(c * 0.28, 1.24, 0, 0.04, 0.2, c * 0.07);
+    ell('biceps', c * 0.283, 1.26, 0.032, 0.045, 0.1, 0.042); ell('triceps', c * 0.283, 1.26, -0.042, 0.048, 0.11, 0.045);
+    ell(null, c * 0.305, 1.0, 0.01, 0.04, 0.12, 0.04, c * 0.06); capsule(c * 0.325, 0.82, 0.015, 0.03, 0.06, c * 0.06); ell(null, c * 0.33, 0.76, 0.02, 0.04, 0.05, 0.03);
+    // jambes
+    ell('fessiers', c * 0.088, 0.93, -0.088, 0.095, 0.1, 0.095);
+    capsule(c * 0.095, 0.71, 0, 0.058, 0.3); ell(null, c * 0.092, 0.43, 0.01, 0.05, 0.05, 0.05);
+    ell('quadris', c * 0.092, 0.74, 0.066, 0.042, 0.2, 0.046); ell('quadris', c * 0.138, 0.71, 0.036, 0.046, 0.19, 0.052, c * -0.04); ell('quadris', c * 0.066, 0.58, 0.056, 0.04, 0.1, 0.042);
+    ell('ischios', c * 0.118, 0.71, -0.058, 0.046, 0.19, 0.05); ell('ischios', c * 0.07, 0.71, -0.062, 0.04, 0.19, 0.046);
+    capsule(c * 0.092, 0.24, 0, 0.04, 0.3);
+    ell('mollets', c * 0.112, 0.3, -0.03, 0.036, 0.125, 0.046); ell('mollets', c * 0.072, 0.3, -0.03, 0.036, 0.125, 0.046);
+    ell(null, c * 0.092, 0.03, 0.045, 0.05, 0.03, 0.095);
   });
-  ell('traps', 0, 1.45, -0.06, 0.15, 0.1, 0.05);
-  ell('lombaires', 0, 1.04, -0.085, 0.075, 0.085, 0.035);
-  [0, 1, 2].forEach(r => [-1, 1].forEach(c => boite('abdos', c * 0.032, 1.2 - r * 0.062, 0.1, 0.05, 0.05, 0.035)));
+  // trapèzes (haut + milieu du dos), abdominaux en tablette
+  ell('traps', 0, 1.51, -0.058, 0.14, 0.07, 0.05); ell('traps', 0, 1.38, -0.098, 0.1, 0.1, 0.035);
+  [0, 1, 2, 3].forEach(r => [-1, 1].forEach(c => ell('abdos', c * 0.034, 1.23 - r * 0.052, 0.098 - r * 0.004, 0.03, 0.022, 0.02)));
   corps.rotation.y = 0.5;
   const rc = new THREE.Raycaster(), ptr = new THREE.Vector2();
   let drag = null, dernierGeste = 0, deplace = false;
@@ -3522,13 +3570,16 @@ async function _labMonter3d(){
     rc.setFromCamera(ptr, cam); const hit = rc.intersectObjects(zonesMeshes)[0];
     const info = document.getElementById('labZoneInfo'); if (!info) return;
     if (!hit) { info.textContent = 'Touche une zone du corps pour voir son niveau.'; return; }
-    const z = hit.object.userData.zone, d = _lab.res.zones[z];
-    info.innerHTML = d ? `<b>${LAB_ZONE_NOM[z] || z}</b> — ${d.etalon ? _labRang(d.niv) + ' · étalon ' + esc(d.src.nom) : '+' + Math.round(d.src.prog) + ' % · ' + esc(d.src.nom)}` : `<b>${LAB_ZONE_NOM[z] || z}</b> — pas encore de données`;
+    const z = hit.object.userData.zone, d = _lab.res.zones[z], a = _lab.avant && _lab.avant.zones[z];
+    const fleche = progresse(z) ? ` <span style="color:#1D9E75;">▲ progression sur ${_lab.periode || 30} jours</span>` : '';
+    info.innerHTML = d ? `<b>${LAB_ZONE_NOM[z] || z}</b> — ${d.etalon ? _labRang(d.niv) + ' · étalon ' + esc(d.src.nom) : '+' + Math.round(d.src.prog) + ' % · ' + esc(d.src.nom)}${fleche}` : `<b>${LAB_ZONE_NOM[z] || z}</b> — pas encore de données`;
   });
   const etat = { stop: false }; _lab3d = etat;
-  (function boucle(){
+  (function boucle(t){
     if (etat.stop || !cont.isConnected) { renderer.dispose(); return; }
     if (!drag && performance.now() - dernierGeste > 2000) corps.rotation.y += 0.006;
+    const k = 0.42 + 0.3 * Math.sin((t || 0) / 380);
+    pulses.forEach(m => { m.emissiveIntensity = k; });
     renderer.render(scene, cam); requestAnimationFrame(boucle);
   })();
 }
@@ -3542,7 +3593,9 @@ function renderLaboNiveauxPage(el){
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
       <select onchange="_lab.poids=null;_lab.clientId=this.value;_labCharger(this.value)" style="font-size:14px;"><option value="yohanp" ${_lab.clientId==='yohanp'?'selected':''}>Yohan (moi)</option>${clients.filter(c=>c.id!=='yohanp').map(c => `<option value="${c.id}" ${_lab.clientId===c.id?'selected':''}>${esc(c.nom)}</option>`).join('')}</select>
       <label style="font-size:12.5px;color:var(--text-faint);">Poids de corps (kg)</label><input type="number" step="0.1" value="${_lab.poids||''}" style="width:90px;font-size:14px;" onchange="_lab.poids=this.value;_labCalculer();renderMain()">
-      <select onchange="_lab.sexe=this.value;_labCalculer();renderMain()" style="font-size:14px;"><option value="H" ${_lab.sexe==='H'?'selected':''}>Homme</option><option value="F" ${_lab.sexe==='F'?'selected':''}>Femme</option></select></div>`;
+      <select onchange="_lab.sexe=this.value;_labCalculer();renderMain()" style="font-size:14px;"><option value="H" ${_lab.sexe==='H'?'selected':''}>Homme</option><option value="F" ${_lab.sexe==='F'?'selected':''}>Femme</option></select>
+      <label style="font-size:12.5px;color:var(--text-faint);">Progression sur</label>
+      <select onchange="_lab.periode=+this.value;_labCalculer();renderMain()" style="font-size:14px;">${[[7,'7 jours'],[30,'30 jours'],[90,'90 jours']].map(([v,l]) => `<option value="${v}" ${(_lab.periode||30)===v?'selected':''}>${l}</option>`).join('')}</select></div>`;
   if (!_lab.charge) { el.innerHTML = entete + `<div style="padding:40px;text-align:center;color:var(--text-faint);">Calcul des niveaux depuis les logs…</div>`; return; }
   if (_lab.erreur || !_lab.res) { el.innerHTML = entete + `<div class="empty-panel"><strong>Erreur</strong>${esc(_lab.erreur || 'Aucune donnée.')}</div>`; return; }
   const { exos, zones } = _lab.res;
@@ -3551,7 +3604,8 @@ function renderLaboNiveauxPage(el){
   const etalons = exos.filter(e => e.etalon).sort((a, b) => b.niv - a.niv);
   const autres = exos.filter(e => !e.etalon && e.niv != null).sort((a, b) => b.prog - a.prog);
   el.innerHTML = entete + `<div style="display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:18px;align-items:start;" class="lab-grille">
-    <div class="table-card" style="padding:14px;"><div id="labAvatar3d" style="width:100%;min-height:280px;display:flex;align-items:center;justify-content:center;color:var(--text-faint);font-size:12px;">Chargement de l'avatar 3D…</div><div id="labZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:var(--text-faint);">Touche une zone du corps pour voir son niveau.</div><div style="margin-top:8px;text-align:center;">${legende}<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="width:10px;height:10px;border-radius:3px;background:#2a2f3f;"></span>pas de données</span></div></div>
+    <div><div class="table-card" style="padding:14px;margin-bottom:12px;"><div id="labAvatar3d" style="width:100%;min-height:280px;display:flex;align-items:center;justify-content:center;color:var(--text-faint);font-size:12px;">Chargement de l'avatar 3D…</div><div id="labZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:var(--text-faint);">Touche une zone du corps pour voir son niveau.</div><div style="margin-top:8px;text-align:center;">${legende}<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="width:10px;height:10px;border-radius:3px;background:#2a2f3f;"></span>pas de données</span></div></div>
+      <div class="table-card" style="padding:14px;"><b>Régions du corps</b> <span style="font-size:11.5px;color:var(--text-faint);">— niveau moyen par région, maintenant vs avant</span>${_labRadarSvg()}</div></div>
     <div>
       <div class="table-card" style="padding:12px 14px;margin-bottom:12px;"><b>Niveau par muscle</b>
         ${zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;">
