@@ -183,7 +183,44 @@ async function _chargerCarteProgression() {
   if (el && S.client === client) el.innerHTML = _carteCardHtml(_carteCache.html);
 }
 
+// ── Mon avatar : niveaux par muscle (module partagé niveaux.js) ─────────────
+// Phase de test : visible uniquement pour le compte du coach (yohanp) et, en vue client, quand le coach consulte l'app.
+// Pour l'ouvrir à tous les clients : vider NV_COMPTES_AUTORISES ne suffit pas, il faut changer _nvAutorise().
+const NV_COMPTES_AUTORISES = ['yohanp'];
+let _nvCache = null;
+function _nvAutorise() {
+  try { if (localStorage.getItem('at_coach') === '1') return true; } catch(e) {}
+  return NV_COMPTES_AUTORISES.includes(S.client);
+}
+async function _chargerNiveauxProgression() {
+  const el = document.getElementById('nvProgression');
+  if (!el || !_nvAutorise() || typeof nvChargerClient !== 'function') return;
+  const client = S.client;
+  const rendre = () => {
+    const c = _nvCache;
+    if (!c || c.client !== client || !document.getElementById('nvProgression')) return;
+    const poids = c.d.poids, sexe = c.d.sexe || 'H';
+    const res = nvCalculer(c.d, 0, poids, sexe), avant = nvCalculer(c.d, Date.now() - 30 * 864e5, poids, sexe);
+    const zl = Object.entries(res.zones).sort((a, b) => b[1].niv - a[1].niv).slice(0, 8);
+    const carte = (titre, inner) => `<div style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:12px 14px;margin-bottom:10px;"><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${titre}</div>${inner}</div>`;
+    const vide = !zl.length;
+    document.getElementById('nvProgression').innerHTML =
+      carte('Mon avatar', `<div id="nvAvatar3d" style="width:100%;min-height:260px;display:flex;align-items:center;justify-content:center;color:#8892a4;font-size:12px;">Chargement…</div>
+        <div id="nvZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:#8892a4;">${vide ? 'Logge tes séances (charge + reps) pour voir ton avatar évoluer.' : 'Touche une zone du corps pour voir son niveau.'}</div>
+        <div style="margin-top:8px;text-align:center;">${nvLegendeHtml()}</div>
+        ${poids ? '' : '<div style="margin-top:8px;font-size:11.5px;color:#e8a33d;text-align:center;">Renseigne ton poids dans Mensurations pour débloquer les rangs sur les exercices à la barre.</div>'}`) +
+      carte('Mes régions du corps — maintenant vs il y a 30 jours', nvRadarSvg(res, avant, 30)) +
+      (zl.length ? carte('Mes niveaux par muscle', zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12.5px;"><span style="width:112px;">${NV_ZONE_NOM[id] || id}</span><div style="flex:1;height:7px;background:#1e2235;border-radius:4px;overflow:hidden;"><div style="width:${Math.round((d.niv - 1) / 8 * 100)}%;height:100%;background:${nvCouleur(d.niv)};"></div></div><b style="width:74px;text-align:right;color:${nvCouleur(d.niv)};">${d.etalon ? nvRang(d.niv) : '+' + Math.round(d.src.prog) + ' %'}</b></div>`).join('')) : '');
+    nv3dMonter(document.getElementById('nvAvatar3d'), res, avant, { jours: 30, infoId: 'nvZoneInfo' });
+  };
+  if (_nvCache && _nvCache.client === client) { rendre(); return; }
+  el.innerHTML = '<div style="padding:18px;text-align:center;color:#8892a4;font-size:12px;">Calcul de ton avatar…</div>';
+  try { _nvCache = { client, d: await nvChargerClient(client) }; rendre(); }
+  catch(e) { el.innerHTML = ''; }
+}
+
 function renderProgressionPage() {
+  setTimeout(_chargerNiveauxProgression, 0);
   setTimeout(_chargerCarteProgression, 0);
   const p = S.data.prog || {};
   const niveau = p.niveau || 1;
@@ -314,6 +351,7 @@ function renderProgressionPage() {
     ${renderGauge(p.assiduiteGlobale || 0, '#f59e0b', 'Assiduité globale', (p.assiduiteGlobale || 0) + '%', '')}
     ${pasHtml}
     <div id="carteProgression">${_carteCache && _carteCache.client === S.client ? _carteCardHtml(_carteCache.html) : ''}</div>
+    <div id="nvProgression"></div>
     ${collectionHtml}
     ${historiqueHtml}
 
