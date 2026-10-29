@@ -632,6 +632,7 @@ const NAV = [
   ]},
   { group:"Système", items:[
     { id:"protocole", label:"Protocole", icon:iFlask() },
+    { id:"labo-niveaux", label:"Labo niveaux", icon:iTrophy() },
     { id:"migration", label:"Migration", icon:iDatabase() },
     { id:"parametres", label:"Paramètres", icon:iCog() },
   ]},
@@ -1896,6 +1897,7 @@ function renderMain(){
   if (state.nav === 'bilan-detail') { renderBilanDetailPage(el); return; }
   if (state.nav === 'classement') { renderClassementPage(el); return; }
   if (state.nav === 'cartes-analyses') { renderCartesAnalysesPage(el); return; }
+  if (state.nav === 'labo-niveaux') { renderLaboNiveauxPage(el); return; }
   if (state.nav === 'notifications') { renderNotificationsPage(el); return; }
   if (state.nav === 'chat') { renderChatCoachPage(el); return; }
   if (state.nav === 'base') { renderBasePage(el); return; }
@@ -3323,6 +3325,166 @@ async function renderCartesAnalysesPage(el, depuisCache){
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;"><div><b style="cursor:pointer;" onclick="openPanel('${r.client_id}').then(()=>setFicheTab('progression'))">${nom(r.client_id)}</b> <span style="color:var(--text-faint);font-size:12px;">· ${fmt(r.created_at)}${(r.version||1) > 1 ? ` · version ${r.version}` : ''}</span></div>${chip(r.statut)}</div>
       ${r.scores ? `<div style="margin-bottom:6px;">${_carteScoresHtml(r.scores)}</div>` : ''}
       <details><summary style="cursor:pointer;color:var(--accent);font-size:12.5px;">Analyse</summary><div style="white-space:pre-wrap;line-height:1.55;font-size:13px;margin-top:6px;">${esc(r.texte)}</div>${versionsHtml(r)}</details></div>`).join('') : '<p style="color:var(--text-faint);">Rien pour l\'instant.</p>'}`;
+}
+
+// ═══ Labo niveaux — prototype PRIVÉ (visible uniquement dans cette console, rien côté client) ═══════════════
+// Idée « Liftoff » : un niveau par muscle, affiché sur un avatar dont les zones se colorent selon l'évolution.
+//  • Exercices ÉTALONS (barre libre, comparables d'une salle à l'autre) : 1RM estimé (Epley, RIR pris en compte)
+//    ramené au poids de corps → rang absolu (Bois…Olympien) via des barèmes en multiples du poids de corps.
+//  • Tous les autres exercices (machines, isolations) : AUCUN barème absolu — deux machines « leg extension » ne
+//    se valent pas. On mesure seulement la progression du client contre lui-même (meilleur 1RM estimé vs ses
+//    débuts sur cet exercice), affichée avec « ~ ».
+const LAB_RANGS = ['Bois','Bronze','Argent','Or','Platine','Diamant','Champion','Titan','Olympien'];
+const LAB_COULEURS = ['#8b6b4a','#c27a3c','#aab3c5','#f0c443','#3fd0c4','#5aa7ff','#a98bff','#f0508a','#ffb020'];
+// seuils (× poids de corps) pour passer Bronze, Argent, Or, Platine, Diamant, Champion, Titan, Olympien — homme ; femme = × coef
+const LAB_ETALONS = {
+  'Développé couché barre':  { zones:['pecs'],                         h:[0.50,0.75,1.00,1.25,1.50,1.75,2.00,2.25], bas:false },
+  'Développé incliné barre': { zones:['pecs'],                         h:[0.40,0.65,0.85,1.05,1.30,1.50,1.75,2.00], bas:false },
+  'Squat':                   { zones:['quadris','fessiers'],           h:[0.75,1.00,1.25,1.50,1.75,2.00,2.50,2.75], bas:true },
+  'Deadlift':                { zones:['lats','traps','lombaires','ischios','fessiers'], h:[1.00,1.25,1.50,1.75,2.00,2.25,2.75,3.00], bas:true },
+  'RDL':                     { zones:['ischios','fessiers'],           h:[0.75,1.00,1.25,1.50,1.75,2.00,2.40,2.75], bas:true },
+  'Hiptrust':                { zones:['fessiers'],                     h:[0.75,1.25,1.75,2.25,2.75,3.25,3.75,4.25], bas:true },
+  'Rowing barre':            { zones:['lats','traps'],                 h:[0.40,0.60,0.80,1.00,1.20,1.40,1.65,1.90], bas:false },
+};
+const LAB_ZONES_GROUPE = {
+  'Pectoraux':['pecs'], 'Dos (dorsaux)':['lats'], 'Dos (trapèzes)':['traps'], 'Dos (global)':['lats','traps','lombaires'],
+  'Epaules (anterieur)':['epaules'], 'Epaules (latéral)':['epaules'], 'Epaules (posterieur)':['delt_ar'],
+  'Biceps':['biceps'], 'Triceps':['triceps'], 'Abdos':['abdos'], 'Lombaires':['lombaires'],
+  'Quadriceps':['quadris'], 'Ischios':['ischios'], 'Fessiers':['fessiers'], 'Mollets':['mollets'],
+};
+const LAB_ZONE_NOM = { pecs:'Pectoraux', lats:'Dorsaux', traps:'Trapèzes', lombaires:'Lombaires', epaules:'Épaules', delt_ar:'Deltoïdes postérieurs', biceps:'Biceps', triceps:'Triceps', abdos:'Abdos', quadris:'Quadriceps', ischios:'Ischios', fessiers:'Fessiers', mollets:'Mollets' };
+let _lab = { clientId: null, charge: false, sexe: 'H', poids: null, res: null, erreur: null };
+
+function _labNiveauDepuisRatio(ratio, seuils){
+  if (ratio < seuils[0]) return 1 + Math.max(0, ratio) / seuils[0];
+  for (let i = 0; i < seuils.length - 1; i++) if (ratio < seuils[i + 1]) return (i + 2) + (ratio - seuils[i]) / (seuils[i + 1] - seuils[i]);
+  return 9;
+}
+const _labRang = niv => LAB_RANGS[Math.max(0, Math.min(8, Math.floor(niv) - 1))];
+const _labCouleur = niv => niv == null ? '#2a2f3f' : LAB_COULEURS[Math.max(0, Math.min(8, Math.floor(niv) - 1))];
+
+async function _labCharger(clientId){
+  _lab.charge = false; _lab.erreur = null; _lab.res = null; renderMain();
+  try {
+    if (exercicesData === null) exercicesData = await chargerExercices();
+    const [profil, mens, progs] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=sexe`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/mensurations?client_id=eq.${encodeURIComponent(clientId)}&poids=not.is.null&order=date.desc&limit=1&select=date,poids`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc&select=id`, { headers: supaHeaders() }).then(r => r.ok ? r.json() : []),
+    ]);
+    const progsFull = [];
+    for (const p of progs) { const f = await chargerProgrammeById(p.id); if (f) progsFull.push(f); }
+    if (profil[0] && profil[0].sexe) _lab.sexe = profil[0].sexe;
+    _lab.poids = _lab.poids || (mens[0] ? mens[0].poids : null);
+    _lab.progs = progsFull; _lab.clientId = clientId; _lab.charge = true;
+    _labCalculer();
+  } catch(e) { _lab.erreur = e.message; _lab.charge = true; }
+  renderMain();
+}
+function _labCalculer(){
+  const poids = parseFloat(_lab.poids) || 0;
+  const parEx = {}; // clé = nom bibliothèque → { nom, groupe, sets:[{ordre,e1rm}] }
+  (_lab.progs || []).forEach((prog, pi) => (prog.blocs || []).forEach((b, bi) => (b.client_programme_seances || []).forEach(se => (se.client_programme_exercices || []).forEach(ex => {
+    const lib = exercicesData.find(l => l.id === ex.exercice_id) || exercicesData.find(l => l.nom.toLowerCase() === (ex.nom || '').toLowerCase());
+    if (!lib) return;
+    Object.values(prog.logs || {}).forEach(l => {
+      if (l.client_programme_exercice_id !== ex.id) return;
+      const charge = parseFloat(l.charge), reps = parseFloat(l.reps);
+      if (!(charge > 0) || !(reps > 0)) return;
+      const eff = Math.min(30, reps + (parseFloat(l.rir) || 0));
+      (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: pi * 1e6 + bi * 1e4 + (l.semaine || 0), e1rm: charge * (1 + eff / 30), charge, reps });
+    });
+  }))));
+  const exos = Object.values(parEx).map(e => {
+    e.sets.sort((a, b) => a.ordre - b.ordre);
+    e.best = Math.max(...e.sets.map(s => s.e1rm));
+    const debut = e.sets.slice(0, Math.max(3, Math.ceil(e.sets.length / 5)));
+    e.base = Math.max(...debut.map(s => s.e1rm));
+    e.prog = e.base > 0 ? (e.best / e.base - 1) * 100 : 0;
+    e.nbSets = e.sets.length;
+    const et = LAB_ETALONS[e.nom];
+    if (et && poids) {
+      const coef = _lab.sexe === 'F' ? (et.bas ? 0.8 : 0.6) : 1;
+      e.ratio = e.best / poids; e.niv = _labNiveauDepuisRatio(e.ratio, et.h.map(x => x * coef)); e.etalon = true;
+    } else if (e.nbSets >= 3) { e.niv = Math.max(1, Math.min(4, 1 + Math.max(0, e.prog) / 15)); e.etalon = false; } // plafonné à « Or » : une progression relative ne vaut jamais un rang absolu
+    return e;
+  });
+  const zones = {};
+  exos.forEach(e => {
+    if (e.niv == null) return;
+    const zs = e.etalon ? LAB_ETALONS[e.nom].zones : (LAB_ZONES_GROUPE[e.groupe] || []);
+    zs.forEach(z => { const cur = zones[z] || (zones[z] = { niv: 0, src: null, etalon: false });
+      // un étalon (absolu) prime sur une progression relative ; à source égale on garde le plus haut
+      if ((e.etalon && !cur.etalon) || (e.etalon === cur.etalon && e.niv > cur.niv)) { cur.niv = e.niv; cur.src = e; cur.etalon = e.etalon; } });
+  });
+  _lab.res = { exos, zones, poids };
+}
+
+// Avatar : vue de face + de dos, zones SVG colorées selon le niveau.
+function _labAvatarSvg(){
+  const z = id => { const d = _lab.res.zones[id]; return d ? _labCouleur(d.niv) : '#2a2f3f'; };
+  const st = (id) => `fill="${z(id)}" stroke="#0e1018" stroke-width="1.4"`;
+  const neutre = 'fill="#232838" stroke="#0e1018" stroke-width="1.4"';
+  const face = `<g>
+    <circle cx="100" cy="30" r="18" ${neutre}/><rect x="92" y="46" width="16" height="14" rx="4" ${neutre}/>
+    <path d="M92 58 L72 74 L80 80 L100 66 Z" ${st('traps')}/><path d="M108 58 L128 74 L120 80 L100 66 Z" ${st('traps')}/>
+    <ellipse cx="62" cy="92" rx="15" ry="19" ${st('epaules')}/><ellipse cx="138" cy="92" rx="15" ry="19" ${st('epaules')}/>
+    <path d="M98 86 C84 84 69 91 67 106 C70 122 88 126 98 119 Z" ${st('pecs')}/><path d="M102 86 C116 84 131 91 133 106 C130 122 112 126 102 119 Z" ${st('pecs')}/>
+    <rect x="86" y="124" width="28" height="64" rx="10" ${st('abdos')}/>
+    <ellipse cx="48" cy="126" rx="9" ry="21" ${st('biceps')}/><ellipse cx="152" cy="126" rx="9" ry="21" ${st('biceps')}/>
+    <ellipse cx="42" cy="176" rx="8" ry="25" ${neutre}/><ellipse cx="158" cy="176" rx="8" ry="25" ${neutre}/>
+    <path d="M78 196 L98 196 L96 296 C90 300 80 300 76 294 C70 260 72 222 78 196 Z" ${st('quadris')}/><path d="M122 196 L102 196 L104 296 C110 300 120 300 124 294 C130 260 128 222 122 196 Z" ${st('quadris')}/>
+    <ellipse cx="82" cy="352" rx="11" ry="34" ${st('mollets')}/><ellipse cx="118" cy="352" rx="11" ry="34" ${st('mollets')}/>
+    <ellipse cx="82" cy="400" rx="12" ry="6" ${neutre}/><ellipse cx="118" cy="400" rx="12" ry="6" ${neutre}/></g>`;
+  const dos = `<g>
+    <circle cx="100" cy="30" r="18" ${neutre}/><rect x="92" y="46" width="16" height="14" rx="4" ${neutre}/>
+    <path d="M100 58 L76 76 L84 104 L100 118 L116 104 L124 76 Z" ${st('traps')}/>
+    <ellipse cx="62" cy="92" rx="15" ry="19" ${st('delt_ar')}/><ellipse cx="138" cy="92" rx="15" ry="19" ${st('delt_ar')}/>
+    <path d="M82 106 C70 126 74 156 94 170 L98 120 Z" ${st('lats')}/><path d="M118 106 C130 126 126 156 106 170 L102 120 Z" ${st('lats')}/>
+    <rect x="90" y="150" width="20" height="36" rx="7" ${st('lombaires')}/>
+    <ellipse cx="48" cy="126" rx="9" ry="21" ${st('triceps')}/><ellipse cx="152" cy="126" rx="9" ry="21" ${st('triceps')}/>
+    <ellipse cx="42" cy="176" rx="8" ry="25" ${neutre}/><ellipse cx="158" cy="176" rx="8" ry="25" ${neutre}/>
+    <ellipse cx="86" cy="214" rx="17" ry="19" ${st('fessiers')}/><ellipse cx="114" cy="214" rx="17" ry="19" ${st('fessiers')}/>
+    <path d="M76 234 L98 234 L96 300 C90 304 80 304 76 298 C72 276 72 252 76 234 Z" ${st('ischios')}/><path d="M124 234 L102 234 L104 300 C110 304 120 304 124 298 C128 276 128 252 124 234 Z" ${st('ischios')}/>
+    <ellipse cx="82" cy="352" rx="11" ry="34" ${st('mollets')}/><ellipse cx="118" cy="352" rx="11" ry="34" ${st('mollets')}/>
+    <ellipse cx="82" cy="400" rx="12" ry="6" ${neutre}/><ellipse cx="118" cy="400" rx="12" ry="6" ${neutre}/></g>`;
+  return `<div style="display:flex;gap:10px;justify-content:center;">
+    <svg viewBox="0 0 200 410" width="46%" role="img" aria-label="Avatar de face">${face}</svg>
+    <svg viewBox="0 0 200 410" width="46%" role="img" aria-label="Avatar de dos">${dos}</svg></div>`;
+}
+
+function renderLaboNiveauxPage(el){
+  const clients = data.clients.filter(c => !c.estCoach || c.id === 'yohanp');
+  const defaut = _lab.clientId || 'yohanp';
+  if (!_lab.charge && !_lab.erreur && _lab.clientId !== defaut) { _lab.clientId = defaut; _labCharger(defaut); }
+  const entete = `<div class="page-head"><div><div class="eyebrow">Labo · prototype privé</div><h1>Niveaux par muscle</h1></div>
+    <div class="meta">Visible uniquement dans ta console</div></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+      <select onchange="_lab.poids=null;_lab.clientId=this.value;_labCharger(this.value)" style="font-size:14px;"><option value="yohanp" ${_lab.clientId==='yohanp'?'selected':''}>Yohan (moi)</option>${clients.filter(c=>c.id!=='yohanp').map(c => `<option value="${c.id}" ${_lab.clientId===c.id?'selected':''}>${esc(c.nom)}</option>`).join('')}</select>
+      <label style="font-size:12.5px;color:var(--text-faint);">Poids de corps (kg)</label><input type="number" step="0.1" value="${_lab.poids||''}" style="width:90px;font-size:14px;" onchange="_lab.poids=this.value;_labCalculer();renderMain()">
+      <select onchange="_lab.sexe=this.value;_labCalculer();renderMain()" style="font-size:14px;"><option value="H" ${_lab.sexe==='H'?'selected':''}>Homme</option><option value="F" ${_lab.sexe==='F'?'selected':''}>Femme</option></select></div>`;
+  if (!_lab.charge) { el.innerHTML = entete + `<div style="padding:40px;text-align:center;color:var(--text-faint);">Calcul des niveaux depuis les logs…</div>`; return; }
+  if (_lab.erreur || !_lab.res) { el.innerHTML = entete + `<div class="empty-panel"><strong>Erreur</strong>${esc(_lab.erreur || 'Aucune donnée.')}</div>`; return; }
+  const { exos, zones } = _lab.res;
+  const zl = Object.entries(zones).sort((a, b) => b[1].niv - a[1].niv);
+  const legende = LAB_RANGS.map((r, i) => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;"><span style="width:10px;height:10px;border-radius:3px;background:${LAB_COULEURS[i]};"></span>${r}</span>`).join('');
+  const etalons = exos.filter(e => e.etalon).sort((a, b) => b.niv - a.niv);
+  const autres = exos.filter(e => !e.etalon && e.niv != null).sort((a, b) => b.prog - a.prog);
+  el.innerHTML = entete + `<div style="display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:18px;align-items:start;" class="lab-grille">
+    <div class="table-card" style="padding:14px;">${_labAvatarSvg()}<div style="margin-top:8px;text-align:center;">${legende}<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="width:10px;height:10px;border-radius:3px;background:#2a2f3f;"></span>pas de données</span></div></div>
+    <div>
+      <div class="table-card" style="padding:12px 14px;margin-bottom:12px;"><b>Niveau par muscle</b>
+        ${zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;">
+          <span style="width:130px;">${LAB_ZONE_NOM[id] || id}</span>
+          <div style="flex:1;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="width:${Math.round((d.niv - 1) / 8 * 100)}%;height:100%;background:${_labCouleur(d.niv)};"></div></div>
+          <b style="width:86px;color:${_labCouleur(d.niv)};">${d.etalon ? _labRang(d.niv) : '+' + Math.round(d.src.prog) + ' %'}</b>
+          <span style="width:190px;color:var(--text-faint);font-size:11.5px;">${d.etalon ? 'étalon : ' + esc(d.src.nom) : 'progression : ' + esc(d.src.nom)}</span></div>`).join('') || '<div style="color:var(--text-faint);margin-top:8px;">Pas encore assez de logs.</div>'}</div>
+      <div class="table-card" style="padding:12px 14px;margin-bottom:12px;"><b>Exercices étalons</b> <span style="font-size:11.5px;color:var(--text-faint);">— rang absolu : 1RM estimé ÷ poids de corps (${_lab.poids || '?'} kg, ${_lab.sexe === 'F' ? 'femme' : 'homme'})</span>
+        ${etalons.map(e => `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;"><span style="flex:1;">${esc(e.nom)}</span><span style="color:var(--text-faint);">${Math.round(e.best)} kg · ${e.ratio.toFixed(2)} × PC</span><b style="width:90px;text-align:right;color:${_labCouleur(e.niv)};">${_labRang(e.niv)}</b></div>`).join('') || '<div style="color:var(--text-faint);margin-top:6px;font-size:12.5px;">Aucun exercice étalon loggé (squat, développé couché barre, soulevé de terre, rowing barre, hip thrust…).</div>'}</div>
+      <div class="table-card" style="padding:12px 14px;"><b>Autres exercices</b> <span style="font-size:11.5px;color:var(--text-faint);">— progression contre toi-même (pas de barème : chaque machine est différente)</span>
+        ${autres.slice(0, 25).map(e => `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;"><span style="flex:1;">${esc(e.nom)} <span style="color:var(--text-faint);font-size:11px;">${esc(e.groupe || '')}</span></span><span style="color:var(--text-faint);">${Math.round(e.base)} → ${Math.round(e.best)} kg</span><b style="width:70px;text-align:right;color:${e.prog > 0 ? '#1D9E75' : 'var(--text-faint)'};">${e.prog >= 0 ? '+' : ''}${e.prog.toFixed(0)} %</b></div>`).join('')}</div>
+    </div></div>
+    <style>@media(max-width:900px){.lab-grille{grid-template-columns:1fr !important;}}</style>`;
 }
 
 function renderClassementPage(el){
