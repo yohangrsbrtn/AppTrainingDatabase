@@ -81,7 +81,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
   const exos = Object.values(parEx).map(e => {
     e.sets.sort((a, b) => a.ordre - b.ordre);
     e.best = Math.max(...e.sets.map(s => s.e1rm));
-    const debut = e.sets.slice(0, Math.max(3, Math.ceil(e.sets.length / 5)));
+    const debut = e.sets.filter(x => x.ordre <= e.sets[0].ordre + 3).slice(0, 30); // départ = les 4 premières semaines
     e.base = Math.max(...debut.map(s => s.e1rm));
     e.prog = e.base > 0 ? (e.best / e.base - 1) * 100 : 0;
     e.nbSets = e.sets.length;
@@ -156,6 +156,6 @@ function nvAvatarMonter(cont, res, avant, opts) {
     if (!z) { info.textContent = 'Touche une zone du corps pour voir son niveau.'; return; }
     const dz = res.zones[z];
     const fleche = nvZoneProgresse(res, avant, z) ? ` <span style="color:#1D9E75;">▲ progression sur ${opts.jours || 30} jours</span>` : '';
-    info.innerHTML = dz ? `<b>${NV_ZONE_NOM[z] || z}</b> — ${dz.etalon ? nvRang(dz.niv) + ' · ' + _nvEsc(dz.src.nom) : '+' + Math.round(dz.src.prog) + ' % · ' + _nvEsc(dz.src.nom)}${fleche}` : `<b>${NV_ZONE_NOM[z] || z}</b> — pas encore de données`;
+    info.innerHTML = dz ? `<b>${NV_ZONE_NOM[z] || z}</b> — ${dz.etalon ? nvRang(dz.niv) + ' · ' + _nvEsc(dz.src.nom) : nvRang(dz.niv) + ' · ' + _nvEsc(dz.src.nom)}${fleche}` : `<b>${NV_ZONE_NOM[z] || z}</b> — pas encore de données`;
   });
 }

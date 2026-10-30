@@ -516,7 +516,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=24"></script>
-<script src="niveaux.js?v=3"></script>
+<script src="niveaux.js?v=4"></script>
 <script src="collection.js?v=2"></script>
 <script>
 // ── getTierColors (progression.js non chargé en console) ────────────────
@@ -3372,7 +3372,7 @@ function renderLaboNiveauxPage(el){
         ${zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;">
           <span style="width:130px;">${NV_ZONE_NOM[id] || id}</span>
           <div style="flex:1;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;"><div style="width:${Math.round((d.niv - 1) / 8 * 100)}%;height:100%;background:${nvCouleur(d.niv)};"></div></div>
-          <b style="width:86px;color:${nvCouleur(d.niv)};">${d.etalon ? nvRang(d.niv) : '+' + Math.round(d.src.prog) + ' %'}</b>
+          <b style="width:86px;color:${nvCouleur(d.niv)};">${nvRang(d.niv)}</b>
           <span style="width:190px;color:var(--text-faint);font-size:11.5px;">${d.etalon ? 'étalon : ' + esc(d.src.nom) : 'progression : ' + esc(d.src.nom)}</span></div>`).join('') || '<div style="color:var(--text-faint);margin-top:8px;">Pas encore assez de logs.</div>'}</div>
       <div class="table-card" style="padding:12px 14px;margin-bottom:12px;"><b>Exercices étalons</b> <span style="font-size:11.5px;color:var(--text-faint);">— rang absolu : 1RM estimé ÷ poids de corps (${_lab.poids || '?'} kg, ${_lab.sexe === 'F' ? 'femme' : 'homme'})</span>
         ${etalons.map(e => `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;"><span style="flex:1;">${esc(e.nom)}</span><span style="color:var(--text-faint);">${Math.round(e.best)} kg · ${e.ratio.toFixed(2)} × PC</span><b style="width:90px;text-align:right;color:${nvCouleur(e.niv)};">${nvRang(e.niv)}</b></div>`).join('') || '<div style="color:var(--text-faint);margin-top:6px;font-size:12.5px;">Aucun exercice étalon loggé (squat, développé couché barre, soulevé de terre, rowing barre, hip thrust…).</div>'}</div>
