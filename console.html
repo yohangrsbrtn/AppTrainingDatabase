@@ -1251,6 +1251,46 @@ function fmtDateNote(iso){
   return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
 }
 
+// Validation d'un aliment ajouté par un client (aliments_communaute.valide=false) : macros éditables pour corriger avant de valider.
+const _ALIM_VALIDER_CHAMPS = [['kcal_par_100g','Kcal'],['prot_par_100g','Protéines'],['glu_par_100g','Glucides'],['lip_par_100g','Lipides'],['sucres_par_100g','dont sucres'],['fibres_par_100g','Fibres'],['ags_par_100g','dont AG saturés']];
+function ouvrirValiderAliment(id){
+  const a = data.aValider.find(x => x.id === id);
+  if (!a) return;
+  const ov = document.createElement('div'); ov.className = 'modal-overlay'; ov.id = 'modal-valider-aliment';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="modal-box">
+    <h3>Valider un aliment</h3>
+    <div style="font-size:12px;color:var(--text-faint);margin-bottom:10px;">Ajouté par ${esc(a.ajoutePar||'?')}${a.code_barre ? ' · code-barres ' + esc(a.code_barre) : ''} — valeurs pour 100 g, à comparer avec l'étiquette.</div>
+    <div class="field-row"><label>Nom</label><input id="vaNom" type="text" value="${esc(a.nom)}"></div>
+    <div class="field-grid">${_ALIM_VALIDER_CHAMPS.map(([c,l]) => `<div class="field-row"><label>${l}</label><input id="va_${c}" type="number" step="0.1" value="${a[c]==null?'':a[c]}"></div>`).join('')}</div>
+    <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;">
+      <button class="btn" style="color:var(--danger,#e5484d);" onclick="supprimerAlimentCommunaute(${id})">Supprimer</button>
+      <span><button class="btn" onclick="document.getElementById('modal-valider-aliment').remove()">Annuler</button>
+      <button class="btn btn-primary" onclick="validerAlimentCommunaute(${id})">✓ Valider</button></span>
+    </div></div>`;
+  document.body.appendChild(ov);
+}
+async function validerAlimentCommunaute(id){
+  const body = { nom: document.getElementById('vaNom').value.trim(), valide: true };
+  if (!body.nom) { alert('Le nom est obligatoire.'); return; }
+  _ALIM_VALIDER_CHAMPS.forEach(([c]) => { const v = document.getElementById('va_'+c).value; body[c] = v === '' ? null : parseFloat(v); });
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?id=eq.${id}`, { method:'PATCH', headers: supaHeaders(), body: JSON.stringify(body) });
+  if (!res.ok) { alert('Erreur : ' + res.status); return; }
+  _alimValiderFin(id);
+}
+async function supprimerAlimentCommunaute(id){
+  if (!confirm('Supprimer définitivement cet aliment de la base communautaire ?')) return;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?id=eq.${id}`, { method:'DELETE', headers: supaHeaders() });
+  if (!res.ok) { alert('Erreur : ' + res.status); return; }
+  _alimValiderFin(id);
+}
+function _alimValiderFin(id){
+  data.aValider = data.aValider.filter(x => x.id !== id);
+  try { localStorage.removeItem('at_console_cache_v2'); } catch(e) {}
+  const m = document.getElementById('modal-valider-aliment'); if (m) m.remove();
+  renderSidebar(); renderMain();
+}
+
 function renderSidebar(){
   const baseCount = data.aValider.length;
   const bilansCount = data.bilansCoach.filter(b=>!b.coachTraite).length;
@@ -1762,7 +1802,7 @@ async function chargerDonnees(){
     const res = await fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?valide=eq.false&order=created_at.desc`, { headers: supaHeaders() });
     if (res.ok) aValiderRows = await res.json();
   } catch(e) {}
-  const aValider = aValiderRows.map(a => ({ nom: a.nom, ajoutePar: clientsById[a.created_by] || a.created_by || '?' }));
+  const aValider = aValiderRows.map(a => ({ ...a, ajoutePar: clientsById[a.created_by] || a.created_by || '?' }));
 
   const logs = await _chargerActiviteRecente(clientsById).catch(()=>[]);
 
@@ -6814,7 +6854,7 @@ function renderDashboard(el){
         <div class="card-head">${iDatabase()}<span class="t">Aliments à valider</span></div>
         ${data.aValider.length ? `<div class="card-list">
           ${data.aValider.slice(0,4).map(a => `
-            <div class="card-list-row">
+            <div class="card-list-row" onclick="ouvrirValiderAliment(${a.id})" style="cursor:pointer;">
               <div><div class="t">${esc(a.nom)}</div><div class="s">ajouté par ${esc(a.ajoutePar||'?')}</div></div>
             </div>`).join('')}
         </div>` : `<div class="card-empty">${iCheckCircle()}Rien à valider.</div>`}
