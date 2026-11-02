@@ -5342,6 +5342,7 @@ function archEdAjouterBloc(mode){ // 'copie' = duplique le bloc courant (sans id
   copie.seances.forEach(se => { se.id = undefined; se.extras = (se.extras || []).map(x => Object.assign({}, x, { id: undefined })); });
   if (mode === 'vide') { copie.choix = {}; copie.series = {}; copie.tempo = {}; copie.notes = {}; copie.reps = {}; copie.repos = {}; copie.rir = {}; copie.ss = {}; copie.seances.forEach(se => { se.extras = []; }); }
   const suite = { metabolique: 'mecanique', mecanique: 'force', force: 'metabolique' };
+  copie.reps = {}; copie.repos = {}; copie.rir = {}; // reps/repos/RIR dépendent du type de bloc : repartir des valeurs de la fiche exercice du NOUVEAU type (sinon le bloc Force gardait les reps du Mécanique)
   copie.blocType = suite[_arch.blocType] || 'metabolique'; copie.nbSemaines = _arch.nbSemaines || 6;
   _archEd.states[_archEd.cur] = _arch;
   _archEd.states.push(copie); _archEd.cur = _archEd.states.length - 1; _arch = copie;
