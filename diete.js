@@ -402,8 +402,8 @@ async function sbResoudreDieteDetail(clientDieteId) {
 
 async function sbChargerBaseAliments() {
   const [coachRes, commRes, ciqualRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=nom,unite,kcal_par_100g,prot_par_100g,glu_par_100g,lip_par_100g&order=nom.asc`, { headers: supaHeaders() }),
-    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=id,nom,kcal_par_100g,prot_par_100g,glu_par_100g,sucres_par_100g,fibres_par_100g,lip_par_100g,ags_par_100g,code_barre,valide&order=nom.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_coach?select=*&order=nom.asc`, { headers: supaHeaders() }),
+    fetch(`${SUPABASE_URL}/rest/v1/aliments_communaute?select=*&order=nom.asc`, { headers: supaHeaders() }),
     // ciqual_aliments (base ANSES officielle, macros + vitamines/minéraux) — table peut ne pas
     // encore exister selon l'avancement de l'import, échec silencieux dans ce cas (voir catch).
     fetch(`${SUPABASE_URL}/rest/v1/ciqual_aliments?select=id,nom,kcal_100g,prot_100g,glucides_100g,lipides_100g,sucres_100g,fibres_100g,ags_100g&order=nom.asc`, { headers: supaHeaders() }).catch(()=>null),
@@ -420,8 +420,8 @@ async function sbChargerBaseAliments() {
   return {
     // Base coach : pas de détail sucres/fibres/AGS (colonnes inexistantes) — cohérent avec
     // le comportement GAS d'origine (aDetail = a.sucres !== null dans la modale d'ajout).
-    coach: coach.map(a => { const d = (a.unite||'g')==='g' ? 100 : 1; return { nom: a.nom, kcal: (a.kcal_par_100g||0)/d, prot: (a.prot_par_100g||0)/d, glu: (a.glu_par_100g||0)/d, lip: (a.lip_par_100g||0)/d, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true }; }),
-    communaute: comm.map(a => ({ nom: a.nom, kcal: (a.kcal_par_100g||0)/100, prot: (a.prot_par_100g||0)/100, glu: (a.glu_par_100g||0)/100, lip: (a.lip_par_100g||0)/100, sucres: a.sucres_par_100g!=null?a.sucres_par_100g/100:null, fibres: a.fibres_par_100g!=null?a.fibres_par_100g/100:null, ags: a.ags_par_100g!=null?a.ags_par_100g/100:null, codeBarre: a.code_barre, source: 'communaute', valide: a.valide })),
+    coach: coach.map(a => { const d = (a.unite||'g')==='g' ? 100 : 1; return { nom: a.nom, kcal: (a.kcal_par_100g||0)/d, prot: (a.prot_par_100g||0)/d, glu: (a.glu_par_100g||0)/d, lip: (a.lip_par_100g||0)/d, sucres: null, fibres: null, ags: null, codeBarre: null, source: 'coach', valide: true, portionG: a.portion_g || null, portionNom: a.portion_nom || '' }; }),
+    communaute: comm.map(a => ({ nom: a.nom, kcal: (a.kcal_par_100g||0)/100, prot: (a.prot_par_100g||0)/100, glu: (a.glu_par_100g||0)/100, lip: (a.lip_par_100g||0)/100, sucres: a.sucres_par_100g!=null?a.sucres_par_100g/100:null, fibres: a.fibres_par_100g!=null?a.fibres_par_100g/100:null, ags: a.ags_par_100g!=null?a.ags_par_100g/100:null, codeBarre: a.code_barre, source: 'communaute', valide: a.valide, portionG: a.portion_g || null, portionNom: a.portion_nom || '' })),
     ciqual: ciqual.map(a => ({ nom: a.nom, kcal: (a.kcal_100g||0)/100, prot: (a.prot_100g||0)/100, glu: (a.glucides_100g||0)/100, lip: (a.lipides_100g||0)/100, sucres: a.sucres_100g!=null?a.sucres_100g/100:null, fibres: a.fibres_100g!=null?a.fibres_100g/100:null, ags: a.ags_100g!=null?a.ags_100g/100:null, codeBarre: null, source: 'ciqual', valide: true }))
   };
 }
@@ -435,14 +435,15 @@ async function sbAjouterAlimentCommunaute(p) {
     body: JSON.stringify({
       nom: p.nom, kcal_par_100g: p.kcal, prot_par_100g: p.prot, glu_par_100g: p.glu,
       sucres_par_100g: p.sucres || null, fibres_par_100g: p.fibres || null, lip_par_100g: p.lip,
-      ags_par_100g: p.ags || null, code_barre: p.codeBarre || null, valide: false, created_by: S.client
+      ags_par_100g: p.ags || null, code_barre: p.codeBarre || null, valide: false, created_by: S.client,
+      ...(p.portionG > 0 ? { portion_g: p.portionG, portion_nom: p.portionNom || 'portion' } : {})
     })
   });
   if (!res.ok) return { ok: false };
   const [row] = await res.json();
   // Reconverti en "par gramme" pour usage interne immédiat (push dans
   // _dBaseAliments.communaute) — même logique que sbChargerBaseAliments.
-  return { ok: true, aliment: { nom: row.nom, kcal: (row.kcal_par_100g||0)/100, prot: (row.prot_par_100g||0)/100, glu: (row.glu_par_100g||0)/100, lip: (row.lip_par_100g||0)/100, sucres: row.sucres_par_100g!=null?row.sucres_par_100g/100:null, fibres: row.fibres_par_100g!=null?row.fibres_par_100g/100:null, ags: row.ags_par_100g!=null?row.ags_par_100g/100:null, codeBarre: row.code_barre, source: 'communaute', valide: row.valide } };
+  return { ok: true, aliment: { nom: row.nom, kcal: (row.kcal_par_100g||0)/100, prot: (row.prot_par_100g||0)/100, glu: (row.glu_par_100g||0)/100, lip: (row.lip_par_100g||0)/100, sucres: row.sucres_par_100g!=null?row.sucres_par_100g/100:null, fibres: row.fibres_par_100g!=null?row.fibres_par_100g/100:null, ags: row.ags_par_100g!=null?row.ags_par_100g/100:null, codeBarre: row.code_barre, source: 'communaute', valide: row.valide, portionG: row.portion_g || null, portionNom: row.portion_nom || '' } };
 }
 
 async function sbChargerAlimentsRecents() {
@@ -1689,15 +1690,20 @@ function renderModalAjoutQuantite() {
   const a = _dAjoutSelection;
   const enEdition = _dModifIndex != null;
   const qteInitiale = enEdition ? _dMenuDraft.aliments[_dModifIndex].quantite : '';
+  _dQteMode = 'g'; setTimeout(_dQteMajUi, 0);
   const aDetail = a.sucres !== null; // base coach = pas de détail sucres/fibres/AGS
   return `
     <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${enEdition ? 'Modifier' : 'Ajouter'}</div>
     <div style="font-size:18px;font-weight:700;color:#f0f2ff;margin-bottom:16px;">${esc(a.nom)}</div>
     <div style="margin-bottom:16px;">
-      <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">QUANTITÉ (g)</div>
-      <input id="dAjoutQte" type="text" inputmode="numeric" placeholder="ex: 100" value="${qteInitiale}" oninput="_majPreviewAjout()"
+      ${a.portionG ? `<div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button id="dQteModeG" onclick="_dQteChoisirMode('g')" style="flex:1;padding:8px;border-radius:8px;border:1px solid #2d3142;font-size:13px;font-weight:600;cursor:pointer;"></button>
+        <button id="dQteModeP" onclick="_dQteChoisirMode('p')" style="flex:1;padding:8px;border-radius:8px;border:1px solid #2d3142;font-size:13px;font-weight:600;cursor:pointer;"></button></div>` : ''}
+      <div id="dQteLabel" style="font-size:11px;color:#8892a4;margin-bottom:6px;">QUANTITÉ (g)</div>
+      <input id="dAjoutQte" type="text" inputmode="decimal" placeholder="ex: 100" value="${qteInitiale}" oninput="_majPreviewAjout()"
         style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;">
     </div>
+    <div id="dQteEquiv" style="font-size:12px;color:#a8b0c8;text-align:right;margin:-10px 0 8px;min-height:14px;"></div>
     <div id="dAjoutPreview" style="display:flex;justify-content:space-around;text-align:center;padding:12px 0;background:#0f1117;border-radius:10px;">
       <div><span style="font-size:14px;font-weight:600;">0</span><div class="macro-label">KCAL</div></div>
       <div><span style="font-size:14px;font-weight:600;color:#378ADD;">0</span><div class="macro-label">PROT</div></div>
@@ -1710,11 +1716,42 @@ function renderModalAjoutQuantite() {
     <button onclick="_dQuickEdit=false;_dAjoutEtape='recherche';_dModifIndex=null;_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
 }
 
+// Mode de saisie de la quantité : 'g' (grammes) ou 'p' (portions, converties en grammes via a.portionG — le stockage reste en grammes).
+let _dQteMode = 'g';
+function _dQteGrammes() {
+  const a = _dAjoutSelection;
+  const v = parseFloat(((document.getElementById('dAjoutQte')||{}).value || '').replace(',', '.')) || 0;
+  return (_dQteMode === 'p' && a && a.portionG) ? v * a.portionG : v;
+}
+function _dQteChoisirMode(m) {
+  const a = _dAjoutSelection, inp = document.getElementById('dAjoutQte');
+  if (!a || !a.portionG || !inp || m === _dQteMode) return;
+  const g = _dQteGrammes();
+  _dQteMode = m;
+  inp.value = g ? String(m === 'p' ? Math.round(g / a.portionG * 10) / 10 : Math.round(g)) : '';
+  _dQteMajUi();
+  _majPreviewAjout();
+}
+function _dQteMajUi() {
+  const a = _dAjoutSelection; if (!a) return;
+  const nom = a.portionNom || 'portion';
+  const bg = document.getElementById('dQteModeG'), bp = document.getElementById('dQteModeP'), lab = document.getElementById('dQteLabel'), inp = document.getElementById('dAjoutQte');
+  if (bg && bp) {
+    bg.textContent = 'Grammes'; bp.textContent = nom.charAt(0).toUpperCase() + nom.slice(1) + 's (≈ ' + a.portionG + ' g)';
+    const on = 'background:#6d3fd6;color:#fff;', off = 'background:#0f1117;color:#8892a4;';
+    bg.style.cssText += ';' + (_dQteMode === 'g' ? on : off); bp.style.cssText += ';' + (_dQteMode === 'p' ? on : off);
+  }
+  if (lab) lab.textContent = _dQteMode === 'p' ? 'NOMBRE DE ' + nom.toUpperCase() + 'S' : 'QUANTITÉ (g)';
+  if (inp) inp.placeholder = _dQteMode === 'p' ? 'ex: 2' : 'ex: 100';
+}
+
 function _majPreviewAjout() {
   const a = _dAjoutSelection;
   const prev = document.getElementById('dAjoutPreview');
   if (!prev || !a) return;
-  const qte = parseFloat((document.getElementById('dAjoutQte')||{}).value) || 0;
+  const qte = _dQteGrammes();
+  const pg = document.getElementById('dQteEquiv');
+  if (pg) pg.textContent = (_dQteMode === 'p' && qte) ? '≈ ' + Math.round(qte) + ' g' : '';
   const vals = [Math.round(a.kcal*qte), Math.round(a.prot*qte), Math.round(a.glu*qte), Math.round(a.lip*qte)];
   prev.querySelectorAll('span').forEach((s, i) => { s.textContent = vals[i]; });
   if (a.sucres !== null) {
@@ -1725,7 +1762,7 @@ function _majPreviewAjout() {
 
 function confirmerAjoutAliment() {
   const a = _dAjoutSelection;
-  const qte = parseFloat((document.getElementById('dAjoutQte')||{}).value) || 0;
+  const qte = Math.round(_dQteGrammes() * 10) / 10;
   if (!a || qte <= 0 || !_dMenuDraft) return;
   const item = {
     nom: a.nom, quantite: qte, kcal: a.kcal*qte, prot: a.prot*qte, glu: a.glu*qte,
@@ -1906,7 +1943,7 @@ function _offFetch(code) {
   const essai = async () => {
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
     try {
-      const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments,last_modified_t,brands,quantity', { signal: ctl.signal });
+      const res = await fetch('https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=product_name,nutriments,last_modified_t,brands,quantity,serving_quantity,serving_size', { signal: ctl.signal });
       if (!res.ok) throw new Error('off_' + res.status);
       return await res.json();
     } finally { clearTimeout(to); }
@@ -1943,6 +1980,8 @@ async function _traiterCodeBarre(codeBarre) {
         lip100:    Math.round((n['fat_100g'] || 0) * 10) / 10,
         ags100:    Math.round((n['saturated-fat_100g'] || 0) * 10) / 10
       };
+      const sq = parseFloat(data.product.serving_quantity);
+      if (sq > 0) { _dCreationPrefill.portionG = sq; _dCreationPrefill.portionNom = 'portion'; }
       _dCreationCodeBarre = codeBarre;
       ouvrirCreationAliment(data.product.product_name || '');
       setTimeout(_majCoherenceCrea, 0);
@@ -1990,6 +2029,12 @@ function renderModalAjoutCreation() {
       <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">dont AGS (g)</div><input id="dCreaAgs" type="text" inputmode="decimal" placeholder="0" value="${v('ags100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
       <div style="grid-column:1 / -1;"><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Fibres (g)</div><input id="dCreaFibres" oninput="_majCoherenceCrea()" type="text" inputmode="decimal" placeholder="0" value="${v('fibres100')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
     </div>
+    <div style="font-size:11px;color:#8892a4;margin:4px 0 6px;">PORTION (optionnel)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px;">
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">Nom (ex: tranche)</div><input id="dCreaPortionNom" type="text" placeholder="tranche" value="${esc(pf.portionNom || '')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+      <div><div style="font-size:10px;color:#8892a4;margin-bottom:4px;">1 portion ≈ (g)</div><input id="dCreaPortionG" type="text" inputmode="decimal" placeholder="30" value="${v('portionG')}" style="width:100%;padding:10px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:8px;font-size:16px;box-sizing:border-box;"></div>
+    </div>
+    <div style="font-size:11px;color:#555e7a;margin-bottom:10px;">Pèse une portion : valeur approximative. Tu pourras ensuite saisir des portions au lieu des grammes.</div>
     <div id="dCreaCoherence" style="display:none;font-size:12px;color:#e8a33d;background:#e8a33d1a;border:1px solid #e8a33d55;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;"></div>
     <div style="font-size:11px;color:#555e7a;margin-bottom:12px;">Sucres, AGS et fibres sont optionnels.</div>
     <div id="dCreaErr" style="display:none;font-size:12px;color:#e05252;margin-bottom:12px;"></div>
@@ -2041,7 +2086,8 @@ async function confirmerCreationAliment() {
     const res = await _apiAjouterAlimentCommunaute({
       nom, kcal: kcal100, prot: prot100, glu: glu100,
       sucres: sucres100, fibres: fibres100, lip: lip100, ags: ags100,
-      codeBarre: _dCreationCodeBarre || ''
+      codeBarre: _dCreationCodeBarre || '',
+      portionG: val('dCreaPortionG'), portionNom: (document.getElementById('dCreaPortionNom').value || '').trim()
     });
     if (!res || !res.ok) { errEl.textContent = 'Erreur lors de la création.'; errEl.style.display = 'block'; return; }
     if (_dBaseAliments) _dBaseAliments.communaute.push(res.aliment);
