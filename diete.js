@@ -1681,6 +1681,8 @@ function ouvrirModifQuantiteDraft(index) {
     nom: item.nom, kcal: item.kcal/q, prot: item.prot/q, glu: item.glu/q,
     sucres: item.sucres/q, fibres: item.fibres/q, lip: item.lip/q, ags: item.ags/q
   };
+  const base = _tousLesAliments().find(x => x.nom === item.nom && x.portionG);
+  if (base) { _dAjoutSelection.portionG = base.portionG; _dAjoutSelection.portionNom = base.portionNom; }
   _dModifIndex = index;
   _dAjoutEtape = 'quantite';
   _afficherModalAjout(false);

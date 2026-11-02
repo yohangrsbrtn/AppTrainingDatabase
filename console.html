@@ -11824,10 +11824,12 @@ function _renderAlimListHtml(ri, slot) {
       <div class="aliment-row" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="alimOnDrop(event,${ri},${ai}${slotArg})">
         <span class="drag-handle" draggable="true" ondragstart="alimOnDragStart(event,${ri},${ai}${slotArg})" ondragend="alimOnDragEnd()" title="Glisser pour réordonner">⠿</span>
         <span class="a-nom">${esc(a.nom)}</span>
-        <input type="number" class="a-qte" inputmode="decimal" min="0" step="1" value="${a.quantite_g!=null?a.quantite_g:''}"
+        ${(() => { const pi = (a.unite||'g')==='g' ? _alimPortionInfo(a) : null; const mp = !!(pi && a._mp);
+          return `<input type="number" class="a-qte" inputmode="decimal" min="0" step="${mp?'0.5':'1'}" value="${a.quantite_g!=null?(mp?Math.round(a.quantite_g/pi.g*10)/10:a.quantite_g):''}"
           onchange="alimChangerQuantite(${ri},${ai},this.value${slotArg})"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
-        <span class="a-unite">${a.unite==='unite'?'u.':a.unite==='portion'?'portion':(a.unite&&a.unite!=='g'?esc(a.unite):'g')}</span>
+        <span class="a-unite">${mp?esc(pi.nom)+'s':(a.unite==='unite'?'u.':a.unite==='portion'?'portion':(a.unite&&a.unite!=='g'?esc(a.unite):'g'))}</span>
+        ${pi ? `<button class="icon-btn" style="width:auto;padding:0 6px;font-size:10.5px;flex-shrink:0;" title="Basculer grammes ⇄ ${esc(pi.nom)}s (1 ≈ ${pi.g} g)" onclick="alimBasculerMode(${ri},${ai}${slotArg})">${mp?'→ g':'→ '+esc(pi.nom)}</button>${mp?`<span style="font-size:10.5px;color:var(--text-faint);flex-shrink:0;">${a.quantite_g||0} g</span>`:''}` : ''}`; })()}
         <span class="macro-pills">${(() => {
           const d=(a.unite||'g')==='g'?100:1; const q=a.quantite_g||0;
           const k = Math.round(q*(a.kcal_par_100g||0)/d);
@@ -11952,7 +11954,19 @@ function _renderDieteBlocsHtml(slot){
   }).join('');
 }
 
+// Portion d'un aliment (1 tranche ≈ 30 g) : portée par la ligne si elle vient du picker, sinon retrouvée par nom dans la base coach.
+function _alimPortionInfo(a){
+  if (a.portion_g > 0) return { g: a.portion_g, nom: a.portion_nom || 'portion' };
+  const b = (alimentsCoachData||[]).find(x => x.portion_g > 0 && (x.nom||'').toLowerCase() === (a.nom||'').toLowerCase());
+  return b ? { g: b.portion_g, nom: b.portion_nom || 'portion' } : null;
+}
+function alimBasculerMode(ri, ai, slot){
+  const a = _dieteEnEdition(slot).repas[ri].aliments[ai];
+  a._mp = !a._mp;
+  _updateAlimentsDom(ri, slot);
+}
 function renderEditeurDietePage(el) {
+  if (alimentsCoachData === null) chargerAlimentsCoach().then(d => { alimentsCoachData = d; if (state.nav === 'editeur-diete') renderMain(); }).catch(() => { alimentsCoachData = []; });
   const tpl = dieteTplEnEdition;
   const totalM = macrosDiete(tpl.repas.filter(r=>(r.variante_index||0)===0).map(r=>({ repas_aliments:r.aliments })));
   const repasHtml = _renderDieteBlocsHtml();
@@ -12115,9 +12129,11 @@ function supprimerAlimentDiete(ri, ai, slot){
 // Grammage éditable inline — parseFloat avec remplacement virgule→point (clavier
 // iOS en locale FR insère une virgule comme séparateur décimal, cf. programme-client.js).
 function alimChangerQuantite(ri, ai, valeur, slot){
-  const q = parseFloat((valeur+'').replace(',','.'));
+  let q = parseFloat((valeur+'').replace(',','.'));
   const a = _dieteEnEdition(slot).repas[ri].aliments[ai];
   const ancien = a.quantite_g;
+  const pi = a._mp ? _alimPortionInfo(a) : null;
+  if (pi && !isNaN(q)) q = Math.round(q * pi.g * 10) / 10; // saisi en portions → stocké en grammes
   a.quantite_g = isNaN(q) ? 0 : q;
   // Aliment déjà existant (a un id) dont le grammage change réellement : on
   // coche automatiquement "modifié" — le coach peut décocher s'il ne veut pas
