@@ -972,7 +972,8 @@ function _mensurationsDansPeriode(bornes, mensurations){
 function _bilanBornesAvecGraceMens(bornes, envoyeAt){
   if (!bornes) return bornes;
   const fin = new Date(bornes.fin);
-  fin.setDate(fin.getDate() + 1);
+  // jour_bilan (+1) puis 3 jours de plus : les clients se pèsent souvent le lendemain ou le surlendemain de leur bilan (demande coach 2026-11-02)
+  fin.setDate(fin.getDate() + 4);
   fin.setHours(23, 59, 59, 999);
   if (envoyeAt) {
     const jourEnvoi = new Date(envoyeAt);
