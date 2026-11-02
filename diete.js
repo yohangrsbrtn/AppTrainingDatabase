@@ -1585,7 +1585,9 @@ async function ouvrirAjoutAliment() {
 
 function _tousLesAliments() {
   const b = _dBaseAliments || { coach: [], communaute: [], ciqual: [] };
-  return (b.coach || []).concat(b.communaute || []).concat(b.ciqual || []);
+  // un aliment communautaire déjà repris dans la base coach (même nom) n'apparaît qu'une fois
+  const nomsCoach = new Set((b.coach || []).map(a => a.nom.toLowerCase()));
+  return (b.coach || []).concat((b.communaute || []).filter(a => !nomsCoach.has(a.nom.toLowerCase()))).concat(b.ciqual || []);
 }
 
 function _rechercherAlimentsLocal(query) {
@@ -1971,7 +1973,7 @@ function renderModalAjoutCreation() {
   const v = n => (pf[n] != null ? pf[n] : '');
   return `
     <div style="font-size:11px;font-weight:600;color:#555e7a;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Nouvel aliment</div>
-    <div style="font-size:13px;color:#8892a4;margin-bottom:16px;line-height:1.5;">Ajouté à la base communautaire, utilisable par tous — visible immédiatement mais marqué "non validé" jusqu'à ce que ton coach le confirme.${_dCreationCodeBarre ? ' Champs préremplis depuis Open Food Facts, à vérifier avant de valider.' : ''}</div>
+    <div style="font-size:13px;color:#8892a4;margin-bottom:16px;line-height:1.5;">L'aliment est <b>envoyé à ton coach</b> pour être intégré à la base. En attendant, il est utilisable par tous, marqué "non validé".${_dCreationCodeBarre ? ' Champs préremplis depuis Open Food Facts, à vérifier avant de valider.' : ''}</div>
     <div style="margin-bottom:12px;">
       <div style="font-size:11px;color:#8892a4;margin-bottom:6px;">NOM</div>
       <input id="dCreaNom" type="text" value="${esc(_dCreationNomPrerempli)}" placeholder="ex: Yaourt grec"
@@ -1991,7 +1993,10 @@ function renderModalAjoutCreation() {
     <div id="dCreaCoherence" style="display:none;font-size:12px;color:#e8a33d;background:#e8a33d1a;border:1px solid #e8a33d55;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;"></div>
     <div style="font-size:11px;color:#555e7a;margin-bottom:12px;">Sucres, AGS et fibres sont optionnels.</div>
     <div id="dCreaErr" style="display:none;font-size:12px;color:#e05252;margin-bottom:12px;"></div>
-    <button onclick="_guardAction(confirmerCreationAliment, this)" style="width:100%;padding:14px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;">Créer et ajouter</button>
+    <label style="display:flex;gap:10px;align-items:flex-start;background:#e8a33d1a;border:1px solid #e8a33d55;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#e8d3a8;line-height:1.45;cursor:pointer;">
+      <input id="dCreaVerif" type="checkbox" onchange="document.getElementById('dCreaBtn').style.opacity=this.checked?1:.45" style="width:20px;height:20px;flex-shrink:0;margin-top:1px;">
+      <span><b>Vérification des macros</b> — j'ai comparé calories, protéines, glucides et lipides avec l'étiquette du produit.</span></label>
+    <button id="dCreaBtn" onclick="_guardAction(confirmerCreationAliment, this)" style="width:100%;padding:14px;background:linear-gradient(135deg,#a78bfa,#6d3fd6);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;opacity:.45;">Envoyer au coach et ajouter</button>
     <button onclick="_dCreationPrefill=null;_dCreationOffInfo=null;_dCreationCodeBarre=null;_dAjoutEtape='recherche';_afficherModalAjout(false);" style="width:100%;margin-top:8px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">‹ Retour</button>`;
 }
 
@@ -2022,6 +2027,7 @@ async function confirmerCreationAliment() {
   const ags100    = val('dCreaAgs');
   const fibres100 = val('dCreaFibres');
   const errEl = document.getElementById('dCreaErr');
+  if (!document.getElementById('dCreaVerif').checked) { errEl.textContent = 'Coche la vérification des macros avec l\'étiquette avant d\'envoyer.'; errEl.style.display = 'block'; return; }
   if (!nom) { errEl.textContent = 'Entre un nom.'; errEl.style.display = 'block'; return; }
   if (kcal100 <= 0) { errEl.textContent = 'Entre au moins les calories.'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
