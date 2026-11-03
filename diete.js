@@ -498,7 +498,8 @@ function renderDietePage() {
 
 function renderDieteTabs(actif) {
   const tabs = [['list','Diètes'], ['menus','Mes menus'], ['journal','Mon journal']];
-  return `<div style="display:flex;gap:6px;padding:0 16px 12px;">
+  return `<div style="padding:0 16px 8px;"><button onclick="ouvrirEnvoiAlimentCoach()" style="width:100%;padding:9px;border-radius:10px;border:1px dashed #a78bfa88;background:transparent;color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;">📷 Scanner un aliment pour mon coach</button></div>
+  <div style="display:flex;gap:6px;padding:0 16px 12px;">
     ${tabs.map(([key,label]) => `
       <button onclick="switchDieteTab('${key}')" style="flex:1;padding:9px 4px;border-radius:10px;border:1px solid ${actif===key?'#a78bfa':'var(--border)'};background:${actif===key?'#a78bfa22':'transparent'};color:${actif===key?'#a78bfa':'var(--muted)'};font-size:12px;font-weight:700;cursor:pointer;">${label}</button>`).join('')}
   </div>`;
@@ -1572,7 +1573,17 @@ async function supprimerSlotJournalClient(ligne) {
 
 // ── Modale de recherche/ajout/création d'aliment (alimente _dMenuDraft) ──────
 
+// Scan rapide « envoyer un aliment au coach » : directement la caméra, puis la fiche à vérifier ; ne touche à aucun repas/menu.
+let _dEnvoiCoach = false;
+async function ouvrirEnvoiAlimentCoach() {
+  _dEnvoiCoach = true;
+  _dAjoutSelection = null; _dModifIndex = null;
+  if (!_dBaseAliments) { try { _dBaseAliments = await _apiChargerBaseAliments(); } catch(e) { _dBaseAliments = { coach: [], communaute: [] }; } }
+  ouvrirScanCodeBarre();
+}
+
 async function ouvrirAjoutAliment() {
+  _dEnvoiCoach = false;
   _dAjoutEtape = 'recherche';
   _dAjoutSelection = null;
   _dModifIndex = null;
@@ -1963,6 +1974,12 @@ function _offFetch(code) {
 
 async function _traiterCodeBarre(codeBarre) {
   const local = _tousLesAliments().find(a => a.codeBarre === codeBarre);
+  if (local && _dEnvoiCoach) {
+    _dScanTraitementEnCours = false; _dEnvoiCoach = false; _arreterScan();
+    const m = document.getElementById('modalAjoutAliment'); if (m) m.remove();
+    showToast('Cet aliment est déjà dans la base ✓', '#1D9E75');
+    return;
+  }
   if (local) { _dScanTraitementEnCours = false; selectionnerAliment(local.nom, local.source); return; }
   _afficherModalAjout('produit');
   try {
@@ -2093,6 +2110,12 @@ async function confirmerCreationAliment() {
     });
     if (!res || !res.ok) { errEl.textContent = 'Erreur lors de la création.'; errEl.style.display = 'block'; return; }
     if (_dBaseAliments) _dBaseAliments.communaute.push(res.aliment);
+    if (_dEnvoiCoach) {
+      _dEnvoiCoach = false; _dCreationPrefill = null; _dCreationCodeBarre = null; _dCreationOffInfo = null;
+      const m = document.getElementById('modalAjoutAliment'); if (m) m.remove();
+      showToast('Aliment envoyé à ton coach ✓', '#1D9E75');
+      return;
+    }
     _dAjoutSelection = res.aliment;
     _dAjoutEtape = 'quantite';
     _dCreationPrefill = null;
@@ -2119,6 +2142,7 @@ function _arreterScan() {
 
 function _afficherModalAjout(loading) {
   _arreterScan();
+  if (_dAjoutEtape === 'recherche') _dEnvoiCoach = false; // retour au picker normal : plus en mode « envoi au coach »
   const existant = document.getElementById('modalAjoutAliment');
   if (existant) existant.remove();
   const modal = document.createElement('div');
