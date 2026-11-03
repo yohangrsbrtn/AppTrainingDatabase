@@ -9090,7 +9090,8 @@ function renderFicheDieteTab(c){
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="dupliquerDieteClient(${d.id},'${c.id}')" title="Créer une copie indépendante de cette diète pour ce client">Dupliquer</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirCopierDieteVersClients(${d.id},'${c.id}')" title="Assigner une copie indépendante de cette diète à un ou plusieurs autres clients">→ Autres clients</button>
         <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="ouvrirModalNotifier('${c.id}','${esc(c.nom).replace(/'/g, "\\'")}','Ta diète a été mise à jour !','Va jeter un œil à ta diète « ${esc(d.nom).replace(/'/g, "\\'")} », elle vient d\\'être mise à jour.')" title="Notifier">🔔</button>
-        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Retirer</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="basculerActifDieteClient(${d.id},'${c.id}',false)" title="Le client ne la voit plus ; elle reste conservée (Archives) et réactivable">Désactiver</button>
+        <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')" title="Supprime définitivement la diète du client">Supprimer</button>
       </div>`).join('') : `
       <div class="fiche-prog-empty" style="text-align:center;padding:24px;margin-bottom:16px;">
         <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px;">Aucune diète assignée</div>
@@ -9104,6 +9105,8 @@ function renderFicheDieteTab(c){
             <div class="p-nom">${esc(d.nom||'Diète sans nom')}</div>
             <div class="p-meta">${d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : '—'}${_dieteMacrosBadge(d)}</div>
           </div>
+          <button class="btn primary" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="basculerActifDieteClient(${d.id},'${c.id}',true)" title="Redevient visible et sélectionnable côté client">Réactiver</button>
+          <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="editerDieteClient('${esc(d.nom)}','${c.id}',${d.id})">Éditer</button>
           <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;" onclick="retirerDieteClient(${d.id},'${c.id}')">Supprimer</button>
         </div>`).join('')}` : ''}
     ${_renderFicheMenusEtJournal(c)}`;
@@ -12925,8 +12928,19 @@ async function publierDieteClient(dieteId, clientId){
   } catch(e){ alert('Erreur : '+e.message); }
 }
 
+// Désactiver = actif:false (le client ne la voit plus, ne peut plus la sélectionner) mais la diète est conservée en Archives ; Réactiver = actif:true.
+async function basculerActifDieteClient(dieteId, clientId, actif){
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${dieteId}`, { method:'PATCH', headers:supaHeaders({ Prefer:'return=minimal' }), body:JSON.stringify({ actif }) });
+    if (!res.ok) throw new Error('supabase_' + res.status);
+    ficheData.tous_dietes = await chargerTousDietes(clientId);
+    ficheData.diete = ficheData.tous_dietes.find(d=>d.actif) || null;
+    setFicheTab('diete');
+  } catch(e){ alert('Erreur : '+e.message); }
+}
+
 async function retirerDieteClient(dieteId, clientId){
-  if (!confirm('Retirer cette diète du client ?')) return;
+  if (!confirm('Supprimer définitivement cette diète du client ? (Pour la garder, utilise « Désactiver ».)')) return;
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/client_dietes?id=eq.${dieteId}`, { method:'DELETE', headers:supaHeaders() });
     ficheData.tous_dietes = await chargerTousDietes(clientId);
