@@ -27,3 +27,7 @@ DROP POLICY IF EXISTS anon_all ON client_seances_libres;
 DROP POLICY IF EXISTS anon_all ON client_seances_libres_series;
 CREATE POLICY anon_all ON client_seances_libres FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON client_seances_libres_series FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- Commentaires (séance et exercice) — ajout du 2026-11-04
+ALTER TABLE client_seances_libres ADD COLUMN IF NOT EXISTS commentaire TEXT;
+ALTER TABLE client_seances_libres_series ADD COLUMN IF NOT EXISTS commentaire TEXT;

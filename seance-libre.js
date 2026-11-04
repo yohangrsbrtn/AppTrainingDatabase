@@ -37,13 +37,14 @@ function _slRenderSeance() {
       <div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;font-size:14px;font-weight:600;">${i + 1}. ${esc(ex.nom)}</div>
         <button onclick="slSupprimerExo(${i})" style="background:none;border:none;color:#8892a4;font-size:16px;cursor:pointer;">🗑</button></div>
       <div style="margin-top:6px;">${sets}</div>
+      <textarea rows="1" placeholder="Commentaire…" onchange="slComExo(${i},this.value)" style="width:100%;margin-top:4px;font-size:16px;padding:8px;border-radius:8px;border:1px solid var(--border);background:#0f1117;color:var(--text);box-sizing:border-box;">${esc(ex.com || '')}</textarea>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn-secondary" style="flex:1;" onclick="slAjouterSerie(${i})">+ Série</button>
         ${ex.series.length > 1 ? `<button class="btn-secondary" style="flex:0 0 44px;" onclick="slRetirerSerie(${i})">−</button>` : ''}
       </div></div>`;
   }).join('');
   return `<div id="app"><div class="page">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-top:calc(env(safe-area-inset-top) + 14px);">
       <button class="btn-secondary" onclick="slRetour()" style="width:auto;padding:8px 12px;">←</button>
       <div style="flex:1;font-size:17px;font-weight:700;">Séance libre</div>
       <button class="btn-secondary" onclick="slOuvrirHisto()" style="width:auto;padding:8px 12px;">🗂 Historique</button>
@@ -53,12 +54,15 @@ function _slRenderSeance() {
       <div style="font-size:12px;color:var(--muted);margin-top:6px;">${nbOk} série${nbOk > 1 ? 's' : ''} validée${nbOk > 1 ? 's' : ''} · ${Math.round(tonnage)} kg soulevés</div>
     </div>
     ${exos}
+    <textarea rows="2" placeholder="Commentaire sur la séance (ressenti, énergie…)" onchange="slComSeance(this.value)" style="width:100%;margin-bottom:8px;font-size:16px;padding:10px;border-radius:8px;border:1px solid var(--border);background:#0f1117;color:var(--text);box-sizing:border-box;">${esc(d.com || '')}</textarea>
     <button class="btn-secondary" style="width:100%;margin-bottom:8px;" onclick="slAjouterExo()">➕ Ajouter un exercice</button>
     <button class="btn-primary" id="slFinBtn" onclick="slTerminer()" ${nbOk ? '' : 'disabled'}>✅ Terminer la séance</button>
     <button onclick="slAbandonner()" style="width:100%;margin-top:8px;background:none;border:none;color:#8892a4;font-size:13px;cursor:pointer;">Abandonner cette séance</button>
   </div>${renderNavBar('training')}</div>`;
 }
 
+function slComExo(i, v) { const d = _slDraft(); if (d) { d.exos[i].com = v.trim(); _slSave(d); } }
+function slComSeance(v) { const d = _slDraft(); if (d) { d.com = v.trim(); _slSave(d); } }
 function slNom(v) { const d = _slDraft(); if (d) { d.nom = v.trim(); _slSave(d); } }
 function slChamp(i, j, f, v) {
   const d = _slDraft(); if (!d) return;
@@ -75,6 +79,16 @@ function slValiderSerie(i, j) {
   const d = _slDraft(), s = d.exos[i].series[j];
   if (!s.ok && (!(s.charge > 0) || !(s.reps > 0))) { showToast('Renseigne les reps et les kg avant de valider.', '#f0a500'); return; }
   s.ok = !s.ok; _slSave(d); setPage('seance-libre');
+  if (s.ok) _slNiveaux(d, i, j);
+}
+// XP par muscle : compare les niveaux avec / sans cette série (séries déjà validées de la séance incluses)
+async function _slNiveaux(d, i, j) {
+  if (typeof _pcNvCharger !== 'function') return;
+  const nv = await _pcNvCharger(); if (!nv) return;
+  const sets = (sans) => { const r = []; d.exos.forEach((ex, a) => ex.series.forEach((x, b) => { if (x.ok && !(sans && a === i && b === j)) r.push({ exercice_id: ex.exId, exercice_nom: ex.nom, charge: x.charge, reps: x.reps, rir: x.rir, date: d.date }); })); return r; };
+  nv.libresLive = sets(true); const avant = nvCalculer(nv, null, nv.poids, nv.sexe);
+  nv.libresLive = sets(false); const apres = nvCalculer(nv, null, nv.poids, nv.sexe);
+  nv.libresLive = []; _pcNvAnnoncer(avant, apres);
 }
 async function slAjouterExo() {
   if (typeof _pcChargerExercicesLib === 'function') await _pcChargerExercicesLib();
@@ -118,11 +132,11 @@ async function slTerminer() {
     const clientId = getClient();
     const nom = d.nom || ('Séance du ' + d.date.split('-').reverse().join('/'));
     const res = await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=representation' }),
-      body: JSON.stringify({ client_id: clientId, nom, date: d.date, duree_min: Math.max(1, Math.round((Date.now() - d.debut) / 60000)) }) });
+      body: JSON.stringify(Object.assign({ client_id: clientId, nom, date: d.date, duree_min: Math.max(1, Math.round((Date.now() - d.debut) / 60000)) }, d.com ? { commentaire: d.com } : {})) });
     if (!res.ok) throw new Error('enregistrement impossible (SQL exécuté ?)');
     const sid = (await res.json())[0].id;
     const rows = [];
-    d.exos.forEach((ex, i) => ex.series.forEach((s, j) => { if (s.ok) rows.push({ seance_id: sid, exercice_id: ex.exId, exercice_nom: ex.nom, ordre_exo: i, numero_serie: j + 1, charge: s.charge, reps: s.reps, rir: s.rir, valide: true }); }));
+    d.exos.forEach((ex, i) => ex.series.forEach((s, j) => { if (s.ok) rows.push(Object.assign({ seance_id: sid, exercice_id: ex.exId, exercice_nom: ex.nom, ordre_exo: i, numero_serie: j + 1, charge: s.charge, reps: s.reps, rir: s.rir, valide: true }, (ex.com && !rows.some(r => r.ordre_exo === i)) ? { commentaire: ex.com } : {})); }));
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres_series`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(rows) });
     if (!r2.ok) throw new Error('séries non enregistrées');
     // Séance du jour comptée (une fois par jour) — mêmes règles que pcValiderSeance
@@ -138,9 +152,10 @@ async function slTerminer() {
       }
     } catch (e) { msg = 'Séance enregistrée, comptage du jour impossible.'; }
     _slSave(null);
-    if (msg) showToast(msg, '#f0a500'); else if (typeof _pcFlashSeanceValidee === 'function') _pcFlashSeanceValidee(xp);
     if (typeof rafraichirProgressionEtDeblocages === 'function') rafraichirProgressionEtDeblocages();
-    _slHisto = null; slOuvrirHisto();
+    _slHisto = null; if (typeof _pcNvData !== 'undefined') _pcNvPromise = null;
+    await slOuvrirHisto(); // le flash est ajouté APRÈS le changement de page (setPage remplace tout le body)
+    if (msg) showToast(msg, '#f0a500'); else if (typeof _pcFlashSeanceValidee === 'function') _pcFlashSeanceValidee(xp);
   } catch (e) {
     showToast('Erreur : ' + e.message, '#c0392b');
     if (btn) { btn.disabled = false; btn.textContent = '✅ Terminer la séance'; }
@@ -171,7 +186,8 @@ function _slRenderHisto() {
     if (_slOuverte === s.id) {
       const parExo = {};
       ser.sort((a, b) => a.ordre_exo - b.ordre_exo || a.numero_serie - b.numero_serie).forEach(x => (parExo[x.ordre_exo] = parExo[x.ordre_exo] || { nom: x.exercice_nom, l: [] }).l.push(x));
-      detail = Object.values(parExo).map(e => `<div style="margin-top:8px;"><div style="font-size:13px;font-weight:600;">${esc(e.nom)}</div><div style="font-size:12px;color:var(--muted);">${e.l.map(x => `${x.reps || '?'}×${x.charge || '?'} kg`).join(' · ')}</div></div>`).join('')
+      detail = Object.values(parExo).map(e => `<div style="margin-top:8px;"><div style="font-size:13px;font-weight:600;">${esc(e.nom)}</div><div style="font-size:12px;color:var(--muted);">${e.l.map(x => `${x.reps || '?'}×${x.charge || '?'} kg`).join(' · ')}</div>${(e.l.find(x => x.commentaire) || {}).commentaire ? `<div style="font-size:12px;font-style:italic;margin-top:2px;">${esc(e.l.find(x => x.commentaire).commentaire)}</div>` : ''}</div>`).join('')
+        + (s.commentaire ? `<div style="margin-top:10px;font-size:12px;font-style:italic;">${esc(s.commentaire)}</div>` : '')
         + `<button onclick="slSupprimerHisto(${s.id})" style="margin-top:10px;background:none;border:none;color:#c0392b;font-size:12px;cursor:pointer;">Supprimer</button>`;
     }
     return `<div class="card" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="slToggleHisto(${s.id})">
@@ -179,7 +195,7 @@ function _slRenderHisto() {
       <div style="font-size:12px;color:var(--muted);margin-top:2px;">${nbExo} exercice${nbExo > 1 ? 's' : ''} · ${ser.length} séries · ${Math.round(ton)} kg${s.duree_min ? ' · ' + s.duree_min + ' min' : ''}</div>${detail}</div>`;
   }).join('');
   return `<div id="app"><div class="page">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-top:calc(env(safe-area-inset-top) + 14px);">
       <button class="btn-secondary" onclick="slRetourSeance()" style="width:auto;padding:8px 12px;">←</button>
       <div style="flex:1;font-size:17px;font-weight:700;">Historique des séances</div></div>
     ${_slHisto === null ? '<div class="spinner" style="margin:30px auto;"></div>' : (liste || '<div style="text-align:center;color:var(--muted);padding:30px;">Aucune séance libre pour l\'instant.</div>')}

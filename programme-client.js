@@ -1690,6 +1690,11 @@ async function pcValiderSerie(exId, s) {
   const calc = () => nvCalculer(d, null, d.poids, d.sexe);
   _pcNvPoser(exId, sem, s, null); const avant = calc();
   _pcNvPoser(exId, sem, s, log); const apres = calc();
+  _pcNvAnnoncer(avant, apres);
+}
+
+// Annonce XP / montée de rang par muscle entre deux calculs de niveaux (partagé avec la séance libre).
+function _pcNvAnnoncer(avant, apres) {
   const lignes = [];
   Object.keys(apres.zones).forEach(z => {
     const n = apres.zones[z].niv, a = avant.zones[z] ? avant.zones[z].niv : 0;

@@ -43,10 +43,11 @@ const nvCouleur = niv => niv == null ? '#2a2f3f' : NV_COULEURS[Math.max(0, Math.
 // Charge tout ce qu'il faut pour un client : bibliothèque d'exercices, programmes + logs (paginés), dernier poids, sexe.
 async function nvChargerClient(clientId) {
   const get = async url => { const r = await fetch(`${SUPABASE_URL}/rest/v1/${url}`, { headers: supaHeaders() }); return r.ok ? r.json() : []; };
-  const [exercices, profil, mens, progs] = await Promise.all([
+  const [exercices, profil, mens, libres, progs] = await Promise.all([
     get('exercices?select=id,nom,groupe_musculaire&limit=1000'),
     get(`client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=sexe`),
     get(`mensurations?client_id=eq.${encodeURIComponent(clientId)}&poids=not.is.null&order=date.desc&limit=1&select=date,poids`),
+    get(`client_seances_libres_series?select=exercice_id,exercice_nom,charge,reps,rir,client_seances_libres!inner(client_id,date)&client_seances_libres.client_id=eq.${encodeURIComponent(clientId)}&charge=not.is.null&limit=5000`),
     get(`client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc&select=id,created_at,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,ordre,client_programme_seances(client_programme_exercices(id,exercice_id,nom)))`),
   ]);
   const idsParExo = [];
@@ -60,7 +61,7 @@ async function nvChargerClient(clientId) {
       if (rows.length < 1000) break;
     }
   }
-  return { exercices, progs, logsParExo, poids: mens[0] ? mens[0].poids : null, sexe: (profil[0] && profil[0].sexe) || null };
+  return { exercices, progs, logsParExo, libres, poids: mens[0] ? mens[0].poids : null, sexe: (profil[0] && profil[0].sexe) || null };
 }
 
 // Calcule les niveaux. cutoff (ms) : ne garde que les séries loggées jusque-là → compare « maintenant » et « il y a X jours ».
@@ -78,6 +79,17 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
       (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: pi * 1e6 + (b.ordre || bi) * 1e4 + (l.semaine || 0), e1rm: charge * (1 + eff / 30), charge, reps });
     });
   }))));
+  // Séances libres (enregistrées + série en cours validée à la salle) : mêmes calculs, rangées après les programmes
+  [].concat(donnees.libres || [], donnees.libresLive || []).forEach(l => {
+    const lib = (l.exercice_id && donnees.exercices.find(x => x.id === l.exercice_id)) || donnees.exercices.find(x => x.nom.toLowerCase() === (l.exercice_nom || '').toLowerCase());
+    if (!lib) return;
+    const date = l.date || (l.client_seances_libres && l.client_seances_libres.date);
+    const charge = parseFloat(l.charge), reps = parseFloat(l.reps);
+    if (!(charge > 0) || !(reps > 0)) return;
+    if (cutoff && date && new Date(date).getTime() > cutoff) return;
+    const eff = Math.min(30, reps + (parseFloat(l.rir) || 0));
+    (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: 1e8 + Math.floor((date ? new Date(date).getTime() : Date.now()) / 6048e5), e1rm: charge * (1 + eff / 30), charge, reps });
+  });
   const exos = Object.values(parEx).map(e => {
     e.sets.sort((a, b) => a.ordre - b.ordre);
     e.best = Math.max(...e.sets.map(s => s.e1rm));
