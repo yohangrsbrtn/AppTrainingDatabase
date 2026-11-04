@@ -172,6 +172,19 @@ async function slOuvrirHisto() {
 }
 function slToggleHisto(id) { _slOuverte = _slOuverte === id ? null : id; setPage('seance-libre'); }
 function slRetourSeance() { _slSub = 'seance'; if (!_slDraft()) slOuvrir(); else setPage('seance-libre'); }
+// Nouvelle séance du jour pré-remplie avec les exercices, séries, reps et kg d'une séance passée (rien n'est validé)
+function slRefaire(id) {
+  const src = (_slHisto || []).find(x => x.id === id); if (!src) return;
+  const cur = _slDraft();
+  if (cur && cur.exos.length && !confirm('Tu as une séance en cours. La remplacer par celle-ci ?')) return;
+  const parExo = {};
+  (src.client_seances_libres_series || []).slice().sort((a, b) => a.ordre_exo - b.ordre_exo || a.numero_serie - b.numero_serie).forEach(x => {
+    const e = (parExo[x.ordre_exo] = parExo[x.ordre_exo] || { nom: x.exercice_nom, exId: x.exercice_id, series: [] });
+    e.series.push({ charge: x.charge, reps: x.reps, rir: x.rir, ok: false });
+  });
+  _slSave({ nom: src.nom, date: _slIso(), debut: Date.now(), exos: Object.values(parExo) });
+  _slSub = 'seance'; setPage('seance-libre');
+}
 async function slSupprimerHisto(id) {
   if (!confirm('Supprimer cette séance de l\'historique ?')) return;
   await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres?id=eq.${id}`, { method: 'DELETE', headers: supaHeaders() });
@@ -188,7 +201,7 @@ function _slRenderHisto() {
       ser.sort((a, b) => a.ordre_exo - b.ordre_exo || a.numero_serie - b.numero_serie).forEach(x => (parExo[x.ordre_exo] = parExo[x.ordre_exo] || { nom: x.exercice_nom, l: [] }).l.push(x));
       detail = Object.values(parExo).map(e => `<div style="margin-top:8px;"><div style="font-size:13px;font-weight:600;">${esc(e.nom)}</div><div style="font-size:12px;color:var(--muted);">${e.l.map(x => `${x.reps || '?'}×${x.charge || '?'} kg`).join(' · ')}</div>${(e.l.find(x => x.commentaire) || {}).commentaire ? `<div style="font-size:12px;font-style:italic;margin-top:2px;">${esc(e.l.find(x => x.commentaire).commentaire)}</div>` : ''}</div>`).join('')
         + (s.commentaire ? `<div style="margin-top:10px;font-size:12px;font-style:italic;">${esc(s.commentaire)}</div>` : '')
-        + `<button onclick="slSupprimerHisto(${s.id})" style="margin-top:10px;background:none;border:none;color:#c0392b;font-size:12px;cursor:pointer;">Supprimer</button>`;
+        + `<button class="btn-primary" onclick="event.stopPropagation();slRefaire(${s.id})" style="margin-top:10px;">🔁 Refaire cette séance</button><button onclick="event.stopPropagation();slSupprimerHisto(${s.id})" style="margin-top:10px;background:none;border:none;color:#c0392b;font-size:12px;cursor:pointer;">Supprimer</button>`;
     }
     return `<div class="card" style="padding:10px;margin-bottom:8px;cursor:pointer;" onclick="slToggleHisto(${s.id})">
       <div style="display:flex;justify-content:space-between;gap:8px;"><div style="font-size:14px;font-weight:600;">${esc(s.nom)}</div><div style="font-size:12px;color:var(--muted);">${s.date.split('-').reverse().join('/')}</div></div>
