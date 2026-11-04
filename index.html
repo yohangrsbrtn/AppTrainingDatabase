@@ -193,8 +193,9 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="collection.js?v=4"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=40"></script>
+<script src="programme-client.js?v=41"></script>
 <script src="training-perso.js?v=2"></script>
+<script src="seance-libre.js?v=1"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=23"></script>
 <script>
@@ -369,6 +370,7 @@ function render() {
     case 'programme-client':
     case 'programme-client-loading': document.body.innerHTML = renderProgrammeClientPage(); break;
     case 'training-perso-loading': document.body.innerHTML = renderTrainingPersoLoading(); break;
+    case 'seance-libre':         document.body.innerHTML = renderSeanceLibrePage();       break;
     case 'training-perso':       document.body.innerHTML = renderTrainingPersoPage();     break;
   }
 }

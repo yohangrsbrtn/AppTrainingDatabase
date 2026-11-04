@@ -815,6 +815,7 @@ function renderPcSelectorPage() {
       <button class="btn-primary" onclick="pcOuvrirSeance()" ${canGo ? '' : 'disabled'}>${isReadonly ? '👁 Voir la séance' : 'Commencer →'}</button>
       <button class="btn-secondary" onclick="pcOuvrirSuivi()" style="margin-top:8px;width:100%;">📊 Suivi des charges</button>
       ${(_pcAutoEdition() && !isReadonly && seances.length > 1) ? `<button class="btn-secondary" onclick="pcOuvrirReorganiserSeances()" style="margin-top:8px;width:100%;">↕️ Réorganiser mes séances</button>` : ''}
+      ${(typeof _slAccesAutorise === 'function' && _slAccesAutorise()) ? `<button class="btn-secondary" onclick="slOuvrir()" style="margin-top:8px;width:100%;">🏋️ Séance libre</button>` : ''}
       ${(typeof tpAccesAutorise === 'function' && tpAccesAutorise()) ? `<button class="btn-secondary" onclick="loadTrainingPerso()" style="margin-top:8px;width:100%;">📓 Mes séances perso</button>` : ''}
     </div>
     ${renderNavBar('training')}
