@@ -2165,7 +2165,7 @@ function _afficherModalAjout(loading) {
       <input id="dAjoutRecherche" type="text" placeholder="Chercher un aliment…" oninput="onRechercheAlimentInput(this.value)"
         style="width:100%;padding:12px;background:#0f1117;color:#e8eaf0;border:1px solid #2d3142;border-radius:10px;font-size:16px;box-sizing:border-box;margin-bottom:4px;">
       <button onclick="ouvrirScanCodeBarre()" style="width:100%;margin-bottom:12px;padding:10px;background:#2d3142;border:none;border-radius:8px;color:#e8eaf0;font-size:13px;font-weight:600;cursor:pointer;">📷 Scanner un code-barres</button>
-      <div id="dAjoutResultats" style="max-height:50vh;overflow-y:auto;">${renderResultatsAliments('')}</div>
+      <div id="dAjoutResultats" style="height:38vh;overflow-y:auto;">${renderResultatsAliments('')}</div>
       <button onclick="document.getElementById('modalAjoutAliment').remove();" style="width:100%;margin-top:12px;padding:12px;background:#2d3142;border:none;border-radius:12px;color:#8892a4;font-size:14px;cursor:pointer;">Fermer</button>`;
   }
   modal.innerHTML = `<div class="sheet-body" style="background:#1a1f35;border-radius:20px 20px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:500px;margin:0 auto;box-sizing:border-box;max-height:85vh;overflow-y:auto;">

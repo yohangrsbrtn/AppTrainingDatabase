@@ -419,7 +419,7 @@ async function pcOuvrirCreerEquivalent(exerciceId) {
   overlay.id = 'pcEquivOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
   overlay.innerHTML = `
-    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;height:60vh;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
       <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
       <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">🔁 Exercice équivalent</div>
       <div style="padding:0 20px 10px;font-size:12px;color:#8892a4;">Même nombre de séries, reps, repos et tempo que l'exercice prévu — seul le nom change.</div>
@@ -531,7 +531,7 @@ async function pcOuvrirPickerExo(mode) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
   const titre = mode.type === 'remplacer' ? '🔁 Remplacer l\'exercice' : '➕ Ajouter un exercice';
   overlay.innerHTML = `
-    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;height:60vh;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
       <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
       <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">${titre}</div>
       <div style="padding:0 20px 10px;">
@@ -673,7 +673,7 @@ function pcOuvrirReorganiserSeances() {
   overlay.id = 'pcReorderSeancesOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
   overlay.innerHTML = `
-    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+    <div class="sheet-body" style="background:#151a28;border-radius:20px 20px 0 0;width:100%;height:60vh;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
       <div class="sheet-handle" style="width:36px;height:4px;background:#2d3142;border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
       <div style="padding:14px 20px 4px;font-size:16px;font-weight:700;color:#fff;">↕️ Réorganiser mes séances</div>
       <div id="pcReorderSeancesList" style="flex:1;overflow-y:auto;padding:8px 20px 12px;"></div>

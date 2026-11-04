@@ -81,7 +81,7 @@ async function slAjouterExo() {
   const ov = document.createElement('div');
   ov.id = 'slPicker';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:flex-end;';
-  ov.innerHTML = `<div style="background:#151a28;border-radius:20px 20px 0 0;width:100%;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
+  ov.innerHTML = `<div style="background:#151a28;border-radius:20px 20px 0 0;width:100%;height:60vh;max-height:80vh;display:flex;flex-direction:column;margin:0 auto;max-width:520px;">
     <div style="padding:16px 20px 8px;font-size:16px;font-weight:700;color:#fff;">➕ Ajouter un exercice</div>
     <div style="padding:0 20px 10px;"><input id="slSearch" type="text" placeholder="Chercher un exercice…" oninput="_slFiltrer()" style="width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid #2d3142;background:#0f1117;color:#fff;"></div>
     <div id="slList" style="flex:1;overflow-y:auto;padding:0 20px 12px;"></div>
