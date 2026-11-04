@@ -923,7 +923,7 @@ function _pcRightPanel(seance) {
 // Rendu des lignes de séries, factorisé pour être utilisé identiquement côté
 // exercice prévu ET côté exercice équivalent (mêmes cibles, juste une source
 // de logs et un handler de sauvegarde différents).
-function _pcSetsHtml(nbSeries, semaine, getLog, getPrevLog, isReadonly, onchangeBuilder) {
+function _pcSetsHtml(nbSeries, semaine, getLog, getPrevLog, isReadonly, onchangeBuilder, validExId) {
   let html = '';
   for (let s = 1; s <= nbSeries; s++) {
     const log = getLog(s) || {};
@@ -937,11 +937,13 @@ function _pcSetsHtml(nbSeries, semaine, getLog, getPrevLog, isReadonly, onchange
       refPrec = `<div style="font-size:11px;color:#5a6172;margin-bottom:2px;padding-left:38px;">Sem ${semaine - 1} : ${parts.join(' · ')}</div>`;
     }
     const roAttr = isReadonly ? 'disabled style="opacity:.55;padding:6px 2px;"' : 'style="padding:6px 2px;"';
-    html += refPrec + `<div class="set-row">
+    const valOn = validExId && _pcSerieValidee(validExId, semaine, s);
+    html += refPrec + `<div class="set-row${valOn ? ' valide' : ''}" id="pcrow-${validExId}-${semaine}-${s}">
       <span class="set-num">S${s}</span>
       <input class="set-input" type="text" inputmode="decimal" placeholder="Rep"    value="${log.reps   != null ? log.reps   : ''}" ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'reps')}"`}   ${roAttr}>
       <input class="set-input" type="text" inputmode="decimal" placeholder="Kg"     value="${log.charge != null ? log.charge : ''}" ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'charge')}"`} ${roAttr}>
       <input class="set-input" type="text" inputmode="decimal" placeholder="RIR"    value="${esc(log.rir || '')}"                   ${isReadonly ? 'disabled' : `onchange="${onchangeBuilder(s,'rir')}"`}    ${roAttr}>
+      ${validExId && _nvAutorise() ? `<button class="set-ok" onclick="pcValiderSerie(${validExId},${s})" aria-label="Valider la série">✓</button>` : ''}
     </div>`;
   }
   return html;
@@ -972,7 +974,8 @@ function renderPcSeancePage() {
       s => _pcLogs[ex.id + '|' + _pcSemaine + '|' + s],
       s => _pcLogs[ex.id + '|' + (_pcSemaine - 1) + '|' + s],
       isReadonly,
-      (s, field) => `pcSauverLog(${ex.id},${s},'${field}',this.value)`);
+      (s, field) => `pcSauverLog(${ex.id},${s},'${field}',this.value)`,
+      ex.id);
     const commentaireLog = _pcLogs[ex.id + '|' + _pcSemaine + '|1'] || {};
     const cibleLigne1 = [
       ex.series ? ex.series + ' séries' : '',
@@ -1648,4 +1651,51 @@ function pcStopChrono() {
   _pcChronoDone = false;
   const overlay = _pcGetOverlay();
   if (overlay) overlay.style.display = 'none';
+}
+
+
+// ── Validation de série + niveaux par muscle en direct (test : comptes autorisés par _nvAutorise) ──
+// Séries validées : stockées en local (par client), sans effet sur les données du coach.
+const _PC_VALID_KEY = () => 'at_pc_valid_' + (S.client || '');
+function _pcValidSet() { try { return JSON.parse(localStorage.getItem(_PC_VALID_KEY()) || '{}'); } catch (e) { return {}; } }
+function _pcSerieValidee(exId, sem, s) { return !!_pcValidSet()[exId + '|' + sem + '|' + s]; }
+let _pcNvData = null, _pcNvPromise = null;
+function _pcNvCharger() {
+  if (!_pcNvPromise && typeof nvChargerClient === 'function') _pcNvPromise = nvChargerClient(S.client).then(d => (_pcNvData = d)).catch(() => { _pcNvPromise = null; return null; });
+  return _pcNvPromise;
+}
+// Remplace (ou ajoute) la série dans les données en mémoire, ou la retire si log == null.
+function _pcNvPoser(exId, sem, serie, log) {
+  const l = (_pcNvData.logsParExo[exId] = (_pcNvData.logsParExo[exId] || []).filter(x => !(x.semaine === sem && x.numero_serie === serie)));
+  if (log) l.push({ client_programme_exercice_id: exId, semaine: sem, numero_serie: serie, charge: log.charge, reps: log.reps, rir: log.rir });
+}
+function _pcToastNv(html, long) {
+  let box = document.getElementById('pcNvToasts');
+  if (!box) { box = document.createElement('div'); box.id = 'pcNvToasts'; box.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none;'; document.body.appendChild(box); }
+  const t = document.createElement('div');
+  t.style.cssText = 'background:#161a24;border:1px solid #2a2f3f;border-radius:12px;padding:10px 14px;color:#fff;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.5);transition:opacity .4s;';
+  t.innerHTML = html; box.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 450); }, long ? 4500 : 2500);
+}
+async function pcValiderSerie(exId, s) {
+  const sem = _pcSemaine, key = exId + '|' + sem + '|' + s;
+  const set = _pcValidSet(), row = document.getElementById(`pcrow-${exId}-${sem}-${s}`);
+  if (set[key]) { delete set[key]; try { localStorage.setItem(_PC_VALID_KEY(), JSON.stringify(set)); } catch (e) {} if (row) row.classList.remove('valide'); return; }
+  const log = _pcLogs[key] || {};
+  if (!(parseFloat(log.charge) > 0) || !(parseFloat(log.reps) > 0)) { _pcToastNv('Renseigne les reps et les kg avant de valider.'); return; }
+  set[key] = 1; try { localStorage.setItem(_PC_VALID_KEY(), JSON.stringify(set)); } catch (e) {}
+  if (row) row.classList.add('valide');
+  const d = await _pcNvCharger(); if (!d) return;
+  const calc = () => nvCalculer(d, null, d.poids, d.sexe);
+  _pcNvPoser(exId, sem, s, null); const avant = calc();
+  _pcNvPoser(exId, sem, s, log); const apres = calc();
+  const lignes = [];
+  Object.keys(apres.zones).forEach(z => {
+    const n = apres.zones[z].niv, a = avant.zones[z] ? avant.zones[z].niv : 0;
+    if (n <= a + 0.004) return;
+    if (Math.floor(n) > Math.floor(a) && a > 0) _pcToastNv(`🏆 <b>${NV_ZONE_NOM[z]}</b> : niveau ${Math.floor(n)} — <b style="color:${nvCouleur(n)}">${nvRang(n)}</b> !`, true);
+    else lignes.push(`${NV_ZONE_NOM[z]} <b style="color:${nvCouleur(n)}">+${Math.max(1, Math.round((n - a) * 100))} XP</b> <span style="color:#8b93a7;">(${nvRang(n)} ${Math.round((n % 1) * 100)} %)</span>`);
+  });
+  if (lignes.length) _pcToastNv('💪 ' + lignes.slice(0, 3).join('<br>'));
+  else if (!Object.keys(apres.zones).length) _pcToastNv('✓ Série validée');
 }

@@ -143,6 +143,9 @@ body { max-width: 430px; margin: 0 auto; position: relative; }
 /* ── Training ── */
 .t-select { width:100%;padding:10px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:16px;font-family:inherit; }
 .set-row { display:flex;align-items:center;gap:6px;margin-bottom:6px; }
+.set-row.valide { background:rgba(52,199,89,.2);border-radius:8px;box-shadow:0 0 0 1px rgba(52,199,89,.5); }
+.set-ok { flex-shrink:0;width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:#0f1117;color:var(--muted);font-size:17px;cursor:pointer; }
+.set-row.valide .set-ok { background:#34c759;color:#fff;border-color:#34c759; }
 .set-num { font-size:12px;font-weight:700;color:var(--muted);width:24px;flex-shrink:0;text-align:center; }
 .set-input { flex:1;padding:8px 4px;background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:16px;text-align:center;min-width:0; }
 .chrono-btn { background:#1e2444;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-weight:600;padding:6px 10px;cursor:pointer;white-space:nowrap;flex-shrink:0; }
@@ -181,7 +184,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="api.js?v=30"></script>
-<script src="niveaux.js?v=4"></script>
+<script src="niveaux.js?v=5"></script>
 <script src="bilan.js?v=41"></script>
 <script src="diete.js?v=38"></script>
 <script src="mensurations.js?v=18"></script>
@@ -190,7 +193,7 @@ input[type="number"] { -moz-appearance:textfield; }
 <script src="collection.js?v=4"></script>
 <script src="coach.js?v=5"></script>
 <script src="protocole.js?v=5"></script>
-<script src="programme-client.js?v=39"></script>
+<script src="programme-client.js?v=40"></script>
 <script src="training-perso.js?v=2"></script>
 <script src="roadmap.js?v=6"></script>
 <script src="chat.js?v=23"></script>

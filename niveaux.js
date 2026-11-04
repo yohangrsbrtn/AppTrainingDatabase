@@ -55,7 +55,7 @@ async function nvChargerClient(clientId) {
   for (let i = 0; i < idsParExo.length; i += 150) {
     const ids = idsParExo.slice(i, i + 150).join(',');
     for (let off = 0; ; off += 1000) {
-      const rows = await get(`client_programme_logs?client_programme_exercice_id=in.(${ids})&charge=not.is.null&select=client_programme_exercice_id,semaine,charge,reps,rir,updated_at&order=id.asc&limit=1000&offset=${off}`);
+      const rows = await get(`client_programme_logs?client_programme_exercice_id=in.(${ids})&charge=not.is.null&select=client_programme_exercice_id,semaine,numero_serie,charge,reps,rir,updated_at&order=id.asc&limit=1000&offset=${off}`);
       rows.forEach(l => { (logsParExo[l.client_programme_exercice_id] = logsParExo[l.client_programme_exercice_id] || []).push(l); });
       if (rows.length < 1000) break;
     }
