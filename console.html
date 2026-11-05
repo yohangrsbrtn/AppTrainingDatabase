@@ -10849,6 +10849,16 @@ async function sauvegarderProgrammeClient(){
     return r;
   }
   try {
+    // Garde-fou : supprimer un exercice supprime AUSSI toutes ses séries enregistrées (cascade). On prévient avant, et on arrête si le coach refuse.
+    {
+      const gardes = new Set(); cp.blocs.forEach(b => b.seances.forEach(se => se.exercices.forEach(ex => { if (ex.id) gardes.add(ex.id); })));
+      const aSupprimer = _origClientProgExoIds.filter(id => !gardes.has(id));
+      if (aSupprimer.length) {
+        const rl = await fetch(`${SUPABASE_URL}/rest/v1/client_programme_logs?client_programme_exercice_id=in.(${aSupprimer.join(',')})&select=id&limit=1000`, { headers: supaHeaders() });
+        const nbLogs = rl.ok ? (await rl.json()).length : 0;
+        if (nbLogs && !confirm(`⚠️ Cette modification supprime ${aSupprimer.length} exercice(s) qui ont ${nbLogs >= 1000 ? '1000+' : nbLogs} série(s) déjà enregistrée(s) par le client. Ces séries seront PERDUES.\n\nContinuer quand même ?`)) { if(btn){btn.disabled=false;btn.textContent='Enregistrer';} return; }
+      }
+    }
     await _cpAssertOk(await fetch(`${SUPABASE_URL}/rest/v1/client_programmes?id=eq.${cp.id}`,{method:'PATCH',headers:supaHeaders(),body:JSON.stringify({nom:cp.nom,objectif:cp.objectif||null,bloc_actif_id:cp.bloc_actif_id||null})}), 'Programme');
     const newBlocIds=[],newSeanceIds=[],newExoIds=[];
     for(let bi=0;bi<cp.blocs.length;bi++){
