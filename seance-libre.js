@@ -149,9 +149,9 @@ async function slTerminer() {
       }
     } catch (e) {}
     const rows = [];
-    d.exos.forEach((ex, i) => ex.series.forEach((s, j) => { if (s.ok) rows.push(Object.assign({ seance_id: sid, exercice_id: ex.exId, exercice_nom: ex.nom, ordre_exo: i, numero_serie: j + 1, charge: s.charge, reps: s.reps, rir: s.rir, valide: true }, (ex.com && !rows.some(r => r.ordre_exo === i)) ? { commentaire: ex.com } : {})); }));
+    d.exos.forEach((ex, i) => ex.series.forEach((s, j) => { if (s.ok) rows.push(Object.assign({ seance_id: sid, exercice_id: ex.exId, exercice_nom: ex.nom, ordre_exo: i, numero_serie: j + 1, charge: s.charge, reps: s.reps, rir: s.rir, valide: true, commentaire: (ex.com && !rows.some(r => r.ordre_exo === i)) ? ex.com : null })); }));
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres_series`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(rows) });
-    if (!r2.ok) throw new Error('séries non enregistrées');
+    if (!r2.ok) { const txt = await r2.text(); try { await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres?id=eq.${sid}`, { method: 'DELETE', headers: supaHeaders() }); } catch (e) {} throw new Error('séries non enregistrées — ' + txt.slice(0, 160)); }
     // Séance du jour comptée (une fois par jour) — mêmes règles que pcValiderSeance
     let xp = 0, msg = '';
     try {
