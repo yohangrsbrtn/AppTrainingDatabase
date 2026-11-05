@@ -5278,7 +5278,7 @@ function _archStep4(){
     </div>
     <div style="display:flex;gap:12px;margin-top:12px;align-items:center;flex-wrap:wrap;">
       <label style="font-size:12px;color:var(--text-faint);">Type de bloc</label>
-      <select style="font-size:16px;" onchange="_arch.blocType=this.value;renderArchitectureSub()">${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1).replace('que','que')}</option>`).join('')}</select>
+      <select style="font-size:16px;" onchange="_arch.blocType=this.value;_arch.reps={};_arch.repos={};_arch.rir={};renderArchitectureSub()">${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1).replace('que','que')}</option>`).join('')}</select>
       <label style="font-size:12px;color:var(--text-faint);">Semaines</label>
       <input type="number" min="1" max="12" value="${_arch.nbSemaines}" style="width:70px;font-size:16px;" oninput="_arch.nbSemaines=parseInt(this.value)||6">
     </div></div>
@@ -5468,7 +5468,7 @@ function _archEdEntete(){
       <button class="btn" onclick="archEdAjouterBloc('vide')" title="Nouveau bloc avec les mêmes séances, sans exercices">+ Bloc vide</button></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
       <span style="font-size:12px;color:var(--text-faint);">Ce bloc :</span>
-      <select onchange="_arch.blocType=this.value;renderArchitectureSub()"><option value="" ${!_arch.blocType?'selected':''}>Sans type</option>${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${_ARCH_BLOC_LABEL[t]}</option>`).join('')}</select>
+      <select onchange="_arch.blocType=this.value;_arch.reps={};_arch.repos={};_arch.rir={};renderArchitectureSub()"><option value="" ${!_arch.blocType?'selected':''}>Sans type</option>${['metabolique','mecanique','force'].map(t => `<option value="${t}" ${_arch.blocType===t?'selected':''}>${_ARCH_BLOC_LABEL[t]}</option>`).join('')}</select>
       <input type="number" min="1" max="12" value="${_arch.nbSemaines || ''}" placeholder="Sem." style="width:64px;" oninput="_arch.nbSemaines=parseInt(this.value)||null" title="Nombre de semaines">
       <button class="btn" onclick="archEdBlocActif()">⭐ Définir actif</button>
       ${_archEd.cur > 0 ? `<button class="btn" onclick="archEdCharges()" title="Estime les charges de départ (S1) depuis la dernière semaine loggée du bloc précédent (Brzycki)">🧮 Calculer les charges</button>` : ''}
@@ -6006,7 +6006,7 @@ function blocVide(){ return { type: null, nombre_semaines: null, seances: [{ tit
 // qui semblait figer tous les blocs sur les valeurs Métabolique d'origine — même piège que
 // documenté plus haut dans ce fichier pour le groupe musculaire (toujours prévoir les deux
 // lookups id puis nom).
-function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
+function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib, forcer){
   const type = bloc.type;
   if (!type) return;
   bloc.seances.forEach(seance => {
@@ -6015,9 +6015,9 @@ function _appliquerTypeAuxExercicesDuBloc(bloc, exercicesLib){
         ? (exercicesLib||[]).find(e => e.id === ex.exercice_id)
         : (exercicesLib||[]).find(e => e.nom.toLowerCase() === (ex.nom||'').toLowerCase());
       if (lib && lib['reps_'+type])       ex.reps  = lib['reps_'+type];
-      else if (!ex.reps)                  ex.reps  = REPS_PAR_TYPE[type]  || ex.reps;
+      else if (forcer || !ex.reps)        ex.reps  = REPS_PAR_TYPE[type]  || ex.reps; // forcer = changement de type voulu par le coach : toujours suivre le type
       if (lib && lib['repos_'+type])      ex.repos = lib['repos_'+type];
-      else if (!ex.repos)                 ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
+      else if (forcer || !ex.repos)       ex.repos = REPOS_PAR_TYPE[type] || ex.repos;
       // RIR : contrairement à reps/repos, il n'existe aucune donnée migrée individuelle par
       // exercice à protéger (GAS ne remonte jamais de RIR) — donc pas de mode "combler si vide
       // seulement" ici. Une correspondance bibliothèque (rir_<type>) est prioritaire ; sinon on
@@ -6098,7 +6098,7 @@ function renderBlocsTemplate(){
       ${simple ? '' : `
       <div class="day-head" style="flex-wrap:wrap;border-bottom:2px solid ${color}20;">
         <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-        <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(tplEnEdition.blocs[${bi}],exercicesData);renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        <select onchange="tplEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(tplEnEdition.blocs[${bi}],exercicesData,true);renderBlocsTemplate()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o => `<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="tplEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
@@ -10570,7 +10570,7 @@ function renderBlocsClientProg(){
       ${simple ? `<div style="display:flex;justify-content:flex-end;padding:8px 12px 0;"><button class="btn" style="font-size:11px;padding:4px 10px;" onclick="archImporterBloc(${bi})" title="Retravailler ce programme avec la vue d'ensemble du mode Architecture">🧩 Mode Architecture</button></div>` : `
       <div class="day-head" style="flex-wrap:wrap;border-bottom:2px solid ${color}20;">
         <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-        <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(clientProgEnEdition.blocs[${bi}],exercicesData);renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
+        <select onchange="clientProgEnEdition.blocs[${bi}].type=this.value||null;_appliquerTypeAuxExercicesDuBloc(clientProgEnEdition.blocs[${bi}],exercicesData,true);renderBlocsClientProg()" style="background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
           ${BLOCS_TYPES.map(o=>`<option value="${o.value}" ${((bloc.type||'')===o.value)?'selected':''}>${o.label}</option>`).join('')}
         </select>
         <input type="text" inputmode="numeric" value="${bloc.nombre_semaines||''}" placeholder="Nb semaines" oninput="clientProgEnEdition.blocs[${bi}].nombre_semaines=parseInt(this.value)||null" style="width:110px;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;">
