@@ -38,14 +38,17 @@ function _nvaStyle() {
 }
 
 // Retour haptique : navigator.vibrate (Android) sinon l'interrupteur natif d'iOS 17.4+ (input switch) — très léger.
+let _nvaDernierHap = 0;
 function nvHaptic(kind) {
   try { if (navigator.vibrate) { navigator.vibrate(kind === 'succes' ? [16, 50, 26] : kind === 'fort' ? [30, 40, 30, 40, 50] : 8); return; } } catch (e) {}
+  // iOS : seul un « clic » dans le geste du doigt déclenche le retour haptique ; on espace les appels (≥110 ms) sinon iOS les avale.
+  const maintenant = Date.now(); if (maintenant - _nvaDernierHap < 110) return; _nvaDernierHap = maintenant;
   try {
     let l = document.getElementById('nvaHap');
-    if (!l) { l = document.createElement('label'); l.id = 'nvaHap'; l.setAttribute('aria-hidden', 'true'); l.style.cssText = 'position:fixed;left:-99px;top:-99px;opacity:0;pointer-events:none;'; l.innerHTML = '<input type="checkbox" switch>'; document.body.appendChild(l); }
+    if (!l) { l = document.createElement('label'); l.id = 'nvaHap'; l.setAttribute('aria-hidden', 'true'); l.style.display = 'none'; l.innerHTML = '<input type="checkbox" switch>'; document.head.appendChild(l); }
     l.click();
-    if (kind === 'succes' || kind === 'fort') setTimeout(() => l.click(), 85);
-    if (kind === 'fort') setTimeout(() => l.click(), 190);
+    if (kind === 'succes' || kind === 'fort') setTimeout(() => { _nvaDernierHap = 0; l.click(); _nvaDernierHap = Date.now(); }, 120);
+    if (kind === 'fort') setTimeout(() => { _nvaDernierHap = 0; l.click(); _nvaDernierHap = Date.now(); }, 250);
   } catch (e) {}
 }
 
@@ -167,7 +170,7 @@ function nvLabOuvrir() {
   ov.querySelector('#nvLabX').onclick = () => ov.remove();
   ov.addEventListener('click', e => {
     const b = e.target.closest('[data-b]'); if (b) { const [r, s] = b.dataset.b.split(',').map(Number); lire(); nvAnimDebloque({ zone: _nvLab.zone, niv: r + (s - 1) / 3 + 0.01, avant: s > 1 ? r : r - 1 }); return; }
-    const a = e.target.closest('[data-a]'); if (!a) return; lire();
+    const a = e.target.closest('[data-a]'); if (!a) return; lire(); if (!/^h\d$/.test(a.dataset.a)) nvHaptic('tick');
     const n = nivSel(), z = _nvLab.zone, host = ov.querySelector('#nvLabBarre');
     switch (a.dataset.a) {
       case 'palier': nvAnimDebloque({ zone: z, niv: n, avant: n - 0.34 }); break;

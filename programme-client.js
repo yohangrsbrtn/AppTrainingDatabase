@@ -1679,6 +1679,7 @@ function _pcToastNv(html, long) {
   setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 450); }, long ? 4500 : 2500);
 }
 async function pcValiderSerie(exId, s) {
+  if (typeof nvHaptic === 'function') nvHaptic('tick'); // dans le geste du doigt : seul moment où iOS accepte le retour haptique à coup sûr
   const sem = _pcSemaine, key = exId + '|' + sem + '|' + s;
   const set = _pcValidSet(), row = document.getElementById(`pcrow-${exId}-${sem}-${s}`);
   if (set[key]) { delete set[key]; try { localStorage.setItem(_PC_VALID_KEY(), JSON.stringify(set)); } catch (e) {} if (row) row.classList.remove('valide'); return; }
