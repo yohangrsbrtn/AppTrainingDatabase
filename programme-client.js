@@ -1694,6 +1694,16 @@ async function pcValiderSerie(exId, s) {
   _pcNvAnnoncer(avant, apres);
 }
 
+// Nouveaux records (meilleur 1RM estimé battu sur un exercice déjà pratiqué) entre deux calculs de niveaux.
+function _nvRecords(avant, apres) {
+  const r = [];
+  (apres.exos || []).forEach(e => {
+    const a = (avant.exos || []).find(x => x.nom === e.nom); if (!a || !(a.best > 0) || !(e.best > a.best * 1.005)) return;
+    const s = e.sets.reduce((m, x) => x.e1rm > m.e1rm ? x : m, e.sets[0]), sa = a.sets.reduce((m, x) => x.e1rm > m.e1rm ? x : m, a.sets[0]);
+    r.push({ exo: e.nom, charge: Math.round(s.charge * 10) / 10, reps: s.reps, detail: `Ancien : ${Math.round(sa.charge * 10) / 10} kg × ${sa.reps}` });
+  });
+  return r;
+}
 // Annonce XP / montée de rang par muscle entre deux calculs de niveaux (partagé avec la séance libre).
 function _pcNvAnnoncer(avant, apres) {
   const lignes = [];
@@ -1703,6 +1713,8 @@ function _pcNvAnnoncer(avant, apres) {
     if (nvPalier(n) > nvPalier(a) && a > 0) { if (typeof nvAnimDebloque === 'function' && Math.floor(n) > Math.floor(a)) nvAnimDebloque({ zone: z, niv: n, avant: a }); else { _pcToastNv(`🏆 <b>${NV_ZONE_NOM[z]}</b> : <b style="color:${nvCouleur(n)}">${nvRangComplet(n)}</b> !`, true); if (typeof nvHaptic === 'function') nvHaptic('succes'); } }
     else lignes.push(`${NV_ZONE_NOM[z]} <b style="color:${nvCouleur(n)}">+${Math.max(1, Math.round((n - a) * 300))} XP</b> <span style="color:#8b93a7;">(${nvRangComplet(n)} ${Math.round(nvFracPalier(n) * 100)} %)</span>`);
   });
+  const recs = _nvRecords(avant, apres);
+  if (recs.length && typeof nvAnimRecord === 'function') nvAnimRecord({ exo: recs[0].exo, charge: recs[0].charge, reps: recs[0].reps, detail: recs[0].detail });
   if (lignes.length) _pcToastNv('💪 ' + lignes.slice(0, 3).join('<br>'));
   else if (!Object.keys(apres.zones).length) _pcToastNv('✓ Série validée');
 }

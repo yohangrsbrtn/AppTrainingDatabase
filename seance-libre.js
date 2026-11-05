@@ -135,6 +135,19 @@ async function slTerminer() {
       body: JSON.stringify(Object.assign({ client_id: clientId, nom, date: d.date, duree_min: Math.max(1, Math.round((Date.now() - d.debut) / 60000)) }, d.com ? { commentaire: d.com } : {})) });
     if (!res.ok) throw new Error('enregistrement impossible (SQL exécuté ?)');
     const sid = (await res.json())[0].id;
+    // Récap : niveaux avant / après cette séance (calculé ici, le DB ne contient pas encore la séance dans le cache)
+    let recap = null;
+    try {
+      const nv = await _pcNvCharger();
+      if (nv) {
+        const live = []; d.exos.forEach(ex => ex.series.forEach(x => { if (x.ok) live.push({ exercice_id: ex.exId, exercice_nom: ex.nom, charge: x.charge, reps: x.reps, rir: x.rir, date: d.date }); }));
+        nv.libresLive = []; const av = nvCalculer(nv, null, nv.poids, nv.sexe);
+        nv.libresLive = live; const ap = nvCalculer(nv, null, nv.poids, nv.sexe); nv.libresLive = [];
+        const muscles = Object.keys(ap.zones).filter(z => ap.zones[z].niv > (av.zones[z] ? av.zones[z].niv : 0) + 0.01).map(z => ({ zone: z, de: av.zones[z] ? av.zones[z].niv : 1, vers: ap.zones[z].niv }));
+        const records = _nvRecords(av, ap);
+        if (muscles.length || records.length) recap = { muscles, records };
+      }
+    } catch (e) {}
     const rows = [];
     d.exos.forEach((ex, i) => ex.series.forEach((s, j) => { if (s.ok) rows.push(Object.assign({ seance_id: sid, exercice_id: ex.exId, exercice_nom: ex.nom, ordre_exo: i, numero_serie: j + 1, charge: s.charge, reps: s.reps, rir: s.rir, valide: true }, (ex.com && !rows.some(r => r.ordre_exo === i)) ? { commentaire: ex.com } : {})); }));
     const r2 = await fetch(`${SUPABASE_URL}/rest/v1/client_seances_libres_series`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(rows) });
@@ -156,6 +169,7 @@ async function slTerminer() {
     _slHisto = null; if (typeof _pcNvData !== 'undefined') _pcNvPromise = null;
     await slOuvrirHisto(); // le flash est ajouté APRÈS le changement de page (setPage remplace tout le body)
     if (msg) showToast(msg, '#f0a500'); else if (typeof _pcFlashSeanceValidee === 'function') _pcFlashSeanceValidee(xp);
+    if (recap && typeof nvAnimRecap === 'function') setTimeout(() => nvAnimRecap(recap), msg ? 300 : 2600);
   } catch (e) {
     showToast('Erreur : ' + e.message, '#c0392b');
     if (btn) { btn.disabled = false; btn.textContent = '✅ Terminer la séance'; }
