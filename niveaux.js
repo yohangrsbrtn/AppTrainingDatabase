@@ -3,7 +3,8 @@
 // des 6 grandes régions du corps (maintenant vs il y a X jours).
 //  • Exercices ÉTALONS (barre libre, comparables d'une salle à l'autre) : 1RM estimé (Epley, RIR pris en compte) ramené au poids de
 //    corps → rang absolu (Bois…Olympien) via des barèmes en multiples du poids de corps (coefficient réduit pour les femmes).
-//  • Tous les autres exercices (machines, isolations) : AUCUN barème absolu — deux machines « leg extension » ne se valent pas. On
+//  • Machines/isolations calibrées : si la zone possède un étalon, la machine part du rang de l'étalon puis progresse (+15 % = +1 rang).
+//  • Sinon, pour les autres exercices (machines, isolations) : AUCUN barème absolu — deux machines « leg extension » ne se valent pas. On
 //    mesure seulement la progression du client contre lui-même (meilleur 1RM estimé vs ses débuts), plafonnée au rang « Or ».
 // Rien n'est stocké : tout est recalculé à partir des logs (client_programme_logs), du poids de corps (mensurations) et du sexe.
 const NV_RANGS = ['Bois', 'Bronze', 'Argent', 'Or', 'Platine', 'Diamant', 'Champion', 'Titan', 'Olympien'];
@@ -16,6 +17,7 @@ const NV_ETALONS = {
   'Deadlift':                { zones: ['lats', 'traps', 'lombaires', 'ischios', 'fessiers'], h: [1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.75, 3.00], bas: true },
   'RDL':                     { zones: ['ischios', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.40, 2.75], bas: true },
   'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
+  'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
   'Rowing barre':            { zones: ['lats', 'traps'],                                    h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
 };
 const NV_ZONES_GROUPE = {
@@ -105,12 +107,18 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     return e;
   });
   const zones = {};
+  const prio = (cur, niv, e, abs) => { if ((abs && !cur.etalon) || (abs === cur.etalon && niv > cur.niv)) { cur.niv = niv; cur.src = e; cur.etalon = abs; } };
+  // 1) étalons (absolus) ; 2) machines/isolations CALIBRÉES : si la zone a un étalon, la 1re performance de la machine vaut le rang de
+  // l'étalon, puis chaque +15 % de charge = +1 rang. Sans étalon dans la zone → ancienne règle (progression seule, plafond « Or »).
+  exos.forEach(e => { if (e.niv != null && e.etalon) NV_ETALONS[e.nom].zones.forEach(z => prio(zones[z] || (zones[z] = { niv: 0, src: null, etalon: false }), e.niv, e, true)); });
+  const ancres = {}; Object.keys(zones).forEach(z => { ancres[z] = zones[z].niv; });
   exos.forEach(e => {
-    if (e.niv == null) return;
-    const zs = e.etalon ? NV_ETALONS[e.nom].zones : (NV_ZONES_GROUPE[e.groupe] || []);
-    zs.forEach(z => { const cur = zones[z] || (zones[z] = { niv: 0, src: null, etalon: false });
-      // un étalon (absolu) prime sur une progression relative ; à source égale on garde le plus haut
-      if ((e.etalon && !cur.etalon) || (e.etalon === cur.etalon && e.niv > cur.niv)) { cur.niv = e.niv; cur.src = e; cur.etalon = e.etalon; } });
+    if (e.niv == null || e.etalon) return;
+    (NV_ZONES_GROUPE[e.groupe] || []).forEach(z => {
+      const cur = zones[z] || (zones[z] = { niv: 0, src: null, etalon: false });
+      if (ancres[z] != null) { if (e.nbSets >= 3) prio(cur, Math.min(9, ancres[z] + Math.max(0, e.prog) / 15), e, true); }
+      else prio(cur, e.niv, e, false);
+    });
   });
   return { exos, zones, poids };
 }
