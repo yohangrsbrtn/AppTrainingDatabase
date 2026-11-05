@@ -192,6 +192,18 @@ function _nvAutorise() {
   try { if (localStorage.getItem('at_coach') === '1') return true; } catch(e) {}
   return NV_COMPTES_AUTORISES.includes(S.client);
 }
+function nvCalibOuvrir(i) { const el = document.getElementById('nvCal' + i); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+async function nvCalibEnregistrer(i) {
+  const nom = Object.keys(NV_ETALONS)[i], pdc = NV_ETALONS[nom].pdc;
+  const c = parseFloat(document.getElementById('nvCalC' + i).value), r = parseInt(document.getElementById('nvCalR' + i).value), ri = parseFloat(document.getElementById('nvCalI' + i).value);
+  if (!(r > 0) || (!pdc && !(c > 0)) || (pdc && !(c >= 0))) { alert(pdc ? 'Indique le lest (0 si poids de corps) et les reps.' : 'Indique la charge et les reps.'); return; }
+  const d = new Date(), jour = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  try {
+    const rep = await fetch(`${SUPABASE_URL}/rest/v1/client_calibrations`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ client_id: S.client, exercice_nom: nom, charge: pdc ? (c || 0) : c, reps: r, rir: isNaN(ri) ? null : ri, date: jour }) });
+    if (!rep.ok) throw new Error(await rep.text());
+  } catch (e) { alert('Enregistrement impossible (SQL de calibration exécuté ?)'); return; }
+  _nvCache = null; _pcNvData = null; _pcNvPromise = null; _chargerNiveauxProgression();
+}
 async function _chargerNiveauxProgression() {
   const el = document.getElementById('nvProgression');
   if (!el || !_nvAutorise() || typeof nvChargerClient !== 'function') return;
@@ -201,16 +213,30 @@ async function _chargerNiveauxProgression() {
     if (!c || c.client !== client || !document.getElementById('nvProgression')) return;
     const poids = c.d.poids, sexe = c.d.sexe || 'H';
     const res = nvCalculer(c.d, 0, poids, sexe), avant = nvCalculer(c.d, Date.now() - 30 * 864e5, poids, sexe);
-    const zl = Object.entries(res.zones).sort((a, b) => b[1].niv - a[1].niv).slice(0, 8);
+    const zl = Object.entries(res.zones).sort((a, b) => b[1].niv - a[1].niv);
     const carte = (titre, inner) => `<div style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:12px 14px;margin-bottom:10px;"><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${titre}</div>${inner}</div>`;
     const vide = !zl.length;
+    const verrouilles = Object.keys(res.verrous || {}).filter(z => !res.zones[z]);
+    const ligneMuscle = ([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;"><span style="width:112px;">${NV_ZONE_NOM[id] || id}</span><div style="flex:1;height:7px;background:#1e2235;border-radius:4px;overflow:hidden;"><div style="width:${Math.round(nvFracPalier(d.niv) * 100)}%;height:100%;background:${nvCouleur(d.niv)};"></div></div><b style="width:84px;text-align:right;color:${nvCouleur(d.niv)};">${nvRangComplet(d.niv)}</b></div>`;
+    const ligneVerrou = z => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:#6b7390;"><span style="width:112px;">${NV_ZONE_NOM[z] || z}</span><span style="flex:1;font-size:11.5px;">🔒 calibre : ${nvEtalonsDeZone(z).slice(0, 2).map(_nvEsc).join(' ou ')}</span></div>`;
+    const etalons = Object.keys(NV_ETALONS);
+    const calib = etalons.map((nom, i) => {
+      const e = res.exos.find(x => x.nom === nom);
+      const etat = e && e.etalon ? `<b style="color:${nvCouleur(e.niv)};">${nvRangComplet(e.niv)}</b> <span style="color:#6b7390;">· ${Math.round(e.best)} kg estimés${e.calibre ? ' · calibré' : ''}</span>` : '<span style="color:#e8a33d;">non calibré</span>';
+      const pdc = NV_ETALONS[nom].pdc;
+      return `<div style="padding:9px 0;border-top:1px solid #1e2235;"><div style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><div style="flex:1;"><div>${_nvEsc(nom)}</div><div style="font-size:11.5px;margin-top:2px;">${etat}</div></div><button onclick="nvCalibOuvrir(${i})" style="background:#1e2a4a;color:#8ec5ff;border:1px solid #2c3a58;border-radius:8px;padding:6px 11px;font-size:12px;">Calibrer</button></div>
+        <div id="nvCal${i}" style="display:none;margin-top:8px;"><div style="display:flex;gap:6px;"><input id="nvCalC${i}" type="number" inputmode="decimal" placeholder="${pdc ? 'Lest kg (0 = PdC)' : 'Charge kg'}" style="flex:1;min-width:0;font-size:16px;padding:8px;background:#0e1220;color:#fff;border:1px solid #2c3a58;border-radius:8px;"><input id="nvCalR${i}" type="number" inputmode="numeric" placeholder="Reps" style="width:70px;font-size:16px;padding:8px;background:#0e1220;color:#fff;border:1px solid #2c3a58;border-radius:8px;"><input id="nvCalI${i}" type="number" inputmode="numeric" placeholder="RIR" style="width:62px;font-size:16px;padding:8px;background:#0e1220;color:#fff;border:1px solid #2c3a58;border-radius:8px;"></div>
+        <button onclick="nvCalibEnregistrer(${i})" style="margin-top:7px;width:100%;background:#4fc3f7;color:#0b1020;border:0;border-radius:8px;padding:9px;font-size:13px;font-weight:700;">Enregistrer</button></div></div>`;
+    }).join('');
     document.getElementById('nvProgression').innerHTML =
       carte('Mon avatar', `<div id="nvAvatar3d" style="width:100%;min-height:0;display:flex;align-items:center;justify-content:center;color:#8892a4;font-size:12px;">Chargement…</div>
-        <div id="nvZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:#8892a4;">${vide ? 'Logge tes séances (charge + reps) pour voir ton avatar évoluer.' : 'Touche une zone du corps pour voir son niveau.'}</div>
+        <div id="nvZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:#8892a4;">${vide ? 'Calibre tes exercices de base (squat, développé couché…) pour débloquer tes rangs.' : 'Touche une zone du corps pour voir son niveau.'}</div>
         <div style="margin-top:8px;text-align:center;">${nvLegendeHtml()}</div>
         ${poids ? '' : '<div style="margin-top:8px;font-size:11.5px;color:#e8a33d;text-align:center;">Renseigne ton poids dans Mensurations pour débloquer les rangs sur les exercices à la barre.</div>'}`) +
       carte('Mes régions du corps — maintenant vs il y a 30 jours', nvRadarSvg(res, avant, 30)) +
-      (zl.length ? carte('Mes niveaux par muscle', zl.map(([id, d]) => `<div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12.5px;"><span style="width:112px;">${NV_ZONE_NOM[id] || id}</span><div style="flex:1;height:7px;background:#1e2235;border-radius:4px;overflow:hidden;"><div style="width:${Math.round((d.niv - 1) / 8 * 100)}%;height:100%;background:${nvCouleur(d.niv)};"></div></div><b style="width:74px;text-align:right;color:${nvCouleur(d.niv)};">${nvRang(d.niv)}</b></div>`).join('')) : '');
+      ((zl.length || verrouilles.length) ? carte('Mes niveaux par muscle', zl.map(ligneMuscle).join('') + verrouilles.map(ligneVerrou).join('')) : '') +
+      (S.client === 'yohanp' ? carte('Labo', `<button onclick="nvLabOuvrir()" style="width:100%;background:#1e2a4a;color:#8ec5ff;border:1px solid #2c3a58;border-radius:10px;padding:11px;font-size:14px;">🧪 Tester les animations de déblocage</button>`) : '') +
+      carte('Calibration', `<div style="font-size:11.5px;color:#8892a4;margin-bottom:4px;">Indique ta meilleure série récente sur ces exercices de base : c'est elle qui fixe le rang de tes muscles. Les machines et l'isolation le font ensuite monter. Recalibre quand tu veux.</div>${calib}`);
     nvAvatarMonter(document.getElementById('nvAvatar3d'), res, avant, { jours: 30, infoId: 'nvZoneInfo' });
   };
   if (_nvCache && _nvCache.client === client) { rendre(); return; }

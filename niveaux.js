@@ -18,6 +18,7 @@ const NV_ETALONS = {
   'RDL':                     { zones: ['ischios', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.40, 2.75], bas: true },
   'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
+  'Tractions':               { zones: ['lats', 'biceps'],                                    h: [1.05, 1.20, 1.35, 1.50, 1.70, 1.90, 2.10, 2.30], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
   'Rowing barre':            { zones: ['lats', 'traps'],                                    h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
 };
 const NV_ZONES_GROUPE = {
@@ -39,18 +40,27 @@ function nvNiveauDepuisRatio(ratio, seuils) {
   for (let i = 0; i < seuils.length - 1; i++) if (ratio < seuils[i + 1]) return (i + 2) + (ratio - seuils[i]) / (seuils[i + 1] - seuils[i]);
   return 9;
 }
+// Rang = 9 grands rangs, chacun coupé en 3 paliers (Argent I, II, III) → un déblocage toutes les quelques semaines de progression.
+const NV_ROMAIN = ['I', 'II', 'III'];
+const nvSous = niv => niv >= 9 ? 3 : Math.min(3, Math.floor((niv - Math.floor(niv)) * 3) + 1);
+const nvPalier = niv => niv == null ? 0 : Math.floor(Math.min(niv, 8.999) * 3);        // ordinal unique : change à chaque déblocage
+const nvFracPalier = niv => niv >= 9 ? 1 : ((niv * 3) % 1);                           // 0..1 dans le palier courant
+const NV_ZONES_VERROU = [...new Set(Object.values(NV_ETALONS).flatMap(e => e.zones))]; // zones qui exigent un étalon calibré
+const nvEtalonsDeZone = z => Object.keys(NV_ETALONS).filter(n => NV_ETALONS[n].zones.includes(z));
 const nvRang = niv => NV_RANGS[Math.max(0, Math.min(8, Math.floor(niv) - 1))];
+const nvRangComplet = niv => nvRang(niv) + ' ' + NV_ROMAIN[nvSous(niv) - 1];
 const nvCouleur = niv => niv == null ? '#2a2f3f' : NV_COULEURS[Math.max(0, Math.min(8, Math.floor(niv) - 1))];
 
 // Charge tout ce qu'il faut pour un client : bibliothèque d'exercices, programmes + logs (paginés), dernier poids, sexe.
 async function nvChargerClient(clientId) {
   const get = async url => { const r = await fetch(`${SUPABASE_URL}/rest/v1/${url}`, { headers: supaHeaders() }); return r.ok ? r.json() : []; };
-  const [exercices, profil, mens, libres, progs] = await Promise.all([
+  const [exercices, profil, mens, libres, progs, calibrations] = await Promise.all([
     get('exercices?select=id,nom,groupe_musculaire&limit=1000'),
     get(`client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=sexe`),
     get(`mensurations?client_id=eq.${encodeURIComponent(clientId)}&poids=not.is.null&order=date.desc&limit=1&select=date,poids`),
     get(`client_seances_libres_series?select=exercice_id,exercice_nom,charge,reps,rir,client_seances_libres!inner(client_id,date)&client_seances_libres.client_id=eq.${encodeURIComponent(clientId)}&charge=not.is.null&limit=5000`),
     get(`client_programmes?client_id=eq.${encodeURIComponent(clientId)}&order=created_at.asc&select=id,created_at,client_programme_blocs!client_programme_blocs_client_programme_id_fkey(id,ordre,client_programme_seances(client_programme_exercices(id,exercice_id,nom)))`),
+    get(`client_calibrations?client_id=eq.${encodeURIComponent(clientId)}&order=date.asc,id.asc&select=exercice_nom,charge,reps,rir,date`),
   ]);
   const idsParExo = [];
   progs.forEach(p => (p.client_programme_blocs || []).forEach(b => (b.client_programme_seances || []).forEach(s => (s.client_programme_exercices || []).forEach(e => idsParExo.push(e.id)))));
@@ -63,22 +73,24 @@ async function nvChargerClient(clientId) {
       if (rows.length < 1000) break;
     }
   }
-  return { exercices, progs, logsParExo, libres, poids: mens[0] ? mens[0].poids : null, sexe: (profil[0] && profil[0].sexe) || null };
+  return { exercices, progs, logsParExo, libres, calibrations, poids: mens[0] ? mens[0].poids : null, sexe: (profil[0] && profil[0].sexe) || null };
 }
 
 // Calcule les niveaux. cutoff (ms) : ne garde que les séries loggées jusque-là → compare « maintenant » et « il y a X jours ».
 function nvCalculer(donnees, cutoff, poids, sexe) {
   poids = parseFloat(poids) || 0;
   const parEx = {};
+  // Tractions : la charge saisie est le lest, le poids du corps compte toujours (0 kg de lest = tractions au poids de corps)
+  const chargeTotale = (nom, c) => (NV_ETALONS[nom] && NV_ETALONS[nom].pdc) ? (poids ? poids + (parseFloat(c) || 0) : 0) : parseFloat(c);
   (donnees.progs || []).forEach((prog, pi) => (prog.client_programme_blocs || []).forEach((b, bi) => (b.client_programme_seances || []).forEach(se => (se.client_programme_exercices || []).forEach(ex => {
     const lib = donnees.exercices.find(l => l.id === ex.exercice_id) || donnees.exercices.find(l => l.nom.toLowerCase() === (ex.nom || '').toLowerCase());
     if (!lib) return;
     (donnees.logsParExo[ex.id] || []).forEach(l => {
       if (cutoff && l.updated_at && new Date(l.updated_at).getTime() > cutoff) return;
-      const charge = parseFloat(l.charge), reps = parseFloat(l.reps);
+      const charge = chargeTotale(lib.nom, l.charge), reps = parseFloat(l.reps);
       if (!(charge > 0) || !(reps > 0)) return;
       const eff = Math.min(30, reps + (parseFloat(l.rir) || 0));
-      (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: pi * 1e6 + (b.ordre || bi) * 1e4 + (l.semaine || 0), e1rm: charge * (1 + eff / 30), charge, reps });
+      (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: pi * 1e6 + (b.ordre || bi) * 1e4 + (l.semaine || 0), t: l.updated_at ? new Date(l.updated_at).getTime() : null, e1rm: charge * (1 + eff / 30), charge, reps });
     });
   }))));
   // Séances libres (enregistrées + série en cours validée à la salle) : mêmes calculs, rangées après les programmes
@@ -86,11 +98,29 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     const lib = (l.exercice_id && donnees.exercices.find(x => x.id === l.exercice_id)) || donnees.exercices.find(x => x.nom.toLowerCase() === (l.exercice_nom || '').toLowerCase());
     if (!lib) return;
     const date = l.date || (l.client_seances_libres && l.client_seances_libres.date);
-    const charge = parseFloat(l.charge), reps = parseFloat(l.reps);
+    const charge = chargeTotale(lib.nom, l.charge), reps = parseFloat(l.reps);
     if (!(charge > 0) || !(reps > 0)) return;
     if (cutoff && date && new Date(date).getTime() > cutoff) return;
     const eff = Math.min(30, reps + (parseFloat(l.rir) || 0));
-    (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: 1e8 + Math.floor((date ? new Date(date).getTime() : Date.now()) / 6048e5), e1rm: charge * (1 + eff / 30), charge, reps });
+    (parEx[lib.nom] = parEx[lib.nom] || { nom: lib.nom, groupe: lib.groupe_musculaire, sets: [] }).sets.push({ ordre: 1e8 + Math.floor((date ? new Date(date).getTime() : Date.now()) / 6048e5), t: date ? new Date(date).getTime() : null, e1rm: charge * (1 + eff / 30), charge, reps });
+  });
+  // Calibrations manuelles (kg × reps saisis par le client) : la plus récente par exercice fait foi — les séries antérieures sont ignorées
+  // pour cet exercice, ce qui permet aussi de recaler un rang à la baisse (blessure, reprise).
+  const calParEx = {};
+  (donnees.calibrations || []).forEach(c => {
+    const t = c.date ? new Date(c.date).getTime() : Date.now();
+    if (cutoff && t > cutoff) return;
+    const charge = chargeTotale(c.exercice_nom, c.charge), reps = parseFloat(c.reps);
+    if (!(charge > 0) || !(reps > 0)) return;
+    const eff = Math.min(30, reps + (parseFloat(c.rir) || 0));
+    calParEx[c.exercice_nom] = { t, e1rm: charge * (1 + eff / 30), charge, reps };
+  });
+  Object.keys(calParEx).forEach(nom => {
+    const lib = donnees.exercices.find(x => x.nom.toLowerCase() === nom.toLowerCase());
+    const e = parEx[nom] || (parEx[nom] = { nom, groupe: lib ? lib.groupe_musculaire : '', sets: [] });
+    e.sets = e.sets.filter(x => x.t == null || x.t >= calParEx[nom].t);
+    e.sets.push({ ordre: 2e8, t: calParEx[nom].t, e1rm: calParEx[nom].e1rm, charge: calParEx[nom].charge, reps: calParEx[nom].reps });
+    e.calibre = true;
   });
   const exos = Object.values(parEx).map(e => {
     e.sets.sort((a, b) => a.ordre - b.ordre);
@@ -111,16 +141,19 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
   // 1) étalons (absolus) ; 2) machines/isolations CALIBRÉES : si la zone a un étalon, la 1re performance de la machine vaut le rang de
   // l'étalon, puis chaque +15 % de charge = +1 rang. Sans étalon dans la zone → ancienne règle (progression seule, plafond « Or »).
   exos.forEach(e => { if (e.niv != null && e.etalon) NV_ETALONS[e.nom].zones.forEach(z => prio(zones[z] || (zones[z] = { niv: 0, src: null, etalon: false }), e.niv, e, true)); });
+  const verrous = {};
   const ancres = {}; Object.keys(zones).forEach(z => { ancres[z] = zones[z].niv; });
   exos.forEach(e => {
     if (e.niv == null || e.etalon) return;
     (NV_ZONES_GROUPE[e.groupe] || []).forEach(z => {
       const cur = zones[z] || (zones[z] = { niv: 0, src: null, etalon: false });
       if (ancres[z] != null) { if (e.nbSets >= 3) prio(cur, Math.min(9, ancres[z] + Math.max(0, e.prog) / 15), e, true); }
+      else if (NV_ZONES_VERROU.includes(z)) { delete zones[z]; verrous[z] = true; } // zone verrouillée : aucun étalon calibré
       else prio(cur, e.niv, e, false);
     });
   });
-  return { exos, zones, poids };
+  NV_ZONES_VERROU.forEach(z => { if (!zones[z]) verrous[z] = true; });
+  return { exos, zones, verrous, poids };
 }
 const nvZoneProgresse = (res, avant, id) => { const a = avant && avant.zones[id], n = res.zones[id]; return !!(n && (!a || n.niv > a.niv + 0.05)); };
 function nvValeurRegion(res, reg) {

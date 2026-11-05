@@ -1699,8 +1699,8 @@ function _pcNvAnnoncer(avant, apres) {
   Object.keys(apres.zones).forEach(z => {
     const n = apres.zones[z].niv, a = avant.zones[z] ? avant.zones[z].niv : 0;
     if (n <= a + 0.004) return;
-    if (Math.floor(n) > Math.floor(a) && a > 0) _pcToastNv(`🏆 <b>${NV_ZONE_NOM[z]}</b> : niveau ${Math.floor(n)} — <b style="color:${nvCouleur(n)}">${nvRang(n)}</b> !`, true);
-    else lignes.push(`${NV_ZONE_NOM[z]} <b style="color:${nvCouleur(n)}">+${Math.max(1, Math.round((n - a) * 100))} XP</b> <span style="color:#8b93a7;">(${nvRang(n)} ${Math.round((n % 1) * 100)} %)</span>`);
+    if (nvPalier(n) > nvPalier(a) && a > 0) { if (typeof nvAnimDebloque === 'function' && Math.floor(n) > Math.floor(a)) nvAnimDebloque({ zone: z, niv: n, avant: a }); else { _pcToastNv(`🏆 <b>${NV_ZONE_NOM[z]}</b> : <b style="color:${nvCouleur(n)}">${nvRangComplet(n)}</b> !`, true); if (typeof nvHaptic === 'function') nvHaptic('succes'); } }
+    else lignes.push(`${NV_ZONE_NOM[z]} <b style="color:${nvCouleur(n)}">+${Math.max(1, Math.round((n - a) * 300))} XP</b> <span style="color:#8b93a7;">(${nvRangComplet(n)} ${Math.round(nvFracPalier(n) * 100)} %)</span>`);
   });
   if (lignes.length) _pcToastNv('💪 ' + lignes.slice(0, 3).join('<br>'));
   else if (!Object.keys(apres.zones).length) _pcToastNv('✓ Série validée');
