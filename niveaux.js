@@ -29,8 +29,7 @@ const NV_ZONES_GROUPE = {
 const NV_ZONE_NOM = { pecs: 'Pectoraux', lats: 'Dorsaux', traps: 'Trapèzes', lombaires: 'Lombaires', epaules: 'Épaules', delt_ar: 'Deltoïdes postérieurs', biceps: 'Biceps', triceps: 'Triceps', abdos: 'Abdos', quadris: 'Quadriceps', ischios: 'Ischios', fessiers: 'Fessiers', mollets: 'Mollets' };
 // Régions du radar : moyenne du niveau de leurs zones, une zone sans donnée comptant pour 0.
 const NV_REGIONS = [
-  { nom: 'Dos', zones: ['lats', 'traps'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Tronc', zones: ['abdos'] },
-  { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules', 'delt_ar'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers'] },
+  { nom: 'Dos', zones: ['lats', 'traps'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules', 'delt_ar'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers'] },
 ];
 const _nvEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -161,11 +160,11 @@ function nvValeurRegion(res, reg) {
 }
 function nvRadarSvg(res, avant, jours) {
   const cx = 150, cy = 140, R = 92;
-  const pt = (i, v) => { const a = (-120 + i * 60) * Math.PI / 180; return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v]; };
+  const pt = (i, v) => { const a = (-90 + i * 360 / NV_REGIONS.length) * Math.PI / 180; return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v]; };
   const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ');
   const now = NV_REGIONS.map(r => nvValeurRegion(res, r)), prec = NV_REGIONS.map(r => nvValeurRegion(avant, r));
   let s = '';
-  [0.2, 0.4, 0.6, 0.8, 1].forEach(r => { s += `<polygon points="${poly(Array(6).fill(r))}" fill="none" stroke="#2c3a58" stroke-width="1"/>`; });
+  [0.2, 0.4, 0.6, 0.8, 1].forEach(r => { s += `<polygon points="${poly(Array(NV_REGIONS.length).fill(r))}" fill="none" stroke="#2c3a58" stroke-width="1"/>`; });
   NV_REGIONS.forEach((r, i) => {
     const [x, y] = pt(i, 1); s += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2c3a58"/>`;
     const [lx, ly] = pt(i, 1.2); const anc = lx < cx - 8 ? 'end' : lx > cx + 8 ? 'start' : 'middle';
