@@ -155,7 +155,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
   NV_ZONES_VERROU.forEach(z => { if (!zones[z]) verrous[z] = true; });
   return { exos, zones, verrous, poids };
 }
-const nvZoneProgresse = (res, avant, id) => { const a = avant && avant.zones[id], n = res.zones[id]; return !!(n && (!a || n.niv > a.niv + 0.05)); };
+const nvZoneProgresse = (res, avant, id) => { if (!avant) return false; const a = avant && avant.zones[id], n = res.zones[id]; return !!(n && (!a || n.niv > a.niv + 0.05)); };
 function nvValeurRegion(res, reg) {
   const n = reg.zones.map(z => { const d = res.zones[z]; return d ? Math.max(0, Math.min(1, (d.niv - 1) / 8)) : 0; }); // 1 = niveau « Olympien »
   return n.reduce((a, b) => a + b, 0) / n.length;
@@ -164,7 +164,7 @@ function nvRadarSvg(res, avant, jours) {
   const cx = 150, cy = 140, R = 92;
   const pt = (i, v) => { const a = (-90 + i * 360 / NV_REGIONS.length) * Math.PI / 180; return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v]; };
   const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ');
-  const now = NV_REGIONS.map(r => nvValeurRegion(res, r)), prec = NV_REGIONS.map(r => nvValeurRegion(avant, r));
+  const now = NV_REGIONS.map(r => nvValeurRegion(res, r)), prec = avant ? NV_REGIONS.map(r => nvValeurRegion(avant, r)) : null;
   let s = '';
   // un anneau par rang atteint (Bronze → Olympien), coloré comme le rang ; le dernier = bord
   for (let n = 2; n <= 9; n++) s += `<polygon points="${poly(Array(NV_REGIONS.length).fill((n - 1) / 8))}" fill="none" stroke="${NV_COULEURS[n - 1]}" stroke-opacity="${n === 9 ? .85 : .38}" stroke-width="${n === 9 ? 1.6 : 1}"/>`;
@@ -173,13 +173,13 @@ function nvRadarSvg(res, avant, jours) {
     const [lx, ly] = pt(i, 1.2); const anc = lx < cx - 8 ? 'end' : lx > cx + 8 ? 'start' : 'middle';
     s += `<text x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${anc}" font-size="12" fill="#c9d1e6">${r.nom}</text>`;
   });
-  s += `<polygon points="${poly(prec)}" fill="#8892a433" stroke="#8892a4" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  if (prec) s += `<polygon points="${poly(prec)}" fill="#8892a433" stroke="#8892a4" stroke-width="1.5" stroke-dasharray="4 3"/>`;
   s += `<polygon points="${poly(now)}" fill="#4fc3f733" stroke="#4fc3f7" stroke-width="2"/>`;
   now.forEach((v, i) => { const [x, y] = pt(i, v); s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#4fc3f7"/>`; });
   return `<svg viewBox="-24 0 348 285" width="100%" role="img" aria-label="Radar des régions du corps">${s}</svg>
     <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:11.5px;color:#8892a4;margin-top:-6px;">
       <span><span style="display:inline-block;width:10px;height:10px;background:#4fc3f7;border-radius:2px;margin-right:5px;"></span>Maintenant</span>
-      <span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Il y a ${jours} jours</span>
+      ${prec ? `<span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Il y a ${jours} jours</span>` : ''}
       <span>anneaux = rangs · bord = Olympien</span></div>`;
 }
 function nvLegendeHtml() {

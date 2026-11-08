@@ -221,7 +221,7 @@ async function _chargerNiveauxProgression() {
     const c = _nvCache;
     if (!c || c.client !== client || !document.getElementById('nvProgression')) return;
     const poids = c.d.poids, sexe = c.d.sexe || 'H';
-    const res = nvCalculer(c.d, 0, poids, sexe), avant = nvCalculer(c.d, Date.now() - 30 * 864e5, poids, sexe);
+    const res = nvCalculer(c.d, 0, poids, sexe), avant = null;
     const zl = Object.entries(res.zones).sort((a, b) => b[1].niv - a[1].niv);
     const carte = (titre, inner) => `<div style="background:#161b2e;border-radius:12px;border:1px solid #1e2235;padding:12px 14px;margin-bottom:10px;"><div style="font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${titre}</div>${inner}</div>`;
     const vide = !zl.length;
@@ -242,11 +242,11 @@ async function _chargerNiveauxProgression() {
         
         <div style="margin-top:8px;text-align:center;">${nvLegendeHtml()}</div>
         ${poids ? '' : '<div style="margin-top:8px;font-size:11.5px;color:#e8a33d;text-align:center;">Renseigne ton poids dans Mensurations pour débloquer les rangs sur les exercices à la barre.</div>'}`) +
-      carte('Mes régions du corps — maintenant vs il y a 30 jours', nvRadarSvg(res, avant, 30)) +
+      carte('Mes régions du corps', nvRadarSvg(res, null, 0)) +
       ((zl.length || verrouilles.length) ? carte('Mes niveaux par muscle', zl.map(ligneMuscle).join('') + verrouilles.map(ligneVerrou).join('')) : '') +
       (S.client === 'yohanp' ? carte('Labo', `<button onclick="nvLabOuvrir()" style="width:100%;background:#1e2a4a;color:#8ec5ff;border:1px solid #2c3a58;border-radius:10px;padding:11px;font-size:14px;">🧪 Tester les animations de déblocage</button>`) : '') +
       carte('Calibration', `<div style="font-size:11.5px;color:#8892a4;margin-bottom:4px;">Indique ta meilleure série récente sur ces exercices de base : c'est elle qui fixe le rang de tes muscles. Les machines et l'isolation le font ensuite monter. Recalibre quand tu veux.</div>${calib}`);
-    nvAvatarMonter(document.getElementById('nvAvatar3d'), res, avant, { jours: 30, cliquable: false });
+    nvAvatarMonter(document.getElementById('nvAvatar3d'), res, avant, { cliquable: false });
   };
   if (_nvCache && _nvCache.client === client) { rendre(); return; }
   el.innerHTML = '<div style="padding:18px;text-align:center;color:#8892a4;font-size:12px;">Calcul de ton avatar…</div>';
