@@ -160,7 +160,7 @@ function nvValeurRegion(res, reg) {
   const n = reg.zones.map(z => { const d = res.zones[z]; return d ? Math.max(0, Math.min(1, (d.niv - 1) / 8)) : 0; }); // 1 = niveau « Olympien »
   return n.reduce((a, b) => a + b, 0) / n.length;
 }
-function nvRadarSvg(res, avant, jours) {
+function nvRadarSvg(res, avant, jours, libelleAvant) {
   const cx = 150, cy = 140, R = 92;
   const pt = (i, v) => { const a = (-90 + i * 360 / NV_REGIONS.length) * Math.PI / 180; return [cx + Math.cos(a) * R * v, cy + Math.sin(a) * R * v]; };
   const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ');
@@ -179,7 +179,7 @@ function nvRadarSvg(res, avant, jours) {
   return `<svg viewBox="-24 0 348 285" width="100%" role="img" aria-label="Radar des régions du corps">${s}</svg>
     <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:11.5px;color:#8892a4;margin-top:-6px;">
       <span><span style="display:inline-block;width:10px;height:10px;background:#4fc3f7;border-radius:2px;margin-right:5px;"></span>Maintenant</span>
-      ${prec ? `<span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Il y a ${jours} jours</span>` : ''}
+      ${prec ? `<span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>${libelleAvant || 'Il y a ' + jours + ' jours'}</span>` : ''}
       <span>anneaux = rangs · bord = Olympien</span></div>`;
 }
 function nvLegendeHtml() {
