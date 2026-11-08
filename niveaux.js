@@ -18,18 +18,18 @@ const NV_ETALONS = {
   'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
   'Tractions':               { zones: ['lats', 'biceps'],                                    h: [1.05, 1.20, 1.35, 1.50, 1.70, 1.90, 2.10, 2.30], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
-  'Rowing barre':            { zones: ['lats', 'traps'],                                    h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
+  'Rowing barre':            { zones: ['traps'], label: 'Rowing barre (pronation)',          h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
 };
 const NV_ZONES_GROUPE = {
-  'Pectoraux': ['pecs'], 'Dos (dorsaux)': ['lats'], 'Dos (trapèzes)': ['traps'], 'Dos (global)': ['lats', 'traps', 'lombaires'],
+  'Pectoraux': ['pecs'], 'Dos (dorsaux)': ['lats'], 'Dos (trapèzes)': ['traps'], 'Dos (global)': ['lats', 'traps'],
   'Epaules (anterieur)': ['epaules'], 'Epaules (latéral)': ['epaules'], 'Epaules (posterieur)': ['delt_ar'],
-  'Biceps': ['biceps'], 'Triceps': ['triceps'], 'Abdos': ['abdos'], 'Lombaires': ['lombaires'],
+  'Biceps': ['biceps'], 'Triceps': ['triceps'], 'Abdos': ['abdos'], 'Lombaires': [],
   'Quadriceps': ['quadris'], 'Ischios': ['ischios'], 'Fessiers': ['fessiers'], 'Mollets': ['mollets'],
 };
 const NV_ZONE_NOM = { pecs: 'Pectoraux', lats: 'Dorsaux', traps: 'Trapèzes', lombaires: 'Lombaires', epaules: 'Épaules', delt_ar: 'Deltoïdes postérieurs', biceps: 'Biceps', triceps: 'Triceps', abdos: 'Abdos', quadris: 'Quadriceps', ischios: 'Ischios', fessiers: 'Fessiers', mollets: 'Mollets' };
 // Régions du radar : moyenne du niveau de leurs zones, une zone sans donnée comptant pour 0.
 const NV_REGIONS = [
-  { nom: 'Dos', zones: ['lats', 'traps', 'lombaires'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Tronc', zones: ['abdos'] },
+  { nom: 'Dos', zones: ['lats', 'traps'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Tronc', zones: ['abdos'] },
   { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules', 'delt_ar'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers', 'mollets'] },
 ];
 const _nvEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
