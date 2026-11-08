@@ -18,6 +18,7 @@ const NV_ETALONS = {
   'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
   'Tractions':               { zones: ['lats', 'biceps'],                                    h: [1.05, 1.20, 1.35, 1.50, 1.70, 1.90, 2.10, 2.30], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
+  'Crunch au sol':           { zones: ['abdos'], label: 'Crunch au sol (disque sur la poitrine)', h: [0.35, 0.45, 0.55, 0.70, 0.85, 1.00, 1.20, 1.40], bas: false, pdc: true, part: 0.3 }, // charge = lest ; le buste pèse ~30 % du poids de corps
   'Rowing barre':            { zones: ['traps'], label: 'Rowing barre (pronation)',          h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
 };
 const NV_ZONES_GROUPE = {
@@ -79,7 +80,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
   poids = parseFloat(poids) || 0;
   const parEx = {};
   // Tractions : la charge saisie est le lest, le poids du corps compte toujours (0 kg de lest = tractions au poids de corps)
-  const chargeTotale = (nom, c) => (NV_ETALONS[nom] && NV_ETALONS[nom].pdc) ? (poids ? poids + (parseFloat(c) || 0) : 0) : parseFloat(c);
+  const chargeTotale = (nom, c) => (NV_ETALONS[nom] && NV_ETALONS[nom].pdc) ? (poids ? poids * (NV_ETALONS[nom].part || 1) + (parseFloat(c) || 0) : 0) : parseFloat(c);
   (donnees.progs || []).forEach((prog, pi) => (prog.client_programme_blocs || []).forEach((b, bi) => (b.client_programme_seances || []).forEach(se => (se.client_programme_exercices || []).forEach(ex => {
     const lib = donnees.exercices.find(l => l.id === ex.exercice_id) || donnees.exercices.find(l => l.nom.toLowerCase() === (ex.nom || '').toLowerCase());
     if (!lib) return;
@@ -130,7 +131,8 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     const et = NV_ETALONS[e.nom];
     if (et && poids) {
       const coef = sexe === 'F' ? (et.bas ? 0.8 : 0.6) : 1;
-      e.ratio = e.best / poids; e.niv = nvNiveauDepuisRatio(e.ratio, et.h.map(x => x * coef)); e.etalon = true;
+      const seuils = et.pdc ? (et.part && et.part < 1 ? et.h : et.h.map(x => 1 + (x - 1) * (sexe === 'F' ? 0.6 : 1))) : et.h.map(x => x * coef); // poids de corps : le plancher est 1× (tractions), pas de coef femme sur le crunch
+      e.ratio = e.best / poids; e.niv = nvNiveauDepuisRatio(e.ratio, seuils); e.etalon = true;
     } else if (e.nbSets >= 3) { e.niv = Math.max(1, Math.min(4, 1 + Math.max(0, e.prog) / 15)); e.etalon = false; } // plafonné à « Or »
     return e;
   });
