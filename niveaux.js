@@ -139,7 +139,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
   const zones = {};
   const prio = (cur, niv, e, abs) => { if ((abs && !cur.etalon) || (abs === cur.etalon && niv > cur.niv)) { cur.niv = niv; cur.src = e; cur.etalon = abs; } };
   // 1) étalons (absolus) ; 2) machines/isolations CALIBRÉES : si la zone a un étalon, la 1re performance de la machine vaut le rang de
-  // l'étalon, puis chaque +15 % de charge = +1 rang. Sans étalon dans la zone → ancienne règle (progression seule, plafond « Or »).
+  // l'étalon, puis chaque +15 % de charge = +1 rang, au plus +1 rang au-dessus de l'étalon (seul un étalon fait monter plus haut). Sans étalon dans la zone → ancienne règle (progression seule, plafond « Or »).
   exos.forEach(e => { if (e.niv != null && e.etalon) NV_ETALONS[e.nom].zones.forEach(z => prio(zones[z] || (zones[z] = { niv: 0, src: null, etalon: false }), e.niv, e, true)); });
   const verrous = {};
   const ancres = {}; Object.keys(zones).forEach(z => { ancres[z] = zones[z].niv; });
@@ -147,7 +147,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     if (e.niv == null || e.etalon) return;
     (NV_ZONES_GROUPE[e.groupe] || []).forEach(z => {
       const cur = zones[z] || (zones[z] = { niv: 0, src: null, etalon: false });
-      if (ancres[z] != null) { if (e.nbSets >= 3) prio(cur, Math.min(9, ancres[z] + Math.max(0, e.prog) / 15), e, true); }
+      if (ancres[z] != null) { if (e.nbSets >= 3) prio(cur, Math.min(9, ancres[z] + Math.min(1, Math.max(0, e.prog) / 15)), e, true); }
       else if (NV_ZONES_VERROU.includes(z)) { delete zones[z]; verrous[z] = true; } // zone verrouillée : aucun étalon calibré
       else prio(cur, e.niv, e, false);
     });
