@@ -157,7 +157,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
 }
 const nvZoneProgresse = (res, avant, id) => { const a = avant && avant.zones[id], n = res.zones[id]; return !!(n && (!a || n.niv > a.niv + 0.05)); };
 function nvValeurRegion(res, reg) {
-  const n = reg.zones.map(z => { const d = res.zones[z]; return d ? Math.max(0, Math.min(1, (d.niv - 1) / 5)) : 0; }); // 1 = niveau « Diamant »
+  const n = reg.zones.map(z => { const d = res.zones[z]; return d ? Math.max(0, Math.min(1, (d.niv - 1) / 8)) : 0; }); // 1 = niveau « Olympien »
   return n.reduce((a, b) => a + b, 0) / n.length;
 }
 function nvRadarSvg(res, avant, jours) {
@@ -166,7 +166,8 @@ function nvRadarSvg(res, avant, jours) {
   const poly = vals => vals.map((v, i) => pt(i, v).map(x => x.toFixed(1)).join(',')).join(' ');
   const now = NV_REGIONS.map(r => nvValeurRegion(res, r)), prec = NV_REGIONS.map(r => nvValeurRegion(avant, r));
   let s = '';
-  [0.2, 0.4, 0.6, 0.8, 1].forEach(r => { s += `<polygon points="${poly(Array(NV_REGIONS.length).fill(r))}" fill="none" stroke="#2c3a58" stroke-width="1"/>`; });
+  // un anneau par rang atteint (Bronze → Olympien), coloré comme le rang ; le dernier = bord
+  for (let n = 2; n <= 9; n++) s += `<polygon points="${poly(Array(NV_REGIONS.length).fill((n - 1) / 8))}" fill="none" stroke="${NV_COULEURS[n - 1]}" stroke-opacity="${n === 9 ? .85 : .38}" stroke-width="${n === 9 ? 1.6 : 1}"/>`;
   NV_REGIONS.forEach((r, i) => {
     const [x, y] = pt(i, 1); s += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2c3a58"/>`;
     const [lx, ly] = pt(i, 1.2); const anc = lx < cx - 8 ? 'end' : lx > cx + 8 ? 'start' : 'middle';
@@ -179,7 +180,7 @@ function nvRadarSvg(res, avant, jours) {
     <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:11.5px;color:#8892a4;margin-top:-6px;">
       <span><span style="display:inline-block;width:10px;height:10px;background:#4fc3f7;border-radius:2px;margin-right:5px;"></span>Maintenant</span>
       <span><span style="display:inline-block;width:12px;border-top:2px dashed #8892a4;margin-right:5px;vertical-align:middle;"></span>Il y a ${jours} jours</span>
-      <span>bord = niveau Diamant</span></div>`;
+      <span>anneaux = rangs · bord = Olympien</span></div>`;
 }
 function nvLegendeHtml() {
   return NV_RANGS.map((r, i) => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin:2px 8px 2px 0;"><span style="width:10px;height:10px;border-radius:3px;background:${NV_COULEURS[i]};"></span>${r}</span>`).join('')
