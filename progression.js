@@ -186,7 +186,7 @@ async function _chargerCarteProgression() {
 // ── Mon avatar : niveaux par muscle (module partagé niveaux.js) ─────────────
 // Phase de test : visible uniquement pour le compte du coach (yohanp) et, en vue client, quand le coach consulte l'app.
 // Pour l'ouvrir à tous les clients : vider NV_COMPTES_AUTORISES ne suffit pas, il faut changer _nvAutorise().
-const NV_COMPTES_AUTORISES = ['yohanp'];
+const NV_COMPTES_AUTORISES = ['yohanp', 'perrineayot'];
 let _nvCache = null;
 function _nvAutorise() {
   try { if (localStorage.getItem('at_coach') === '1') return true; } catch(e) {}
@@ -202,7 +202,16 @@ async function nvCalibEnregistrer(i) {
     const rep = await fetch(`${SUPABASE_URL}/rest/v1/client_calibrations`, { method: 'POST', headers: supaHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ client_id: S.client, exercice_nom: nom, charge: pdc ? (c || 0) : c, reps: r, rir: isNaN(ri) ? null : ri, date: jour }) });
     if (!rep.ok) throw new Error(await rep.text());
   } catch (e) { alert('Enregistrement impossible (SQL de calibration exécuté ?)'); return; }
-  _nvCache = null; _pcNvData = null; _pcNvPromise = null; _chargerNiveauxProgression();
+  // Animation de calibration : rangs gagnés par rapport à avant la saisie (le plus haut d'abord)
+  let gains = [];
+  try {
+    const ap = await nvChargerClient(S.client), poids = ap.poids, sexe = ap.sexe || 'H';
+    const apres = nvCalculer(ap, 0, poids, sexe), avant = nvCalculer(Object.assign({}, ap, { calibrations: (ap.calibrations || []).slice(0, -1) }), 0, poids, sexe);
+    gains = Object.keys(apres.zones).filter(z => apres.zones[z].niv > (avant.zones[z] ? avant.zones[z].niv : 0) + 0.01).map(z => ({ zone: z, niv: apres.zones[z].niv, avant: avant.zones[z] ? avant.zones[z].niv : 0 })).sort((a, b) => b.niv - a.niv);
+    _nvCache = { client: S.client, d: ap }; _pcNvData = null; _pcNvPromise = null;
+  } catch (e) { _nvCache = null; _pcNvData = null; _pcNvPromise = null; }
+  _chargerNiveauxProgression();
+  if (gains.length && typeof nvAnimDebloque === 'function') nvAnimDebloque({ zone: gains[0].zone, niv: gains[0].niv, titre: 'Calibré' + (gains.length > 1 ? ' · ' + gains.length + ' muscles' : ''), gros: true });
 }
 async function _chargerNiveauxProgression() {
   const el = document.getElementById('nvProgression');
