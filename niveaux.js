@@ -15,7 +15,7 @@ const NV_ETALONS = {
   'Développé incliné barre': { zones: ['pecs'],                                             h: [0.40, 0.65, 0.85, 1.05, 1.30, 1.50, 1.75, 2.00], bas: false },
   'Squat':                   { zones: ['quadris', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 2.75], bas: true },
   'RDL':                     { zones: ['ischios', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.40, 2.75], bas: true },
-  'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
+  'Hiptrust':                { zones: ['fessiers'], label: 'Hip thrust à la barre libre', calibOnly: true,                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
   'Tractions':               { zones: ['lats', 'biceps'],                                    h: [1.05, 1.20, 1.35, 1.50, 1.70, 1.90, 2.10, 2.30], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
   'Crunch au sol':           { zones: ['abdos'], label: 'Crunch au sol (disque sur la poitrine)', h: [0.35, 0.45, 0.55, 0.70, 0.85, 1.00, 1.20, 1.40], bas: false, pdc: true, part: 0.3 }, // charge = lest ; le buste pèse ~30 % du poids de corps
@@ -119,7 +119,7 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     const e = parEx[nom] || (parEx[nom] = { nom, groupe: lib ? lib.groupe_musculaire : '', sets: [] });
     e.sets = e.sets.filter(x => x.t == null || x.t >= calParEx[nom].t);
     e.sets.push({ ordre: 2e8, t: calParEx[nom].t, e1rm: calParEx[nom].e1rm, charge: calParEx[nom].charge, reps: calParEx[nom].reps });
-    e.calibre = true;
+    e.calibre = true; e.calE1rm = calParEx[nom].e1rm;
   });
   const exos = Object.values(parEx).map(e => {
     e.sets.sort((a, b) => a.ordre - b.ordre);
@@ -129,10 +129,10 @@ function nvCalculer(donnees, cutoff, poids, sexe) {
     e.prog = e.base > 0 ? (e.best / e.base - 1) * 100 : 0;
     e.nbSets = e.sets.length;
     const et = NV_ETALONS[e.nom];
-    if (et && poids) {
+    if (et && poids && (!et.calibOnly || e.calibre)) { // calibOnly : seule la saisie manuelle fait foi (les logs peuvent venir d'une machine)
       const coef = sexe === 'F' ? (et.bas ? 0.8 : 0.6) : 1;
       const seuils = et.pdc ? (et.part && et.part < 1 ? et.h : et.h.map(x => 1 + (x - 1) * (sexe === 'F' ? 0.6 : 1))) : et.h.map(x => x * coef); // poids de corps : le plancher est 1× (tractions), pas de coef femme sur le crunch
-      e.ratio = e.best / poids; e.niv = nvNiveauDepuisRatio(e.ratio, seuils); e.etalon = true;
+      const bestRef = et.calibOnly ? e.calE1rm : e.best; e.ratio = bestRef / poids; e.niv = nvNiveauDepuisRatio(e.ratio, seuils); e.etalon = true;
     } else if (e.nbSets >= 3) { e.niv = Math.max(1, Math.min(4, 1 + Math.max(0, e.prog) / 15)); e.etalon = false; } // plafonné à « Or »
     return e;
   });
