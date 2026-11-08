@@ -14,7 +14,6 @@ const NV_ETALONS = {
   'Développé couché barre':  { zones: ['pecs'],                                             h: [0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.25], bas: false },
   'Développé incliné barre': { zones: ['pecs'],                                             h: [0.40, 0.65, 0.85, 1.05, 1.30, 1.50, 1.75, 2.00], bas: false },
   'Squat':                   { zones: ['quadris', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 2.75], bas: true },
-  'Deadlift':                { zones: ['lats', 'traps', 'lombaires', 'ischios', 'fessiers'], h: [1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.75, 3.00], bas: true },
   'RDL':                     { zones: ['ischios', 'fessiers'],                              h: [0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.40, 2.75], bas: true },
   'Hiptrust':                { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
