@@ -23,14 +23,14 @@ const NV_ETALONS = {
 };
 const NV_ZONES_GROUPE = {
   'Pectoraux': ['pecs'], 'Dos (dorsaux)': ['lats'], 'Dos (trapèzes)': ['traps'], 'Dos (global)': ['lats', 'traps'],
-  'Epaules (anterieur)': ['epaules'], 'Epaules (latéral)': ['epaules'], 'Epaules (posterieur)': ['delt_ar'],
+  'Epaules (anterieur)': ['epaules'], 'Epaules (latéral)': ['epaules'], 'Epaules (posterieur)': [],
   'Biceps': ['biceps'], 'Triceps': ['triceps'], 'Abdos': ['abdos'], 'Lombaires': [],
   'Quadriceps': ['quadris'], 'Ischios': ['ischios'], 'Fessiers': ['fessiers'], 'Mollets': [],
 };
 const NV_ZONE_NOM = { pecs: 'Pectoraux', lats: 'Dorsaux', traps: 'Trapèzes', lombaires: 'Lombaires', epaules: 'Épaules', delt_ar: 'Deltoïdes postérieurs', biceps: 'Biceps', triceps: 'Triceps', abdos: 'Abdos', quadris: 'Quadriceps', ischios: 'Ischios', fessiers: 'Fessiers', mollets: 'Mollets' };
 // Régions du radar : moyenne du niveau de leurs zones, une zone sans donnée comptant pour 0.
 const NV_REGIONS = [
-  { nom: 'Dos', zones: ['lats', 'traps'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules', 'delt_ar'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers'] },
+  { nom: 'Dos', zones: ['lats', 'traps'] }, { nom: 'Pectoraux', zones: ['pecs'] }, { nom: 'Bras', zones: ['biceps', 'triceps'] }, { nom: 'Épaules', zones: ['epaules'] }, { nom: 'Jambes', zones: ['quadris', 'ischios', 'fessiers'] },
 ];
 const _nvEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
