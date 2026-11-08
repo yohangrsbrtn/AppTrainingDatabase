@@ -239,14 +239,14 @@ async function _chargerNiveauxProgression() {
     }).join('');
     document.getElementById('nvProgression').innerHTML =
       carte('Mon avatar', `<div id="nvAvatar3d" style="width:100%;min-height:0;display:flex;align-items:center;justify-content:center;color:#8892a4;font-size:12px;">Chargement…</div>
-        <div id="nvZoneInfo" style="text-align:center;font-size:12.5px;min-height:20px;margin-top:6px;color:#8892a4;">${vide ? 'Calibre tes exercices de base (squat, développé couché…) pour débloquer tes rangs.' : 'Touche une zone du corps pour voir son niveau.'}</div>
+        
         <div style="margin-top:8px;text-align:center;">${nvLegendeHtml()}</div>
         ${poids ? '' : '<div style="margin-top:8px;font-size:11.5px;color:#e8a33d;text-align:center;">Renseigne ton poids dans Mensurations pour débloquer les rangs sur les exercices à la barre.</div>'}`) +
       carte('Mes régions du corps — maintenant vs il y a 30 jours', nvRadarSvg(res, avant, 30)) +
       ((zl.length || verrouilles.length) ? carte('Mes niveaux par muscle', zl.map(ligneMuscle).join('') + verrouilles.map(ligneVerrou).join('')) : '') +
       (S.client === 'yohanp' ? carte('Labo', `<button onclick="nvLabOuvrir()" style="width:100%;background:#1e2a4a;color:#8ec5ff;border:1px solid #2c3a58;border-radius:10px;padding:11px;font-size:14px;">🧪 Tester les animations de déblocage</button>`) : '') +
       carte('Calibration', `<div style="font-size:11.5px;color:#8892a4;margin-bottom:4px;">Indique ta meilleure série récente sur ces exercices de base : c'est elle qui fixe le rang de tes muscles. Les machines et l'isolation le font ensuite monter. Recalibre quand tu veux.</div>${calib}`);
-    nvAvatarMonter(document.getElementById('nvAvatar3d'), res, avant, { jours: 30, infoId: 'nvZoneInfo' });
+    nvAvatarMonter(document.getElementById('nvAvatar3d'), res, avant, { jours: 30, cliquable: false });
   };
   if (_nvCache && _nvCache.client === client) { rendre(); return; }
   el.innerHTML = '<div style="padding:18px;text-align:center;color:#8892a4;font-size:12px;">Calcul de ton avatar…</div>';

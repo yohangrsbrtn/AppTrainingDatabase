@@ -197,13 +197,13 @@ function nvAvatarMonter(cont, res, avant, opts) {
   const fig = (cle, titre) => {
     const polys = NV_CORPS[cle].map(([z, nom, pts]) => {
       const d = z && res.zones[z], col = d ? nvCouleur(d.niv) : peau, prog = z && nvZoneProgresse(res, avant, z);
-      return pts.map(p => `<polygon points="${p}" fill="${z ? col : peau}" stroke="${contour}" stroke-width=".35" ${z ? `data-z="${z}" style="cursor:pointer;"` : ''} ${prog ? 'class="nv-pulse"' : ''}/>`).join('');
+      return pts.map(p => `<polygon points="${p}" fill="${z ? col : peau}" stroke="${contour}" stroke-width=".35" ${z && opts.cliquable !== false ? `data-z="${z}" style="cursor:pointer;"` : ''} ${prog ? 'class="nv-pulse"' : ''}/>`).join('');
     }).join('');
     return `<div style="flex:1;text-align:center;min-width:0;"><svg viewBox="0 0 100 200" style="width:100%;max-height:440px;display:block;">${polys}</svg><div style="font-size:11px;color:#8892a4;margin-top:4px;">${titre}</div></div>`;
   };
   cont.style.height = 'auto'; cont.style.minHeight = '0';
   cont.innerHTML = `<style>@keyframes nvp{0%,100%{opacity:1}50%{opacity:.55}}.nv-pulse{animation:nvp 1.6s ease-in-out infinite}</style><div style="display:flex;gap:6px;width:100%;">${fig('f', 'Face')}${fig('d', 'Dos')}</div>`;
-  cont.addEventListener('click', e => {
+  if (opts.cliquable !== false) cont.addEventListener('click', e => {
     const info = document.getElementById(opts.infoId || 'nvZoneInfo'); if (!info) return;
     const z = e.target.getAttribute && e.target.getAttribute('data-z');
     if (!z) { info.textContent = 'Touche une zone du corps pour voir son niveau.'; return; }
