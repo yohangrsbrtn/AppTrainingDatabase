@@ -1887,9 +1887,9 @@ async function _chargerActiviteRecente(clientsById){
 // cause d'un vieux bilan non-envoyé de plusieurs semaines plus tôt).
 async function _supaCalculerRetard(clientId) {
   try {
-    const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan`, { headers: supaHeaders() });
+    const profilRes = await fetch(`${SUPABASE_URL}/rest/v1/client_profils?client_id=eq.${encodeURIComponent(clientId)}&select=jour_bilan,date_debut`, { headers: supaHeaders() });
     const profilArr = profilRes.ok ? await profilRes.json() : [];
-    const jourBilan = profilArr[0] && profilArr[0].jour_bilan;
+    const jourBilan = _normJourBilan(profilArr[0] && profilArr[0].jour_bilan);
     // Repère : le dernier bilan ENVOYÉ (pas juste le dernier CRÉÉ) — tout bilan non-envoyé créé
     // APRÈS lui est potentiellement en retard, tout ce qui est avant est de l'historique ancien
     // qu'on ignore délibérément (cf. commentaire ci-dessus : Ronny/Jean-Baptiste restaient "en
@@ -1905,8 +1905,21 @@ async function _supaCalculerRetard(clientId) {
     const bilanRes = await fetch(`${SUPABASE_URL}/rest/v1/bilans?client_id=eq.${encodeURIComponent(clientId)}&archive=eq.false&envoye_coach=eq.false&created_at=gt.${encodeURIComponent(depuis)}&order=created_at.asc&limit=1&select=created_at`, { headers: supaHeaders() });
     const bilanArr = bilanRes.ok ? await bilanRes.json() : [];
     const plusAncienNonEnvoye = bilanArr[0];
-    if (!plusAncienNonEnvoye) return false;
-    return !_bilanEstPonctuel(plusAncienNonEnvoye.created_at, new Date().toISOString(), jourBilan);
+    if (plusAncienNonEnvoye && !_bilanEstPonctuel(plusAncienNonEnvoye.created_at, new Date().toISOString(), jourBilan)) return true;
+    // Bilan "virtuel" : une ligne bilans n'est créée que quand le client ouvre l'app. S'il ne l'a
+    // pas ouverte depuis la dernière deadline (jour_bilan à midi), aucun bilan non-envoyé n'existe
+    // et il échappait à "en retard" (bug vécu 2026-11-09 : Arnaud, Thibaut, Ronnie, Claire, Paul…).
+    // Règle : si la dernière deadline est passée et qu'aucun bilan envoyé n'a été créé depuis le
+    // début de cette semaine-là, le client est en retard.
+    if (!jourBilan || !(jourBilan in _JOURS_IDX_FR)) return false;
+    const now = new Date();
+    let L = _bilanDeadline(jourBilan, now); // prochaine deadline (≥ aujourd'hui) ; on recule si pas encore passée
+    if (L > now) L = new Date(L.getTime() - 7 * 86400000);
+    const debutSemaine = new Date(L.getTime() - 7 * 86400000); debutSemaine.setHours(0, 0, 0, 0);
+    const dd = profilArr[0] && profilArr[0].date_debut;
+    if (dd && new Date(dd) > debutSemaine) return false; // client arrivé après le début de cette semaine
+    if (dernierEnvoyeArr[0] && new Date(dernierEnvoyeArr[0].created_at) > debutSemaine) return false;
+    return true;
   } catch(e) { return false; }
 }
 
