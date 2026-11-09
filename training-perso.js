@@ -5,7 +5,7 @@
 // journal côté diète (diete.js). Réservé pour l'instant à yohanp côté UI
 // (voir tpAccesAutorise()) — schéma : sql/2026-08-01_training_perso.sql.
 
-function tpAccesAutorise() { return S.client === 'yohanp' || S.client === 'yohan'; }
+function tpAccesAutorise() { return S.client === 'yohanp' || S.client === 'yohan' || S.client === 'perrineayot'; }
 
 let _tpSeances = null;       // liste des séances perso (avec exercices imbriqués)
 let _tpSubPage = 'liste';    // 'liste' | 'editeur' | 'seance'
