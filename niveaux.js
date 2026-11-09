@@ -18,6 +18,7 @@ const NV_ETALONS = {
   'Hip thrust barre libre':  { zones: ['fessiers'],                                         h: [0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75, 4.25], bas: true },
   'Développé militaire haltères': { zones: ['epaules'],                                     h: [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85], bas: false }, // charge d'UN haltère
   'Tractions':               { zones: ['lats', 'biceps'],                                    h: [1.05, 1.20, 1.35, 1.50, 1.70, 1.90, 2.10, 2.30], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
+  'Dips pdc':                { zones: ['triceps'], h: [1.15, 1.35, 1.55, 1.80, 2.05, 2.30, 2.55, 2.80], bas: false, pdc: true }, // charge = lest, ratio = (poids+lest)/poids
   'Crunch au sol':           { zones: ['abdos'], label: 'Crunch au sol (disque sur la poitrine)', h: [0.35, 0.45, 0.55, 0.70, 0.85, 1.00, 1.20, 1.40], bas: false, pdc: true, part: 0.3 }, // charge = lest ; le buste pèse ~30 % du poids de corps
   'Rowing barre':            { zones: ['traps'], label: 'Rowing barre (pronation)',          h: [0.40, 0.60, 0.80, 1.00, 1.20, 1.40, 1.65, 1.90], bas: false },
 };
